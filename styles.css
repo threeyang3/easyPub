@@ -1,0 +1,26 @@
+/* Diff Modal Styles */
+.diff-container {
+  margin: 10px 0;
+}
+
+.diff-container h4 {
+  margin-top: 15px;
+  margin-bottom: 5px;
+}
+
+.diff-container ul {
+  margin: 5px 0;
+  padding-left: 20px;
+}
+
+.diff-container li {
+  margin: 3px 0;
+}
+
+.content-preview {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 10px;
+  background: var(--background-primary-alt);
+  border-radius: 4px;
+}

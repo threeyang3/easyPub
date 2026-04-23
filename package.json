@@ -1,0 +1,30 @@
+{
+  "name": "easy-pub",
+  "version": "1.0.0",
+  "description": "Publish Obsidian articles to Hexo blog",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit && node esbuild.config.mjs production",
+    "version": "node version-bump.mjs && git add manifest.json versions.json"
+  },
+  "keywords": [
+    "obsidian",
+    "hexo",
+    "blog",
+    "publish"
+  ],
+  "author": "threeyang",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "builtin-modules": "^3.3.0",
+    "esbuild": "^0.20.0",
+    "obsidian": "latest",
+    "tslib": "^2.8.1",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "gray-matter": "^4.0.3"
+  }
+}

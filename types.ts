@@ -24,6 +24,13 @@ export interface Platform {
   externalPath?: string;  // 外部路径模板（相对于 hexoRepoPath）
 }
 
+export type FrontMatterData = Record<string, unknown>;
+
+export interface ParsedFrontMatter<T extends FrontMatterData = FrontMatterData> {
+  data: T;
+  content: string;
+}
+
 export const PLATFORMS: Platform[] = [
   {
     id: "hexo",
@@ -64,16 +71,16 @@ export const PLATFORMS: Platform[] = [
 
 export interface ArticleMeta {
   pub_id: string;
-  title: string;
-  date: string;
+  title?: string;
+  date?: unknown;
   updated?: string;
   categories?: string[];
   tags?: string[];
-  子文件?: string[];      // 主文件维护的发布文件链接列表
+  子文件?: string[] | string; // 主文件维护的发布文件链接列表
   source_file?: string;   // 发布文件记录的源文件链接
   publish_url?: string;   // 发布链接
   zhihu_type?: string;    // 知乎文章类型：文章/想法
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface ArticleDiff {

@@ -1,4 +1,4 @@
-import { App, Modal, Setting, Notice } from "obsidian";
+import { App, Modal, Setting } from "obsidian";
 import { ArticleDiff } from "../types";
 import { parseFrontMatter } from "../utils/frontMatter";
 
@@ -15,28 +15,28 @@ export class DiffModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
+    contentEl.addClass("easy-pub-diff-modal");
 
     contentEl.createEl("h2", {
-      text: this.diff.isNew ? "New Article" : "Article Changed",
+      text: this.diff.isNew ? "新文章" : "文章有变更",
     });
 
     contentEl.createEl("p", {
-      text: `Title: ${this.diff.meta.title || "Untitled"}`,
+      text: `标题：${this.diff.meta.title || "Untitled"}`,
     });
 
     if (!this.diff.isNew && this.diff.targetContent) {
       this.renderDiff(contentEl);
     } else {
       contentEl.createEl("p", {
-        text: "This is a new article. It will be copied to the publish path for editing.",
+        text: "这是新文章，将复制到目标发布路径并打开编辑。",
       });
     }
 
-    // Buttons
     new Setting(contentEl)
       .addButton((btn) =>
         btn
-          .setButtonText("Cancel")
+          .setButtonText("取消")
           .onClick(() => {
             this.close();
             this.onConfirm(false);
@@ -44,7 +44,7 @@ export class DiffModal extends Modal {
       )
       .addButton((btn) =>
         btn
-          .setButtonText("Continue to Edit")
+          .setButtonText("继续编辑")
           .setCta()
           .onClick(() => {
             this.close();
@@ -55,14 +55,12 @@ export class DiffModal extends Modal {
 
   renderDiff(contentEl: HTMLElement) {
     const container = contentEl.createDiv({ cls: "diff-container" });
-    container.style.cssText = "max-height: 400px; overflow-y: auto; margin: 10px 0; padding: 10px; background: var(--background-secondary); border-radius: 5px;";
 
     const sourceParsed = parseFrontMatter(this.diff.sourceContent);
     const targetParsed = parseFrontMatter(this.diff.targetContent!);
 
-    // Front Matter comparison
     const fmContainer = container.createDiv();
-    fmContainer.createEl("h4", { text: "Front Matter Changes" });
+    fmContainer.createEl("h4", { text: "Front Matter 变更" });
 
     const changes: string[] = [];
     const keys = new Set([...Object.keys(sourceParsed.data), ...Object.keys(targetParsed.data)]);
@@ -80,12 +78,11 @@ export class DiffModal extends Modal {
         list.createEl("li", { text: change });
       });
     } else {
-      fmContainer.createEl("p", { text: "No front matter changes" });
+      fmContainer.createEl("p", { text: "Front Matter 无变更" });
     }
 
-    // Content comparison
     const contentContainer = container.createDiv();
-    contentContainer.createEl("h4", { text: "Content Preview" });
+    contentContainer.createEl("h4", { text: "正文预览" });
 
     const sourceLines = sourceParsed.content.split("\n");
     const targetLines = targetParsed.content.split("\n");
@@ -93,7 +90,6 @@ export class DiffModal extends Modal {
     const preview = contentContainer.createDiv({
       cls: "content-preview",
     });
-    preview.style.cssText = "font-family: monospace; white-space: pre-wrap; font-size: 12px;";
 
     const maxLines = Math.max(sourceLines.length, targetLines.length);
     const displayLines = Math.min(maxLines, 50);
@@ -103,11 +99,9 @@ export class DiffModal extends Modal {
       const targetLine = targetLines[i] || "";
 
       if (sourceLine !== targetLine) {
-        const lineDiv = preview.createDiv();
-        lineDiv.style.cssText = "background: var(--text-error); opacity: 0.3; margin: 2px 0; padding: 2px;";
+        const lineDiv = preview.createDiv({ cls: "content-preview-line is-removed" });
         lineDiv.setText(`- ${targetLine}`);
-        const newLineDiv = preview.createDiv();
-        newLineDiv.style.cssText = "background: var(--text-success); opacity: 0.3; margin: 2px 0; padding: 2px;";
+        const newLineDiv = preview.createDiv({ cls: "content-preview-line is-added" });
         newLineDiv.setText(`+ ${sourceLine}`);
       }
     }

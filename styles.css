@@ -1,6 +1,11 @@
 /* Diff Modal Styles */
 .diff-container {
+  max-height: 400px;
+  overflow-y: auto;
   margin: 10px 0;
+  padding: 10px;
+  background: var(--background-secondary);
+  border-radius: 5px;
 }
 
 .diff-container h4 {
@@ -23,4 +28,24 @@
   padding: 10px;
   background: var(--background-primary-alt);
   border-radius: 4px;
+  font-family: var(--font-monospace);
+  white-space: pre-wrap;
+  font-size: 12px;
+}
+
+.content-preview-line {
+  margin: 2px 0;
+  padding: 2px;
+}
+
+.content-preview-line.is-removed {
+  color: var(--text-error);
+  background: var(--background-primary-alt);
+  border-left: 2px solid var(--text-error);
+}
+
+.content-preview-line.is-added {
+  color: var(--text-success);
+  background: var(--background-primary-alt);
+  border-left: 2px solid var(--text-success);
 }

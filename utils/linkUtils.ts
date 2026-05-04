@@ -1,9 +1,10 @@
 import fs from "fs/promises";
 import path from "path";
+import { FrontMatterData } from "../types";
 
 export async function generateHexoUrl(
   blogPath: string,
-  meta: Record<string, any>
+  meta: FrontMatterData
 ): Promise<string | null> {
   try {
     // 读取 Hexo _config.yml
@@ -22,16 +23,18 @@ export async function generateHexoUrl(
 
     // 替换 permalink 中的变量
     if (meta.abbrlink) {
-      permalink = permalink.replace(/:abbrlink/g, meta.abbrlink);
+      permalink = permalink.replace(/:abbrlink/g, String(meta.abbrlink));
     }
     if (meta.title) {
-      permalink = permalink.replace(/:title/g, meta.title);
+      permalink = permalink.replace(/:title/g, String(meta.title));
     }
     if (meta.date) {
-      const date = new Date(meta.date);
-      permalink = permalink.replace(/:year/g, date.getFullYear().toString());
-      permalink = permalink.replace(/:month/g, String(date.getMonth() + 1).padStart(2, "0"));
-      permalink = permalink.replace(/:day/g, String(date.getDate()).padStart(2, "0"));
+      const date = new Date(meta.date as string | number | Date);
+      if (!Number.isNaN(date.getTime())) {
+        permalink = permalink.replace(/:year/g, date.getFullYear().toString());
+        permalink = permalink.replace(/:month/g, String(date.getMonth() + 1).padStart(2, "0"));
+        permalink = permalink.replace(/:day/g, String(date.getDate()).padStart(2, "0"));
+      }
     }
 
     return baseUrl + permalink;

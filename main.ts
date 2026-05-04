@@ -1,12 +1,27 @@
 import fs from "fs/promises";
 import path from "path";
-import { App, Modal, Notice, Plugin, TFile, Setting, normalizePath } from "obsidian";
+import { App, Modal, Notice, Plugin, Setting, TFile, TFolder, normalizePath } from "obsidian";
 import { EasyPubSettingTab } from "./settings";
-import { DEFAULT_SETTINGS, PluginSettings, ArticleMeta, ArticleDiff, Platform, PLATFORMS } from "./types";
-import { parseFrontMatter, stringifyFrontMatter, generatePubId } from "./utils/frontMatter";
+import { DEFAULT_SETTINGS, PluginSettings, ArticleMeta, ArticleDiff, Platform, PLATFORMS, FrontMatterData, ParsedFrontMatter } from "./types";
+import {
+  parseFrontMatter,
+  stringifyFrontMatter,
+  generatePubId,
+  getFrontMatterString,
+  mergePublishedFrontMatter,
+  mergeSourceFrontMatter,
+} from "./utils/frontMatter";
 import { deployHexo } from "./utils/hexoCommands";
 import { DiffModal } from "./modals/DiffModal";
-import { getPublishPath, getTargetPath, getSubFolder, createWikiLink } from "./utils/platforms";
+import {
+  getPublishPath,
+  getTargetPath,
+  getSubFolder,
+  createWikiLink,
+  formatChildReference,
+  getObsoleteChildReferences,
+  getTargetDirectory,
+} from "./utils/platforms";
 import { generateHexoUrl } from "./utils/linkUtils";
 
 export default class EasyPub extends Plugin {
@@ -74,65 +89,76 @@ export default class EasyPub extends Plugin {
     }
 
     const content = await this.app.vault.read(activeFile);
-    const parsed = parseFrontMatter(content);
+    const sourceParsed = parseFrontMatter(content);
 
-    let pubId = parsed.data.pub_id;
+    let pubId = getFrontMatterString(sourceParsed.data, "pub_id");
     let isNew = true;
     let existingContent: string | null = null;
     let existingPath: string | null = null;
 
     if (pubId) {
-      existingPath = await this.findArticleByPubId(platform, pubId, parsed.data);
+      existingPath = await this.findArticleByPubId(platform, pubId, sourceParsed.data);
       if (existingPath) {
         isNew = false;
         existingContent = await this.readPublishFile(platform, existingPath);
       }
     } else {
       pubId = generatePubId();
-      parsed.data.pub_id = pubId;
     }
 
-    const title = parsed.data.title || activeFile.basename;
-    const subFolder = getSubFolder(platform, parsed.data);
+    const sourceDataWithPubId: FrontMatterData = {
+      ...sourceParsed.data,
+      pub_id: pubId,
+    };
+    const title = getFrontMatterString(sourceDataWithPubId, "title") || activeFile.basename;
+    const subFolder = getSubFolder(platform, sourceDataWithPubId);
     const targetPath = existingPath || getTargetPath(platform, this.settings, title, subFolder);
+    const proposedPublishedData = await this.buildPublishedFrontMatter(
+      platform,
+      activeFile,
+      sourceDataWithPubId,
+      existingContent,
+      pubId,
+      new Date().toISOString()
+    );
 
     const diff: ArticleDiff = {
       pub_id: pubId,
       sourcePath: activeFile.path,
       targetPath: targetPath,
-      sourceContent: stringifyFrontMatter(parsed.content, parsed.data),
+      sourceContent: stringifyFrontMatter(sourceParsed.content, proposedPublishedData),
       targetContent: existingContent,
       isNew,
-      meta: parsed.data as ArticleMeta,
+      meta: proposedPublishedData as ArticleMeta,
       platform,
     };
 
     if (!isNew && existingContent) {
       new DiffModal(this.app, diff, async (confirmed) => {
         if (confirmed) {
-          await this.copyAndOpenForEdit(diff, activeFile, parsed);
+          await this.copyAndOpenForEdit(diff, activeFile, sourceParsed);
         }
       }).open();
     } else {
-      await this.copyAndOpenForEdit(diff, activeFile, parsed);
+      await this.copyAndOpenForEdit(diff, activeFile, sourceParsed);
     }
   }
 
   async findArticleByPubId(
     platform: Platform,
     pubId: string,
-    meta: Record<string, any>
+    meta: FrontMatterData
   ): Promise<string | null> {
     const subFolder = getSubFolder(platform, meta);
 
     // 先检查已知路径
-    const title = meta.title;
+    const title = getFrontMatterString(meta, "title");
     if (title) {
       const expectedPath = getTargetPath(platform, this.settings, title, subFolder);
       if (await this.publishPathExists(platform, expectedPath)) {
         const content = await this.readPublishFile(platform, expectedPath);
         const parsed = parseFrontMatter(content);
-        if (parsed.data.pub_id === pubId) {
+        if (getFrontMatterString(parsed.data, "pub_id") === pubId) {
           return expectedPath;
         }
       }
@@ -157,7 +183,7 @@ export default class EasyPub extends Plugin {
           if (file.endsWith(".md")) {
             const content = await this.readPublishFile(platform, file);
             const parsed = parseFrontMatter(content);
-            if (parsed.data.pub_id === pubId) {
+            if (getFrontMatterString(parsed.data, "pub_id") === pubId) {
               return file;
             }
           }
@@ -169,54 +195,63 @@ export default class EasyPub extends Plugin {
     return null;
   }
 
+  async buildPublishedFrontMatter(
+    platform: Platform,
+    sourceFile: TFile,
+    sourceData: FrontMatterData,
+    existingContent: string | null,
+    pubId: string,
+    timestamp: string
+  ): Promise<FrontMatterData> {
+    const existingData = existingContent ? parseFrontMatter(existingContent).data : undefined;
+    const publishedData = mergePublishedFrontMatter({
+      sourceData,
+      existingData,
+      pubId,
+      sourceFileLink: createWikiLink(sourceFile.path),
+      timestamp,
+    });
+
+    if (platform.autoUrl && platform.id === "hexo" && this.settings.hexoRepoPath) {
+      const url = await generateHexoUrl(this.settings.hexoRepoPath, publishedData);
+      return {
+        ...publishedData,
+        publish_url: url ?? "",
+      };
+    }
+
+    return publishedData;
+  }
+
   async copyAndOpenForEdit(
     diff: ArticleDiff,
     sourceFile: TFile,
-    parsed: { data: any; content: string }
+    sourceParsed: ParsedFrontMatter
   ) {
     const platform = diff.platform;
-
-    // 保留原有创建日期
-    if (!diff.isNew && diff.targetContent) {
-      const existingParsed = parseFrontMatter(diff.targetContent);
-      if (existingParsed.data.date) {
-        parsed.data.date = existingParsed.data.date;
-      }
-      if (existingParsed.data.publish_url) {
-        parsed.data.publish_url = existingParsed.data.publish_url;
-      }
-    }
-
-    // 设置日期
-    if (!parsed.data.date) {
-      parsed.data.date = new Date().toISOString();
-    }
-    parsed.data.updated = new Date().toISOString();
-
-    // 添加源文件链接
-    parsed.data.source_file = createWikiLink(sourceFile.path);
-
-    // Hexo 自动生成发布链接
-    if (platform.autoUrl && platform.id === "hexo" && this.settings.hexoRepoPath) {
-      const url = await generateHexoUrl(this.settings.hexoRepoPath, parsed.data);
-      if (url) {
-        parsed.data.publish_url = url;
-      }
-    } else if (!parsed.data.publish_url) {
-      parsed.data.publish_url = "";
-    }
-
-    const finalContent = stringifyFrontMatter(parsed.content, parsed.data);
+    const sourceDataWithPubId: FrontMatterData = {
+      ...sourceParsed.data,
+      pub_id: diff.pub_id,
+    };
+    const publishedData = await this.buildPublishedFrontMatter(
+      platform,
+      sourceFile,
+      sourceDataWithPubId,
+      diff.targetContent,
+      diff.pub_id,
+      new Date().toISOString()
+    );
+    const finalContent = stringifyFrontMatter(sourceParsed.content, publishedData);
 
     // 确保发布目录存在
-    const publishPath = getPublishPath(platform, this.settings, getSubFolder(platform, parsed.data));
+    const publishPath = getTargetDirectory(platform, diff.targetPath);
     await this.ensurePublishDirectory(platform, publishPath);
 
     // 写入发布路径
     await this.writePublishFile(platform, diff.targetPath, finalContent);
 
     // 更新源文件的 pub_id 和子文件列表
-    await this.updateSourceFile(sourceFile, parsed, diff.targetPath);
+    await this.updateSourceFile(sourceFile, sourceParsed, platform, diff.targetPath, diff.pub_id);
 
     new Notice(diff.isNew ? `Article copied to ${platform.name}` : `Article updated in ${platform.name}`);
 
@@ -230,25 +265,27 @@ export default class EasyPub extends Plugin {
 
   async updateSourceFile(
     sourceFile: TFile,
-    parsed: { data: any; content: string },
-    targetPath: string
+    sourceParsed: ParsedFrontMatter,
+    platform: Platform,
+    targetPath: string,
+    pubId: string
   ) {
-    // 更新 pub_id
-    if (!parsed.data.pub_id) {
-      parsed.data.pub_id = generatePubId();
-    }
+    const childReference = formatChildReference(platform, targetPath);
+    const obsoleteChildReferences = getObsoleteChildReferences(platform, targetPath);
+    await this.app.fileManager.processFrontMatter(sourceFile, (frontmatter) => {
+      const sourceData = mergeSourceFrontMatter(
+        frontmatter as FrontMatterData,
+        pubId,
+        childReference,
+        obsoleteChildReferences
+      );
 
-    // 更新子文件列表
-    const wikiLink = createWikiLink(targetPath);
-    if (!parsed.data.子文件) {
-      parsed.data.子文件 = [];
-    }
-    if (!parsed.data.子文件.includes(wikiLink)) {
-      parsed.data.子文件.push(wikiLink);
-    }
+      for (const key of Object.keys(frontmatter)) {
+        delete frontmatter[key];
+      }
 
-    const updatedContent = stringifyFrontMatter(parsed.content, parsed.data);
-    await this.app.vault.modify(sourceFile, updatedContent);
+      Object.assign(frontmatter, sourceData);
+    });
   }
 
   async openPublishedFile(filePath: string, platform: Platform) {
@@ -279,7 +316,7 @@ export default class EasyPub extends Plugin {
 
   async publishPathExists(platform: Platform, filePath: string): Promise<boolean> {
     if (!platform.isExternal) {
-      return this.app.vault.adapter.exists(filePath);
+      return this.app.vault.getAbstractFileByPath(filePath) instanceof TFile;
     }
 
     try {
@@ -294,7 +331,13 @@ export default class EasyPub extends Plugin {
     if (platform.isExternal) {
       return fs.readFile(filePath, "utf8");
     }
-    return this.app.vault.adapter.read(filePath);
+
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (!(file instanceof TFile)) {
+      throw new Error(`Publish file not found: ${filePath}`);
+    }
+
+    return this.app.vault.read(file);
   }
 
   async writePublishFile(platform: Platform, filePath: string, content: string): Promise<void> {
@@ -302,7 +345,14 @@ export default class EasyPub extends Plugin {
       await fs.writeFile(filePath, content, "utf8");
       return;
     }
-    await this.app.vault.adapter.write(filePath, content);
+
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (file instanceof TFile) {
+      await this.app.vault.modify(file, content);
+      return;
+    }
+
+    await this.app.vault.create(filePath, content);
   }
 
   async listPublishFiles(platform: Platform, directoryPath: string): Promise<string[]> {
@@ -313,8 +363,14 @@ export default class EasyPub extends Plugin {
         .map((entry) => path.join(directoryPath, entry.name));
     }
 
-    const files = await this.app.vault.adapter.list(directoryPath);
-    return files.files;
+    const folder = this.app.vault.getAbstractFileByPath(directoryPath);
+    if (!(folder instanceof TFolder)) {
+      throw new Error(`Publish directory not found: ${directoryPath}`);
+    }
+
+    return folder.children
+      .filter((child): child is TFile => child instanceof TFile)
+      .map((child) => child.path);
   }
 
   async ensurePublishDirectory(platform: Platform, directoryPath: string): Promise<void> {
@@ -329,8 +385,8 @@ export default class EasyPub extends Plugin {
 
     for (const part of parts) {
       currentPath = currentPath ? `${currentPath}/${part}` : part;
-      if (!(await this.app.vault.adapter.exists(currentPath))) {
-        await this.app.vault.adapter.mkdir(currentPath);
+      if (!(this.app.vault.getAbstractFileByPath(currentPath) instanceof TFolder)) {
+        await this.app.vault.createFolder(currentPath);
       }
     }
   }

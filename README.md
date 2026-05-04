@@ -31,7 +31,7 @@
 ### 开发安装
 
 ```bash
-git clone https://github.com/your-repo/easy-pub.git
+git clone https://github.com/threeyang3/easyPub.git
 cd easy-pub
 npm install
 npm run build

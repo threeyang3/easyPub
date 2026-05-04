@@ -13,13 +13,11 @@ export class EasyPubSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl("h2", { text: "EasyPub Settings" });
-
-    // Hexo 配置
-    containerEl.createEl("h3", { text: "Hexo" });
+    new Setting(containerEl).setName("EasyPub").setHeading();
+    new Setting(containerEl).setName("Hexo").setHeading();
     new Setting(containerEl)
-      .setName("Hexo Repo Path")
-      .setDesc("Absolute path to your Hexo blog root directory (e.g. /path/to/blog)")
+      .setName("Hexo 仓库路径")
+      .setDesc("Hexo 博客根目录的绝对路径，例如 /path/to/blog")
       .addText((text) =>
         text
           .setPlaceholder("/path/to/blog")
@@ -30,11 +28,10 @@ export class EasyPubSettingTab extends PluginSettingTab {
           })
       );
 
-    // 其他平台配置
-    containerEl.createEl("h3", { text: "Other Platforms" });
+    new Setting(containerEl).setName("其他平台").setHeading();
     new Setting(containerEl)
-      .setName("Publish Base Path")
-      .setDesc("Base directory for other platforms (relative to vault root)")
+      .setName("发布根目录")
+      .setDesc("其他平台的发布目录，相对于 Vault 根目录")
       .addText((text) =>
         text
           .setPlaceholder("发布")
@@ -45,11 +42,10 @@ export class EasyPubSettingTab extends PluginSettingTab {
           })
       );
 
-    // 通用配置
-    containerEl.createEl("h3", { text: "General" });
+    new Setting(containerEl).setName("通用").setHeading();
     new Setting(containerEl)
-      .setName("Writing Path")
-      .setDesc("Path to your writing directory (relative to vault root)")
+      .setName("写作目录")
+      .setDesc("写作目录路径，相对于 Vault 根目录")
       .addText((text) =>
         text
           .setPlaceholder("articles")
@@ -61,8 +57,8 @@ export class EasyPubSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Auto Deploy")
-      .setDesc("Automatically deploy to Hexo after publishing")
+      .setName("自动部署")
+      .setDesc("发布到 Hexo 后自动执行部署")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.autoDeploy)

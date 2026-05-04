@@ -1,6 +1,6 @@
 import path from "path";
 import { normalizePath } from "obsidian";
-import { Platform, PLATFORMS, PluginSettings } from "../types";
+import { FrontMatterData, Platform, PLATFORMS, PluginSettings } from "../types";
 
 export function getPlatform(id: string): Platform | undefined {
   return PLATFORMS.find((p) => p.id === id);
@@ -42,21 +42,43 @@ export function getTargetPath(
 
 export function getSubFolder(
   platform: Platform,
-  meta: Record<string, any>
+  meta: FrontMatterData
 ): string | undefined {
   if (!platform.hasSubFolders || !platform.typeField) {
     return undefined;
   }
   const typeValue = meta[platform.typeField];
-  if (platform.subFolders?.includes(typeValue)) {
+  if (typeof typeValue === "string" && platform.subFolders?.includes(typeValue)) {
     return typeValue;
   }
   return platform.subFolders?.[0]; // 默认第一个子文件夹
 }
 
-export function createWikiLink(path: string): string {
+export function getTargetDirectory(platform: Platform, filePath: string): string {
+  if (platform.isExternal) {
+    return path.dirname(filePath);
+  }
+
+  const normalizedPath = normalizePath(filePath);
+  const lastSlashIndex = normalizedPath.lastIndexOf("/");
+  return lastSlashIndex >= 0 ? normalizedPath.slice(0, lastSlashIndex) : "";
+}
+
+export function formatChildReference(platform: Platform, filePath: string): string {
+  return platform.isExternal ? filePath : createWikiLink(filePath);
+}
+
+export function getObsoleteChildReferences(platform: Platform, filePath: string): string[] {
+  if (!platform.isExternal) {
+    return [];
+  }
+
+  return [createWikiLink(filePath), `[[${filePath}]]`];
+}
+
+export function createWikiLink(filePath: string): string {
   // 移除 .md 后缀，创建 [[链接]] 格式
-  const linkPath = path.replace(/\.md$/, "");
+  const linkPath = filePath.replace(/\.md$/, "");
   return `[[${linkPath}]]`;
 }
 

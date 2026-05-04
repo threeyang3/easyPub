@@ -1,6 +1,6 @@
 {
   "name": "easy-pub",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Publish Obsidian articles to Hexo blog",
   "main": "main.js",
   "scripts": {

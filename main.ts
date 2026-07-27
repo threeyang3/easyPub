@@ -2,7 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import { App, Modal, Notice, Plugin, Setting, TFile, TFolder, normalizePath } from "obsidian";
 import { EasyPubSettingTab } from "./settings";
-import { DEFAULT_SETTINGS, PluginSettings, ArticleMeta, ArticleDiff, Platform, PLATFORMS, FrontMatterData, ParsedFrontMatter } from "./types";
+import { DEFAULT_SETTINGS, PluginSettings, ArticleMeta, ArticleDiff, Platform, PLATFORMS, FrontMatterData } from "./types";
 import {
   parseFrontMatter,
   stringifyFrontMatter,
@@ -11,7 +11,7 @@ import {
   mergePublishedFrontMatter,
   mergeSourceFrontMatter,
 } from "./utils/frontMatter";
-import { deployHexo } from "./utils/hexoCommands";
+import { deployHexo, validateHexoBlog } from "./utils/hexoCommands";
 import { DiffModal } from "./modals/DiffModal";
 import {
   getPublishPath,
@@ -26,6 +26,9 @@ import { generateHexoUrl } from "./utils/linkUtils";
 
 export default class EasyPub extends Plugin {
   settings: PluginSettings;
+  private publishInProgress = false;
+  private publishConfirmationOpen = false;
+  private deployInProgress = false;
 
   async onload() {
     await this.loadSettings();
@@ -64,7 +67,7 @@ export default class EasyPub extends Plugin {
   showPlatformSelector() {
     const activeFile = this.app.workspace.getActiveFile();
     if (!activeFile) {
-      new Notice("No active file");
+      new Notice("请先打开要发布的文章");
       return;
     }
 
@@ -76,16 +79,40 @@ export default class EasyPub extends Plugin {
   }
 
   async preparePublish(platform: Platform) {
+    if (this.publishInProgress || this.publishConfirmationOpen) {
+      new Notice("已有发布任务正在进行，请稍候");
+      return;
+    }
+
+    this.publishInProgress = true;
+    try {
+      await this.performPublish(platform);
+    } catch (error) {
+      console.error("EasyPub publish failed", error);
+      new Notice(`发布失败：${this.getErrorMessage(error)}`);
+    } finally {
+      this.publishInProgress = false;
+    }
+  }
+
+  private async performPublish(platform: Platform) {
     const activeFile = this.app.workspace.getActiveFile();
     if (!activeFile) {
-      new Notice("No active file");
+      new Notice("请先打开要发布的文章");
+      return;
+    }
+    if (activeFile.extension !== "md") {
+      new Notice("请选择 Markdown 文件后再发布");
       return;
     }
 
     // Hexo 需要检查路径配置
     if (platform.isExternal && !this.settings.hexoRepoPath) {
-      new Notice("Please configure Hexo repo path in settings");
+      new Notice("请先在设置中填写 Hexo 仓库路径");
       return;
+    }
+    if (platform.id === "hexo") {
+      await validateHexoBlog(this.settings.hexoRepoPath);
     }
 
     const content = await this.app.vault.read(activeFile);
@@ -112,14 +139,20 @@ export default class EasyPub extends Plugin {
     };
     const title = getFrontMatterString(sourceDataWithPubId, "title") || activeFile.basename;
     const subFolder = getSubFolder(platform, sourceDataWithPubId);
-    const targetPath = existingPath || getTargetPath(platform, this.settings, title, subFolder);
+    const desiredTargetPath = getTargetPath(platform, this.settings, title, subFolder);
+    let targetPath = existingPath || desiredTargetPath;
+    if (!existingPath && await this.publishPathExists(platform, desiredTargetPath)) {
+      targetPath = await this.getAvailableTargetPath(platform, desiredTargetPath);
+      new Notice(`发现同名文件，将保存为 ${this.getDisplayFileName(platform, targetPath)}`);
+    }
     const proposedPublishedData = await this.buildPublishedFrontMatter(
       platform,
       activeFile,
       sourceDataWithPubId,
       existingContent,
       pubId,
-      new Date().toISOString()
+      new Date().toISOString(),
+      targetPath
     );
 
     const diff: ArticleDiff = {
@@ -133,14 +166,28 @@ export default class EasyPub extends Plugin {
       platform,
     };
 
-    if (!isNew && existingContent) {
+    if (!isNew && existingContent !== null) {
+      this.publishConfirmationOpen = true;
       new DiffModal(this.app, diff, async (confirmed) => {
+        this.publishConfirmationOpen = false;
         if (confirmed) {
-          await this.copyAndOpenForEdit(diff, activeFile, sourceParsed);
+          if (this.publishInProgress) {
+            new Notice("已有发布任务正在进行，请稍候");
+            return;
+          }
+          this.publishInProgress = true;
+          try {
+            await this.copyAndOpenForEdit(diff, activeFile);
+          } catch (error) {
+            console.error("EasyPub publish failed", error);
+            new Notice(`发布失败：${this.getErrorMessage(error)}`);
+          } finally {
+            this.publishInProgress = false;
+          }
         }
       }).open();
     } else {
-      await this.copyAndOpenForEdit(diff, activeFile, sourceParsed);
+      await this.copyAndOpenForEdit(diff, activeFile);
     }
   }
 
@@ -177,19 +224,18 @@ export default class EasyPub extends Plugin {
     }
 
     for (const publishPath of searchPaths) {
-      try {
-        const files = await this.listPublishFiles(platform, publishPath);
-        for (const file of files) {
-          if (file.endsWith(".md")) {
-            const content = await this.readPublishFile(platform, file);
-            const parsed = parseFrontMatter(content);
-            if (getFrontMatterString(parsed.data, "pub_id") === pubId) {
-              return file;
-            }
+      if (!(await this.publishDirectoryExists(platform, publishPath))) {
+        continue;
+      }
+      const files = await this.listPublishFiles(platform, publishPath);
+      for (const file of files) {
+        if (file.endsWith(".md")) {
+          const content = await this.readPublishFile(platform, file);
+          const parsed = parseFrontMatter(content);
+          if (getFrontMatterString(parsed.data, "pub_id") === pubId) {
+            return file;
           }
         }
-      } catch {
-        // Directory may not exist
       }
     }
     return null;
@@ -201,7 +247,8 @@ export default class EasyPub extends Plugin {
     sourceData: FrontMatterData,
     existingContent: string | null,
     pubId: string,
-    timestamp: string
+    timestamp: string,
+    targetPath: string
   ): Promise<FrontMatterData> {
     const existingData = existingContent ? parseFrontMatter(existingContent).data : undefined;
     const publishedData = mergePublishedFrontMatter({
@@ -213,10 +260,20 @@ export default class EasyPub extends Plugin {
     });
 
     if (platform.autoUrl && platform.id === "hexo" && this.settings.hexoRepoPath) {
-      const url = await generateHexoUrl(this.settings.hexoRepoPath, publishedData);
+      const url = await generateHexoUrl(
+        this.settings.hexoRepoPath,
+        publishedData,
+        targetPath
+      );
+      if (!url) {
+        if (!getFrontMatterString(publishedData, "publish_url")) {
+          new Notice("Hexo 链接将在生成后自动补全");
+        }
+        return publishedData;
+      }
       return {
         ...publishedData,
-        publish_url: url ?? "",
+        publish_url: url,
       };
     }
 
@@ -225,35 +282,36 @@ export default class EasyPub extends Plugin {
 
   async copyAndOpenForEdit(
     diff: ArticleDiff,
-    sourceFile: TFile,
-    sourceParsed: ParsedFrontMatter
+    sourceFile: TFile
   ) {
     const platform = diff.platform;
-    const sourceDataWithPubId: FrontMatterData = {
-      ...sourceParsed.data,
-      pub_id: diff.pub_id,
-    };
-    const publishedData = await this.buildPublishedFrontMatter(
-      platform,
-      sourceFile,
-      sourceDataWithPubId,
-      diff.targetContent,
-      diff.pub_id,
-      new Date().toISOString()
-    );
-    const finalContent = stringifyFrontMatter(sourceParsed.content, publishedData);
+    const finalContent = diff.sourceContent;
 
     // 确保发布目录存在
     const publishPath = getTargetDirectory(platform, diff.targetPath);
     await this.ensurePublishDirectory(platform, publishPath);
 
-    // 写入发布路径
+    // 写入发布路径；若源文件元数据更新失败，则恢复目标文件，避免半成功状态。
+    const previousTargetContent = await this.publishPathExists(platform, diff.targetPath)
+      ? await this.readPublishFile(platform, diff.targetPath)
+      : null;
+    if (diff.isNew && previousTargetContent !== null) {
+      throw new Error("目标文件刚刚被创建，请重新发布以生成新的安全文件名");
+    }
     await this.writePublishFile(platform, diff.targetPath, finalContent);
 
-    // 更新源文件的 pub_id 和子文件列表
-    await this.updateSourceFile(sourceFile, sourceParsed, platform, diff.targetPath, diff.pub_id);
+    try {
+      await this.updateSourceFile(sourceFile, platform, diff.targetPath, diff.pub_id);
+    } catch (error) {
+      if (previousTargetContent === null) {
+        await this.deletePublishFile(platform, diff.targetPath);
+      } else {
+        await this.writePublishFile(platform, diff.targetPath, previousTargetContent);
+      }
+      throw error;
+    }
 
-    new Notice(diff.isNew ? `Article copied to ${platform.name}` : `Article updated in ${platform.name}`);
+    new Notice(diff.isNew ? `已生成${platform.name}发布稿` : `已更新${platform.name}发布稿`);
 
     if (platform.id === "hexo" && this.settings.autoDeploy) {
       await this.deployToHexo();
@@ -265,7 +323,6 @@ export default class EasyPub extends Plugin {
 
   async updateSourceFile(
     sourceFile: TFile,
-    sourceParsed: ParsedFrontMatter,
     platform: Platform,
     targetPath: string,
     pubId: string
@@ -307,7 +364,7 @@ export default class EasyPub extends Plugin {
     if (file instanceof TFile) {
       const leaf = this.app.workspace.getLeaf(false);
       await leaf.openFile(file);
-      new Notice("Edit the article, then run 'Deploy to Hexo' if needed");
+      new Notice(`已打开${platform.name}发布稿`);
       return;
     }
 
@@ -322,8 +379,26 @@ export default class EasyPub extends Plugin {
     try {
       await fs.access(filePath);
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  async publishDirectoryExists(platform: Platform, directoryPath: string): Promise<boolean> {
+    if (!platform.isExternal) {
+      return this.app.vault.getAbstractFileByPath(directoryPath) instanceof TFolder;
+    }
+
+    try {
+      return (await fs.stat(directoryPath)).isDirectory();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return false;
+      }
+      throw error;
     }
   }
 
@@ -353,6 +428,18 @@ export default class EasyPub extends Plugin {
     }
 
     await this.app.vault.create(filePath, content);
+  }
+
+  async deletePublishFile(platform: Platform, filePath: string): Promise<void> {
+    if (platform.isExternal) {
+      await fs.unlink(filePath);
+      return;
+    }
+
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (file instanceof TFile) {
+      await this.app.vault.delete(file);
+    }
   }
 
   async listPublishFiles(platform: Platform, directoryPath: string): Promise<string[]> {
@@ -393,17 +480,101 @@ export default class EasyPub extends Plugin {
 
   async deployToHexo() {
     if (!this.settings.hexoRepoPath) {
-      new Notice("Please configure Hexo repo path in settings");
+      new Notice("请先在设置中填写 Hexo 仓库路径");
+      return;
+    }
+    if (this.deployInProgress) {
+      new Notice("Hexo 正在部署，请稍候");
       return;
     }
 
-    new Notice("Deploying to Hexo...");
+    this.deployInProgress = true;
+    new Notice("正在部署 Hexo...");
     try {
       await deployHexo(this.settings.hexoRepoPath);
-      new Notice("Deployed successfully!");
+      try {
+        await this.refreshActiveHexoPublishUrl();
+      } catch (error) {
+        console.warn("EasyPub could not refresh Hexo publish URL", error);
+        new Notice("Hexo 已部署，但本地发布链接未能自动更新");
+      }
+      new Notice("Hexo 部署成功");
     } catch (error) {
-      new Notice(`Deploy failed: ${error}`);
+      console.error("EasyPub Hexo deploy failed", error);
+      new Notice(`Hexo 部署失败：${this.getErrorMessage(error)}`);
+    } finally {
+      this.deployInProgress = false;
     }
+  }
+
+  private async getAvailableTargetPath(platform: Platform, targetPath: string): Promise<string> {
+    const directory = getTargetDirectory(platform, targetPath);
+    const parsed = platform.isExternal
+      ? path.parse(targetPath)
+      : path.posix.parse(normalizePath(targetPath));
+
+    for (let index = 2; index < 10_000; index++) {
+      const fileName = `${parsed.name} (${index})${parsed.ext}`;
+      const candidate = platform.isExternal
+        ? path.join(directory, fileName)
+        : normalizePath(`${directory}/${fileName}`);
+      if (!(await this.publishPathExists(platform, candidate))) {
+        return candidate;
+      }
+    }
+
+    throw new Error("无法为同名文章生成可用文件名");
+  }
+
+  private getDisplayFileName(platform: Platform, filePath: string): string {
+    return platform.isExternal ? path.basename(filePath) : path.posix.basename(filePath);
+  }
+
+  private getErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  private async refreshActiveHexoPublishUrl(): Promise<void> {
+    const activeFile = this.app.workspace.getActiveFile();
+    const hexoPlatform = PLATFORMS.find((platform) => platform.id === "hexo");
+    if (!activeFile || !hexoPlatform || activeFile.extension !== "md") {
+      return;
+    }
+
+    const sourceContent = await this.app.vault.read(activeFile);
+    const sourceData = parseFrontMatter(sourceContent).data;
+    const pubId = getFrontMatterString(sourceData, "pub_id");
+    if (!pubId) {
+      return;
+    }
+
+    const targetPath = await this.findArticleByPubId(hexoPlatform, pubId, sourceData);
+    if (!targetPath) {
+      return;
+    }
+
+    const publishedContent = await this.readPublishFile(hexoPlatform, targetPath);
+    const publishedParsed = parseFrontMatter(publishedContent);
+    const publishUrl = await generateHexoUrl(
+      this.settings.hexoRepoPath,
+      publishedParsed.data,
+      targetPath
+    );
+    if (
+      !publishUrl
+      || getFrontMatterString(publishedParsed.data, "publish_url") === publishUrl
+    ) {
+      return;
+    }
+
+    await this.writePublishFile(
+      hexoPlatform,
+      targetPath,
+      stringifyFrontMatter(publishedParsed.content, {
+        ...publishedParsed.data,
+        publish_url: publishUrl,
+      })
+    );
   }
 }
 
@@ -426,7 +597,7 @@ class PlatformSelectModal extends Modal {
     for (const platform of this.platforms) {
       new Setting(contentEl)
         .setName(platform.name)
-        .setDesc(`发布到 ${platform.path}`)
+        .setDesc(platform.isExternal ? "保存到 Hexo 仓库" : `保存到 ${platform.path} 发布稿目录`)
         .addButton((btn) =>
           btn.setButtonText("发布").onClick(() => {
             this.close();

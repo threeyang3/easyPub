@@ -1,14 +1,12 @@
 export interface PluginSettings {
   hexoRepoPath: string;     // Hexo 仓库根目录
-  writingPath: string;
   autoDeploy: boolean;
   publishBasePath: string;  // 其他平台发布路径基础目录，默认 "发布"
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
   hexoRepoPath: "",
-  writingPath: "",
-  autoDeploy: true,
+  autoDeploy: false,
   publishBasePath: "发布",
 };
 

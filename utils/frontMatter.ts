@@ -66,6 +66,9 @@ export function mergeSourceFrontMatter(
   obsoleteChildReferences: string[] = []
 ): FrontMatterData {
   const data: FrontMatterData = { ...sourceData, pub_id: pubId };
+  delete data.source_file;
+  delete data.publish_url;
+  delete data.updated;
   const childReferences = normalizeChildReferences(data.子文件).filter(
     (reference) => !obsoleteChildReferences.includes(reference)
   );
@@ -89,8 +92,8 @@ export function mergePublishedFrontMatter({
 }: PublishedFrontMatterMergeOptions): FrontMatterData {
   const publishableSourceData = getPublishableSourceFrontMatter(sourceData);
   const data: FrontMatterData = {
-    ...publishableSourceData,
     ...existingData,
+    ...publishableSourceData,
     pub_id: pubId,
     source_file: sourceFileLink,
     updated: timestamp,
@@ -106,8 +109,8 @@ export function mergePublishedFrontMatter({
 
   if (forcePublishUrl) {
     data.publish_url = publishUrl ?? "";
-  } else if (!hasFrontMatterValue(data.publish_url)) {
-    data.publish_url = publishUrl ?? "";
+  } else if (publishUrl !== undefined) {
+    data.publish_url = publishUrl;
   }
 
   return data;

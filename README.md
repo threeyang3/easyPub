@@ -2,7 +2,7 @@
 
 一个 Obsidian 插件，用于将文章发布到多个平台。
 
-- 当前版本：`1.2.0`
+- 当前版本：`1.3.0`
 - 最低 Obsidian 版本：`1.4.4`
 - 仅支持桌面端 Obsidian
 
@@ -11,7 +11,8 @@
 - **多平台支持**：Hexo、知乎、微信公众号、小红书
 - **文章追踪**：通过 `pub_id` 追踪文章版本
 - **差异对比**：更新时显示内容变化
-- **属性保留**：更新发布文件时保留已有 front matter，并保留创建日期
+- **安全更新**：同名文章自动使用编号文件名，避免误覆盖已有发布稿
+- **属性同步**：源文件字段保持同步，同时保留平台侧专属属性和创建日期
 - **双向链接**：主文件与发布文件互相链接
 - **自动生成链接**：Hexo 自动计算发布 URL
 
@@ -20,9 +21,11 @@
 | 平台 | 发布方式 | 目标路径 | 说明 |
 |------|----------|----------|------|
 | Hexo | 外部目录 | `{hexoRepoPath}/source/_posts/` | 写入 Hexo 仓库，自动生成 `publish_url`，可选自动部署 |
-| 知乎 | Vault 内部目录 | `{publishBasePath}/知乎/文章/` 或 `{publishBasePath}/知乎/想法/` | 通过 front matter `zhihu_type` 区分 `文章` / `想法` |
-| 微信公众号 | Vault 内部目录 | `{publishBasePath}/微信公众号/` | 发布后在 Vault 内继续编辑 |
-| 小红书 | Vault 内部目录 | `{publishBasePath}/小红书/` | 发布后在 Vault 内继续编辑 |
+| 知乎 | Vault 内部目录 | `{publishBasePath}/知乎/文章/` 或 `{publishBasePath}/知乎/想法/` | 生成发布稿，通过 `zhihu_type` 区分 `文章` / `想法` |
+| 微信公众号 | Vault 内部目录 | `{publishBasePath}/微信公众号/` | 生成发布稿，之后可在 Vault 内继续编辑 |
+| 小红书 | Vault 内部目录 | `{publishBasePath}/小红书/` | 生成发布稿，之后可在 Vault 内继续编辑 |
+
+除 Hexo 部署外，当前版本不会直接调用知乎、微信或小红书的发布 API。
 
 ## 平台配置
 
@@ -59,7 +62,7 @@ npm run build
 2. 点击左侧栏云图标，或使用命令 `Publish to platform`
 3. 选择目标平台
 4. 如果是更新，查看差异对比后确认
-5. 文章复制到发布路径并自动打开
+5. 文章复制到发布路径并自动打开；遇到同名文件时会自动使用编号文件名
 6. 进行平台适配编辑
 7. （仅 Hexo）执行 `Deploy to Hexo` 部署
 
@@ -75,12 +78,20 @@ npm run build
 **Hexo**
 - **Hexo 仓库路径**：Hexo 博客仓库根目录的绝对路径
 
+Hexo 仓库需要满足：
+
+- 根目录包含 `_config.yml`
+- 已在仓库中执行 `npm install`，能够使用本地 `hexo`
+- `_config.yml` 已配置 `deploy.type`
+- Git、SSH 或凭据管理器已完成非交互式认证
+
 **其他平台**
 - **发布根目录**：其他平台发布路径基础目录（默认 `发布`）
 
-**通用**
-- **写作目录**：写作目录
-- **自动部署**：是否自动部署
+**部署**
+- **自动部署**：保存 Hexo 发布稿后是否立即部署，默认关闭
+
+部署时只使用博客仓库本地安装的 Hexo，不会通过 `npx` 临时下载。插件会先检查配置，然后依次执行 `clean`、`generate --bail` 和 `deploy`；单个命令超过 10 分钟会停止并提示失败。使用 `hexo-abbrlink` 等动态链接插件时，`publish_url` 会在生成完成后自动补全。
 
 ## Front Matter 属性
 
@@ -123,6 +134,8 @@ zhihu_type: 文章  # 可选值：文章、想法
 
 ```bash
 npm install        # 安装依赖
+npm test           # 运行核心行为测试
+npm run check      # TypeScript 类型检查
 npm run build      # 构建生产版本
 npm run dev        # 开发模式（监听变化）
 ```

@@ -5,6 +5,7 @@ import { parseFrontMatter } from "../utils/frontMatter";
 export class DiffModal extends Modal {
   private diff: ArticleDiff;
   private onConfirm: (confirmed: boolean) => void;
+  private hasResponded = false;
 
   constructor(app: App, diff: ArticleDiff, onConfirm: (confirmed: boolean) => void) {
     super(app);
@@ -38,8 +39,7 @@ export class DiffModal extends Modal {
         btn
           .setButtonText("取消")
           .onClick(() => {
-            this.close();
-            this.onConfirm(false);
+            this.respond(false);
           })
       )
       .addButton((btn) =>
@@ -47,8 +47,7 @@ export class DiffModal extends Modal {
           .setButtonText("继续编辑")
           .setCta()
           .onClick(() => {
-            this.close();
-            this.onConfirm(true);
+            this.respond(true);
           })
       );
   }
@@ -82,7 +81,7 @@ export class DiffModal extends Modal {
     }
 
     const contentContainer = container.createDiv();
-    contentContainer.createEl("h4", { text: "正文预览" });
+    contentContainer.createEl("h4", { text: "正文变更摘要" });
 
     const sourceLines = sourceParsed.content.split("\n");
     const targetLines = targetParsed.content.split("\n");
@@ -91,28 +90,62 @@ export class DiffModal extends Modal {
       cls: "content-preview",
     });
 
-    const maxLines = Math.max(sourceLines.length, targetLines.length);
-    const displayLines = Math.min(maxLines, 50);
-
-    for (let i = 0; i < displayLines; i++) {
-      const sourceLine = sourceLines[i] || "";
-      const targetLine = targetLines[i] || "";
-
-      if (sourceLine !== targetLine) {
-        const lineDiv = preview.createDiv({ cls: "content-preview-line is-removed" });
-        lineDiv.setText(`- ${targetLine}`);
-        const newLineDiv = preview.createDiv({ cls: "content-preview-line is-added" });
-        newLineDiv.setText(`+ ${sourceLine}`);
-      }
+    let prefixLength = 0;
+    while (
+      prefixLength < sourceLines.length
+      && prefixLength < targetLines.length
+      && sourceLines[prefixLength] === targetLines[prefixLength]
+    ) {
+      prefixLength++;
     }
 
-    if (maxLines > 50) {
-      preview.createEl("p", { text: `... (${maxLines - 50} more lines)` });
+    let suffixLength = 0;
+    while (
+      suffixLength < sourceLines.length - prefixLength
+      && suffixLength < targetLines.length - prefixLength
+      && sourceLines[sourceLines.length - 1 - suffixLength]
+        === targetLines[targetLines.length - 1 - suffixLength]
+    ) {
+      suffixLength++;
+    }
+
+    const removedLines = targetLines.slice(prefixLength, targetLines.length - suffixLength);
+    const addedLines = sourceLines.slice(prefixLength, sourceLines.length - suffixLength);
+    const maxPreviewLines = 25;
+
+    removedLines.slice(0, maxPreviewLines).forEach((line) => {
+      const lineDiv = preview.createDiv({ cls: "content-preview-line is-removed" });
+      lineDiv.setText(`- ${line}`);
+    });
+    addedLines.slice(0, maxPreviewLines).forEach((line) => {
+      const lineDiv = preview.createDiv({ cls: "content-preview-line is-added" });
+      lineDiv.setText(`+ ${line}`);
+    });
+
+    const hiddenLineCount = Math.max(0, removedLines.length - maxPreviewLines)
+      + Math.max(0, addedLines.length - maxPreviewLines);
+    if (hiddenLineCount > 0) {
+      preview.createEl("p", { text: `另有 ${hiddenLineCount} 行变更未展开` });
+    } else if (removedLines.length === 0 && addedLines.length === 0) {
+      preview.createEl("p", { text: "正文无变更" });
     }
   }
 
   onClose() {
+    if (!this.hasResponded) {
+      this.hasResponded = true;
+      this.onConfirm(false);
+    }
     const { contentEl } = this;
     contentEl.empty();
+  }
+
+  private respond(confirmed: boolean) {
+    if (this.hasResponded) {
+      return;
+    }
+    this.hasResponded = true;
+    this.close();
+    this.onConfirm(confirmed);
   }
 }

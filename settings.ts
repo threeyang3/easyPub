@@ -42,23 +42,10 @@ export class EasyPubSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl).setName("通用").setHeading();
-    new Setting(containerEl)
-      .setName("写作目录")
-      .setDesc("写作目录路径，相对于 Vault 根目录")
-      .addText((text) =>
-        text
-          .setPlaceholder("articles")
-          .setValue(this.plugin.settings.writingPath)
-          .onChange(async (value) => {
-            this.plugin.settings.writingPath = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
+    new Setting(containerEl).setName("部署").setHeading();
     new Setting(containerEl)
       .setName("自动部署")
-      .setDesc("发布到 Hexo 后自动执行部署")
+      .setDesc("保存 Hexo 发布稿后自动部署。建议确认文章无误后再开启")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.autoDeploy)

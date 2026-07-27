@@ -1,10 +1,12 @@
 {
   "name": "easy-pub",
-  "version": "1.2.0",
-  "description": "Publish Obsidian articles to Hexo blog",
+  "version": "1.3.0",
+  "description": "Prepare and manage Obsidian publishing drafts for Hexo and content platforms",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
+    "check": "tsc -noEmit",
+    "test": "node tests/run-tests.mjs",
     "build": "tsc -noEmit && node esbuild.config.mjs production",
     "version": "node version-bump.mjs && git add manifest.json versions.json"
   },

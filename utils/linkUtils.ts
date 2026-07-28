@@ -76,6 +76,23 @@ export async function generateHexoUrl(
   }
 }
 
+export async function getHexoRootPath(blogPath: string): Promise<string> {
+  const configContent = await fs.readFile(path.join(blogPath, "_config.yml"), "utf8");
+  const configuredRoot = getTopLevelYamlScalar(configContent, "root");
+  if (configuredRoot) {
+    return normalizeRoot(configuredRoot);
+  }
+  const configuredUrl = getTopLevelYamlScalar(configContent, "url");
+  if (!configuredUrl) {
+    return "/";
+  }
+  try {
+    return normalizeRoot(new URL(configuredUrl).pathname);
+  } catch {
+    return "/";
+  }
+}
+
 function getPostNames(
   blogPath: string,
   targetPath: string,

@@ -15,6 +15,9 @@
 - **属性同步**：源文件字段保持同步，同时保留平台侧专属属性和创建日期
 - **双向链接**：主文件与发布文件互相链接
 - **自动生成链接**：Hexo 自动计算发布 URL
+- **图片附件转换**：Hexo 发布时自动复制并转换 Obsidian `![[图片]]`
+- **博客管理入口**：从 Obsidian 功能区、命令面板或设置页打开兼容的 Blog Control Room
+- **PicGo 图床**：可选将本地图片交给 PicGo 上传，并写入网络链接
 
 ## 当前支持的平台
 
@@ -49,7 +52,7 @@
 
 ```bash
 git clone https://github.com/threeyang3/easyPub.git
-cd easy-pub
+cd easyPub
 npm install
 npm run build
 ```
@@ -71,12 +74,38 @@ npm run build
 | 命令 | 说明 |
 |------|------|
 | `Publish to platform` | 选择平台并发布文章 |
-| `Deploy to Hexo` | 执行 `hexo clean && hexo g && hexo d` |
+| `Build Hexo locally (no deploy)` | 本地清理并生成 Hexo，用于发布前检查，不推送线上 |
+| `Deploy to Hexo` | 普通 Hexo 仓库执行部署；检测到 Blog Control Room 时打开受保护发布流程 |
+| `Open Hexo management console` | 复用或启动博客本地管理后台 |
+
+### Hexo 图片
+
+发布到 Hexo 时，正文中的图片型 Obsidian 嵌入会自动处理：
+
+```markdown
+![[Pasted image 20260727.png]]
+```
+
+图片副本保存在 `{hexoRepoPath}/source/images/easy-pub/{pub_id}/`，发布稿中的引用会转换成普通 Markdown 图片链接。源文章、Vault 附件、代码块中的示例以及笔记嵌入不会被修改。
+
+### PicGo 图床
+
+如果希望所有平台的发布稿直接使用网络图片：
+
+1. 安装 PicGo，在 PicGo 中配置图床并开启 PicGo Server
+2. 在 EasyPub 设置的“本地图片处理”中选择“上传到 PicGo”
+3. 使用默认地址 `http://127.0.0.1:36677/upload`，或填写自定义地址
+4. 点击“测试连接”
+
+EasyPub 只通过本地 PicGo Server 上传，不读取 PicGo 中配置的图床账号或密钥。启用后，本地图片嵌入会在确认发布后上传并转换为网络链接；源文章和原附件不会被修改。若 PicGo Server 使用 Secret 认证，可在 EasyPub 中填写，Secret 会保存在 Obsidian 的本地插件设置中。
+
+插件会根据图片内容计算哈希并缓存上传结果。图片没有变化时复用已有链接，内容变化后才重新上传。安装、配置、安全说明和故障排查见 [PicGo 图片上传指南](docs/picgo.md)。
 
 ### 设置
 
 **Hexo**
 - **Hexo 仓库路径**：Hexo 博客仓库根目录的绝对路径
+- **博客管理后台**：兼容仓库可从设置页直接打开；左侧功能区也提供仪表盘入口
 
 Hexo 仓库需要满足：
 
@@ -91,7 +120,13 @@ Hexo 仓库需要满足：
 **部署**
 - **自动部署**：保存 Hexo 发布稿后是否立即部署，默认关闭
 
-部署时只使用博客仓库本地安装的 Hexo，不会通过 `npx` 临时下载。插件会先检查配置，然后依次执行 `clean`、`generate --bail` 和 `deploy`；单个命令超过 10 分钟会停止并提示失败。使用 `hexo-abbrlink` 等动态链接插件时，`publish_url` 会在生成完成后自动补全。
+部署时只使用博客仓库本地安装的 Hexo，不会通过 `npx` 临时下载。插件会先检查配置，然后依次执行 `clean`、`generate --bail` 和 `deploy`；单个命令超过 10 分钟会停止并提示失败。也可以先使用本地构建命令检查生成结果而不部署。使用 `hexo-abbrlink` 等动态链接插件时，`publish_url` 会在生成完成后自动补全。
+
+对于提供 `ManageBlog.bat`、`admin/server.js` 且将 `scripts.gui` 固定为
+`node admin/server.js` 的 Blog Control Room 仓库，EasyPub 不会直接执行 Hexo
+部署。它会打开管理后台，由后台继续执行源码提交、推送、CI 对齐和 Pages 部署检查。
+运行中的会话只从仓库内 `.blog-admin/control-room.json` 读取，并且必须是通过
+健康检查的 `127.0.0.1` 地址和有效随机令牌；外部 URL 会被拒绝。
 
 ## Front Matter 属性
 

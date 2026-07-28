@@ -2,13 +2,26 @@ export interface PluginSettings {
   hexoRepoPath: string;     // Hexo 仓库根目录
   autoDeploy: boolean;
   publishBasePath: string;  // 其他平台发布路径基础目录，默认 "发布"
+  imageHandling: "local" | "picgo";
+  picgoServerUrl: string;
+  picgoServerSecret: string;
+  picgoImageCache: Record<string, PicGoImageCacheEntry>;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
   hexoRepoPath: "",
   autoDeploy: false,
   publishBasePath: "发布",
+  imageHandling: "local",
+  picgoServerUrl: "http://127.0.0.1:36677/upload",
+  picgoServerSecret: "",
+  picgoImageCache: {},
 };
+
+export interface PicGoImageCacheEntry {
+  hash: string;
+  url: string;
+}
 
 export interface Platform {
   id: string;
@@ -90,4 +103,18 @@ export interface ArticleDiff {
   isNew: boolean;
   meta: ArticleMeta;
   platform: Platform;
+  assets?: PublishAsset[];
+  picgoUploads?: PicGoPendingUpload[];
+}
+
+export interface PublishAsset {
+  sourcePath: string;
+  targetPath: string;
+}
+
+export interface PicGoPendingUpload {
+  sourcePath: string;
+  localPath: string;
+  contentHash: string;
+  token: string;
 }

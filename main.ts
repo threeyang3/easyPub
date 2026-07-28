@@ -1,8 +1,9 @@
 import fs from "fs/promises";
 import path from "path";
-import { App, Modal, Notice, Plugin, Setting, TFile, TFolder, normalizePath } from "obsidian";
+import { createHash } from "crypto";
+import { App, FileSystemAdapter, Modal, Notice, Plugin, Setting, TFile, TFolder, normalizePath, requestUrl } from "obsidian";
 import { EasyPubSettingTab } from "./settings";
-import { DEFAULT_SETTINGS, PluginSettings, ArticleMeta, ArticleDiff, Platform, PLATFORMS, FrontMatterData } from "./types";
+import { DEFAULT_SETTINGS, PluginSettings, ArticleMeta, ArticleDiff, Platform, PLATFORMS, FrontMatterData, PublishAsset, PicGoImageCacheEntry, PicGoPendingUpload } from "./types";
 import {
   parseFrontMatter,
   stringifyFrontMatter,
@@ -11,7 +12,7 @@ import {
   mergePublishedFrontMatter,
   mergeSourceFrontMatter,
 } from "./utils/frontMatter";
-import { deployHexo, validateHexoBlog } from "./utils/hexoCommands";
+import { buildHexo, deployHexo, validateHexoBlog } from "./utils/hexoCommands";
 import { DiffModal } from "./modals/DiffModal";
 import {
   getPublishPath,
@@ -21,8 +22,33 @@ import {
   formatChildReference,
   getObsoleteChildReferences,
   getTargetDirectory,
+  getHexoAssetTargetPath,
+  getHexoAssetRelativePath,
 } from "./utils/platforms";
-import { generateHexoUrl } from "./utils/linkUtils";
+import { generateHexoUrl, getHexoRootPath } from "./utils/linkUtils";
+import { prepareImageEmbeds, PreparedImageContent } from "./utils/imageEmbeds";
+import { getPicGoHeartbeatUrl, uploadWithPicGo } from "./utils/picgo";
+import {
+  findControlRoomIntegration,
+  getControlRoomStatusUrl,
+  readControlRoomSession,
+  requireControlRoomIntegration,
+} from "./utils/controlRoom";
+
+const HEXO_IMAGE_EXTENSIONS = new Set([
+  "avif",
+  "bmp",
+  "gif",
+  "jpeg",
+  "jpg",
+  "png",
+  "svg",
+  "webp",
+]);
+
+interface PreparedPublishContent extends PreparedImageContent {
+  picgoUploads: PicGoPendingUpload[];
+}
 
 export default class EasyPub extends Plugin {
   settings: PluginSettings;
@@ -38,6 +64,10 @@ export default class EasyPub extends Plugin {
       this.showPlatformSelector();
     });
 
+    this.addRibbonIcon("layout-dashboard", "打开博客管理后台", () => {
+      void this.openHexoControlRoom();
+    });
+
     this.addCommand({
       id: "publish",
       name: "Publish to platform",
@@ -51,17 +81,56 @@ export default class EasyPub extends Plugin {
       callback: () => this.deployToHexo(),
     });
 
+    this.addCommand({
+      id: "build-hexo",
+      name: "Build Hexo locally (no deploy)",
+      callback: () => this.buildHexoLocally(),
+    });
+
+    this.addCommand({
+      id: "open-hexo-control-room",
+      name: "Open Hexo management console",
+      callback: () => this.openHexoControlRoom(),
+    });
+
     this.addSettingTab(new EasyPubSettingTab(this.app, this));
   }
 
   onunload() {}
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const saved = (await this.loadData()) as Partial<PluginSettings> | null;
+    this.settings = {
+      ...DEFAULT_SETTINGS,
+      ...saved,
+      picgoImageCache: {
+        ...DEFAULT_SETTINGS.picgoImageCache,
+        ...saved?.picgoImageCache,
+      },
+    };
   }
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  async testPicGoConnection(): Promise<void> {
+    try {
+      const response = await requestUrl({
+        url: getPicGoHeartbeatUrl(this.settings.picgoServerUrl),
+        method: "POST",
+        throw: false,
+      });
+      const data = response.json as { success?: boolean; result?: string };
+      if (response.status === 200 && data?.success === true) {
+        new Notice("PicGo Server 连接成功");
+        return;
+      }
+      throw new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      console.warn("EasyPub PicGo heartbeat failed", error);
+      new Notice(`无法连接 PicGo Server：${this.getErrorMessage(error)}`);
+    }
   }
 
   showPlatformSelector() {
@@ -145,6 +214,11 @@ export default class EasyPub extends Plugin {
       targetPath = await this.getAvailableTargetPath(platform, desiredTargetPath);
       new Notice(`发现同名文件，将保存为 ${this.getDisplayFileName(platform, targetPath)}`);
     }
+    const preparedContent = this.settings.imageHandling === "picgo"
+      ? await this.preparePicGoContent(activeFile, sourceParsed.content)
+      : platform.id === "hexo"
+        ? await this.prepareHexoContent(activeFile, sourceParsed.content, pubId)
+        : { content: sourceParsed.content, assets: [], picgoUploads: [] };
     const proposedPublishedData = await this.buildPublishedFrontMatter(
       platform,
       activeFile,
@@ -159,11 +233,13 @@ export default class EasyPub extends Plugin {
       pub_id: pubId,
       sourcePath: activeFile.path,
       targetPath: targetPath,
-      sourceContent: stringifyFrontMatter(sourceParsed.content, proposedPublishedData),
+      sourceContent: stringifyFrontMatter(preparedContent.content, proposedPublishedData),
       targetContent: existingContent,
       isNew,
       meta: proposedPublishedData as ArticleMeta,
       platform,
+      assets: preparedContent.assets,
+      picgoUploads: preparedContent.picgoUploads,
     };
 
     if (!isNew && existingContent !== null) {
@@ -285,7 +361,6 @@ export default class EasyPub extends Plugin {
     sourceFile: TFile
   ) {
     const platform = diff.platform;
-    const finalContent = diff.sourceContent;
 
     // 确保发布目录存在
     const publishPath = getTargetDirectory(platform, diff.targetPath);
@@ -298,6 +373,13 @@ export default class EasyPub extends Plugin {
     if (diff.isNew && previousTargetContent !== null) {
       throw new Error("目标文件刚刚被创建，请重新发布以生成新的安全文件名");
     }
+
+    const picgoResult = await this.resolvePicGoUploads(
+      diff.sourceContent,
+      diff.picgoUploads ?? []
+    );
+    const finalContent = picgoResult.content;
+    await this.copyPublishAssets(diff.assets ?? []);
     await this.writePublishFile(platform, diff.targetPath, finalContent);
 
     try {
@@ -309,6 +391,15 @@ export default class EasyPub extends Plugin {
         await this.writePublishFile(platform, diff.targetPath, previousTargetContent);
       }
       throw error;
+    }
+
+    if (Object.keys(picgoResult.cacheUpdates).length > 0) {
+      Object.assign(this.settings.picgoImageCache, picgoResult.cacheUpdates);
+      try {
+        await this.saveSettings();
+      } catch (error) {
+        console.warn("EasyPub could not persist PicGo image cache", error);
+      }
     }
 
     new Notice(diff.isNew ? `已生成${platform.name}发布稿` : `已更新${platform.name}发布稿`);
@@ -484,7 +575,14 @@ export default class EasyPub extends Plugin {
       return;
     }
     if (this.deployInProgress) {
-      new Notice("Hexo 正在部署，请稍候");
+      new Notice("Hexo 任务正在进行，请稍候");
+      return;
+    }
+
+    const controlRoom = await findControlRoomIntegration(this.settings.hexoRepoPath);
+    if (controlRoom) {
+      new Notice("此博客启用了部署保护，请在管理后台完成源码同步与部署");
+      await this.openHexoControlRoom();
       return;
     }
 
@@ -502,6 +600,77 @@ export default class EasyPub extends Plugin {
     } catch (error) {
       console.error("EasyPub Hexo deploy failed", error);
       new Notice(`Hexo 部署失败：${this.getErrorMessage(error)}`);
+    } finally {
+      this.deployInProgress = false;
+    }
+  }
+
+  async openHexoControlRoom(): Promise<void> {
+    if (!this.settings.hexoRepoPath) {
+      new Notice("请先在设置中填写 Hexo 仓库路径");
+      return;
+    }
+
+    try {
+      const integration = await requireControlRoomIntegration(this.settings.hexoRepoPath);
+      const electron = require("electron") as {
+        shell?: {
+          openExternal(url: string): Promise<void>;
+          openPath(filePath: string): Promise<string>;
+        };
+      };
+      if (!electron.shell) throw new Error("当前环境无法调用桌面浏览器");
+
+      const session = await readControlRoomSession(integration.sessionPath);
+      if (session) {
+        try {
+          const response = await requestUrl({
+            url: getControlRoomStatusUrl(session),
+            method: "GET",
+            throw: false,
+          });
+          if (response.status === 200) {
+            await electron.shell.openExternal(session.url);
+            new Notice("已打开博客管理后台");
+            return;
+          }
+        } catch (error) {
+          console.debug("EasyPub ignored a stale Blog Control Room session", error);
+        }
+      }
+
+      const launchError = await electron.shell.openPath(integration.launcherPath);
+      if (launchError) throw new Error(launchError);
+      new Notice("正在启动博客管理后台，浏览器将自动打开");
+    } catch (error) {
+      console.error("EasyPub could not open Blog Control Room", error);
+      new Notice(`无法打开博客管理后台：${this.getErrorMessage(error)}`);
+    }
+  }
+
+  async buildHexoLocally() {
+    if (!this.settings.hexoRepoPath) {
+      new Notice("请先在设置中填写 Hexo 仓库路径");
+      return;
+    }
+    if (this.deployInProgress) {
+      new Notice("Hexo 任务正在进行，请稍候");
+      return;
+    }
+
+    this.deployInProgress = true;
+    new Notice("正在本地生成 Hexo 站点...");
+    try {
+      await buildHexo(this.settings.hexoRepoPath);
+      try {
+        await this.refreshActiveHexoPublishUrl();
+      } catch (error) {
+        console.warn("EasyPub could not refresh Hexo publish URL", error);
+      }
+      new Notice("Hexo 本地生成成功，未执行部署");
+    } catch (error) {
+      console.error("EasyPub Hexo build failed", error);
+      new Notice(`Hexo 生成失败：${this.getErrorMessage(error)}`);
     } finally {
       this.deployInProgress = false;
     }
@@ -532,6 +701,171 @@ export default class EasyPub extends Plugin {
 
   private getErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+  }
+
+  private async prepareHexoContent(
+    sourceFile: TFile,
+    content: string,
+    pubId: string
+  ): Promise<PreparedPublishContent> {
+    if (!content.includes("![[")) {
+      return { content, assets: [], picgoUploads: [] };
+    }
+
+    const rootPath = await getHexoRootPath(this.settings.hexoRepoPath);
+    const prepared = await prepareImageEmbeds(content, async (linkPath) => {
+      const attachment = this.app.metadataCache.getFirstLinkpathDest(
+        linkPath,
+        sourceFile.path
+      );
+      const requestedExtension = path.extname(linkPath).slice(1).toLowerCase();
+      if (!attachment) {
+        if (HEXO_IMAGE_EXTENSIONS.has(requestedExtension)) {
+          throw new Error(`找不到图片附件：${linkPath}`);
+        }
+        return null;
+      }
+      if (!HEXO_IMAGE_EXTENSIONS.has(attachment.extension.toLowerCase())) {
+        return null;
+      }
+
+      const targetPath = getHexoAssetTargetPath(this.settings, pubId, attachment.path);
+      const relativePath = getHexoAssetRelativePath(pubId, targetPath);
+      const encodedRelativePath = relativePath
+        .split("/")
+        .map((segment) => encodeURIComponent(segment))
+        .join("/");
+      return {
+        url: `${rootPath}${encodedRelativePath}`,
+        alt: attachment.basename,
+        asset: {
+          sourcePath: attachment.path,
+          targetPath,
+        },
+      };
+    });
+    return { ...prepared, picgoUploads: [] };
+  }
+
+  private async preparePicGoContent(
+    sourceFile: TFile,
+    content: string
+  ): Promise<PreparedPublishContent> {
+    if (!content.includes("![[")) {
+      return { content, assets: [], picgoUploads: [] };
+    }
+    const adapter = this.app.vault.adapter;
+    if (!(adapter instanceof FileSystemAdapter)) {
+      throw new Error("当前 Vault 不是本地文件系统，无法通过 PicGo 上传附件");
+    }
+
+    const uploads = new Map<string, PicGoPendingUpload>();
+    const resolvedImages = new Map<string, { url: string; alt: string }>();
+    const prepared = await prepareImageEmbeds(content, async (linkPath) => {
+      const attachment = this.app.metadataCache.getFirstLinkpathDest(
+        linkPath,
+        sourceFile.path
+      );
+      const requestedExtension = path.extname(linkPath).slice(1).toLowerCase();
+      if (!attachment) {
+        if (HEXO_IMAGE_EXTENSIONS.has(requestedExtension)) {
+          throw new Error(`找不到图片附件：${linkPath}`);
+        }
+        return null;
+      }
+      if (!HEXO_IMAGE_EXTENSIONS.has(attachment.extension.toLowerCase())) {
+        return null;
+      }
+
+      const known = resolvedImages.get(attachment.path);
+      if (known) {
+        return known;
+      }
+
+      const binary = await this.app.vault.readBinary(attachment);
+      const contentHash = createHash("sha256")
+        .update(new Uint8Array(binary))
+        .digest("hex");
+      const cached = this.settings.picgoImageCache[attachment.path];
+      if (
+        cached?.hash === contentHash
+        && /^https?:\/\//.test(cached.url)
+      ) {
+        const result = { url: cached.url, alt: attachment.basename };
+        resolvedImages.set(attachment.path, result);
+        return result;
+      }
+
+      const token = `easy-pub-picgo://${contentHash.slice(0, 16)}`;
+      uploads.set(attachment.path, {
+        sourcePath: attachment.path,
+        localPath: adapter.getFullPath(attachment.path),
+        contentHash,
+        token,
+      });
+      const result = { url: token, alt: attachment.basename };
+      resolvedImages.set(attachment.path, result);
+      return result;
+    });
+
+    return {
+      ...prepared,
+      picgoUploads: [...uploads.values()],
+    };
+  }
+
+  private async resolvePicGoUploads(
+    content: string,
+    uploads: PicGoPendingUpload[]
+  ): Promise<{
+    content: string;
+    cacheUpdates: Record<string, PicGoImageCacheEntry>;
+  }> {
+    if (uploads.length === 0) {
+      return { content, cacheUpdates: {} };
+    }
+
+    const urls = await uploadWithPicGo(
+      uploads.map((upload) => upload.localPath),
+      {
+        serverUrl: this.settings.picgoServerUrl,
+        secret: this.settings.picgoServerSecret,
+      },
+      async (request) => {
+        const response = await requestUrl({
+          url: request.url,
+          method: "POST",
+          headers: request.headers,
+          body: request.body,
+          throw: false,
+        });
+        return { status: response.status, json: response.json };
+      }
+    );
+
+    let resolvedContent = content;
+    const cacheUpdates: Record<string, PicGoImageCacheEntry> = {};
+    uploads.forEach((upload, index) => {
+      const url = urls[index];
+      resolvedContent = resolvedContent.split(upload.token).join(url);
+      cacheUpdates[upload.sourcePath] = {
+        hash: upload.contentHash,
+        url,
+      };
+    });
+    return { content: resolvedContent, cacheUpdates };
+  }
+
+  private async copyPublishAssets(assets: PublishAsset[]): Promise<void> {
+    for (const asset of assets) {
+      const sourceFile = this.app.vault.getAbstractFileByPath(asset.sourcePath);
+      if (!(sourceFile instanceof TFile)) {
+        throw new Error(`找不到图片附件：${asset.sourcePath}`);
+      }
+      await fs.mkdir(path.dirname(asset.targetPath), { recursive: true });
+      const content = await this.app.vault.readBinary(sourceFile);
+      await fs.writeFile(asset.targetPath, new Uint8Array(content));
+    }
   }
 
   private async refreshActiveHexoPublishUrl(): Promise<void> {

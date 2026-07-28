@@ -27,6 +27,10 @@ Before the build, use `npm test` for core metadata and Hexo URL behavior.
 - Hexo child references in source front matter are plain external file paths, not wiki links.
 - Never overwrite an unrelated same-name publish target; select a numbered filename automatically.
 - Validate Hexo configuration and deployment prerequisites before running `clean`.
+- Hexo image embeds are copied to `source/images/easy-pub/{pub_id}`. Preserve source Vault
+  attachments and avoid rewriting embeds inside code.
+- Optional PicGo uploads use the local PicGo Server API. Defer external uploads until publish
+  confirmation and reuse URLs only when the attachment content hash still matches.
 
 ## Git
 

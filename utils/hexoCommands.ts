@@ -76,9 +76,13 @@ export async function runHexoCommand(
 
 export async function deployHexo(blogPath: string): Promise<void> {
   await validateHexoDeployment(blogPath);
+  await buildHexo(blogPath);
+  await runHexoCommand("deploy", blogPath);
+}
+
+export async function buildHexo(blogPath: string): Promise<void> {
   await runHexoCommand("clean", blogPath);
   await runHexoCommand("generate", blogPath);
-  await runHexoCommand("deploy", blogPath);
 }
 
 export async function validateHexoDeployment(blogPath: string): Promise<void> {

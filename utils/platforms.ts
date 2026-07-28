@@ -1,4 +1,5 @@
 import path from "path";
+import { createHash } from "crypto";
 import { normalizePath } from "obsidian";
 import { FrontMatterData, Platform, PLATFORMS, PluginSettings } from "../types";
 
@@ -38,6 +39,35 @@ export function getTargetPath(
   return platform.isExternal
     ? path.join(publishPath, `${sanitizeFileName(title)}.md`)
     : normalizePath(`${publishPath}/${sanitizeFileName(title)}.md`);
+}
+
+export function getHexoAssetTargetPath(
+  settings: PluginSettings,
+  pubId: string,
+  sourcePath: string
+): string {
+  const extension = path.extname(sourcePath);
+  const sourceName = path.basename(sourcePath, extension);
+  const safeName = sanitizeFileName(sourceName);
+  const pathHash = createHash("sha1").update(sourcePath).digest("hex").slice(0, 8);
+  const fileName = `${safeName}-${pathHash}${extension.toLowerCase()}`;
+  return path.join(
+    settings.hexoRepoPath,
+    "source",
+    "images",
+    "easy-pub",
+    sanitizeFileName(pubId),
+    fileName
+  );
+}
+
+export function getHexoAssetRelativePath(pubId: string, targetPath: string): string {
+  return [
+    "images",
+    "easy-pub",
+    sanitizeFileName(pubId),
+    path.basename(targetPath),
+  ].join("/");
 }
 
 export function getSubFolder(
@@ -88,6 +118,16 @@ export function parseWikiLink(wikiLink: string): string {
   return match ? match[1] : wikiLink;
 }
 
-function sanitizeFileName(fileName: string): string {
-  return fileName.replace(/[<>:"/\\|?*\x00-\x1F]/g, "-").trim() || "Untitled";
+export function sanitizeFileName(fileName: string): string {
+  let sanitized = fileName
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "-")
+    .trim()
+    .replace(/[. ]+$/g, "");
+  if (!sanitized || sanitized === "." || sanitized === "..") {
+    return "Untitled";
+  }
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(sanitized)) {
+    sanitized = `_${sanitized}`;
+  }
+  return sanitized;
 }

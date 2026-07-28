@@ -83,7 +83,9 @@ export class DiffModal extends Modal {
     const contentContainer = container.createDiv();
     contentContainer.createEl("h4", { text: "正文变更摘要" });
 
-    const sourceLines = sourceParsed.content.split("\n");
+    const sourceLines = sourceParsed.content
+      .replace(/easy-pub-picgo:\/\/[a-f0-9]+/g, "确认后由 PicGo 上传")
+      .split("\n");
     const targetLines = targetParsed.content.split("\n");
 
     const preview = contentContainer.createDiv({

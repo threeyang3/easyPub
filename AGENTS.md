@@ -31,6 +31,9 @@ Before the build, use `npm test` for core metadata and Hexo URL behavior.
   attachments and avoid rewriting embeds inside code.
 - Optional PicGo uploads use the local PicGo Server API. Defer external uploads until publish
   confirmation and reuse URLs only when the attachment content hash still matches.
+- Blog Control Room discovery must require an absolute path, exact fixed GUI script, loopback-only
+  session URL, one 48-character token, and a successful `/api/status` probe. Compatible repositories
+  must enter their protected GUI deployment flow instead of direct Hexo deployment.
 
 ## Git
 

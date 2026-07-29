@@ -53,9 +53,13 @@
 ```bash
 git clone https://github.com/threeyang3/easyPub.git
 cd easyPub
-npm install
+npm ci
 npm run build
 ```
+
+构建完成后，仍需把 `release/main.js`、`release/manifest.json` 和
+`release/styles.css` 一起复制到 Vault 的 `.obsidian/plugins/easy-pub/`，再在
+Obsidian 中关闭并重新启用插件。只运行构建不会自动更新任意 Vault。
 
 ## 使用方法
 
@@ -118,7 +122,8 @@ Hexo 仓库需要满足：
 - **发布根目录**：其他平台发布路径基础目录（默认 `发布`）
 
 **部署**
-- **自动部署**：保存 Hexo 发布稿后是否立即部署，默认关闭
+- **自动部署**：普通 Hexo 仓库保存发布稿后立即部署，默认关闭；兼容 Blog Control
+  Room 的仓库只打开受保护发布流程，不会静默部署
 
 部署时只使用博客仓库本地安装的 Hexo，不会通过 `npx` 临时下载。插件会先检查配置，然后依次执行 `clean`、`generate --bail` 和 `deploy`；单个命令超过 10 分钟会停止并提示失败。也可以先使用本地构建命令检查生成结果而不部署。使用 `hexo-abbrlink` 等动态链接插件时，`publish_url` 会在生成完成后自动补全。
 
@@ -127,6 +132,8 @@ Hexo 仓库需要满足：
 部署。它会打开管理后台，由后台继续执行源码提交、推送、CI 对齐和 Pages 部署检查。
 运行中的会话只从仓库内 `.blog-admin/control-room.json` 读取，并且必须是通过
 健康检查的 `127.0.0.1` 地址和有效随机令牌；外部 URL 会被拒绝。
+完整安装、兼容条件、安全协议和排障说明见
+[Blog Control Room 接入指南](docs/control-room.md)。
 
 ## Front Matter 属性
 
@@ -174,6 +181,9 @@ npm run check      # TypeScript 类型检查
 npm run build      # 构建生产版本
 npm run dev        # 开发模式（监听变化）
 ```
+
+源码或 manifest 变化后必须重新运行 `npm run build`，并用同一次构建生成的三份文件更新
+Vault 插件目录。
 
 ## 许可证
 

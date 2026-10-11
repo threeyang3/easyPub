@@ -1,47 +1,48 @@
-# Blog Control Room 接入指南
+# Blog Control Room 接入
 
-EasyPub 可以从 Obsidian 打开兼容 Hexo 仓库提供的本地管理后台。该能力只负责发现或
-启动后台，不把后台嵌入 Obsidian，也不会绕过博客仓库自己的源码同步、CI 或部署门禁。
+EasyPub 可以发现并打开 Hexo 仓库提供的本地 Blog Control Room。该能力只负责安全地启动或复用管理后台，不把后台嵌入 Obsidian，也不代替仓库自己的源码同步、CI 和部署门禁。
 
-## 用户使用
+## 1. 使用入口
 
-### 安装或更新 EasyPub
+先在“设置 → EasyPub”中填写 Hexo 仓库的绝对路径，再通过任一入口打开：
 
-1. 执行 `npm ci` 和 `npm run build`。
-2. 把 `release/main.js`、`release/manifest.json`、`release/styles.css` 复制到 Vault 的
-   `.obsidian/plugins/easy-pub/`。
-3. 在 Obsidian“设置 → 第三方插件”中关闭再启用 EasyPub，或重启 Obsidian。
-4. 在“设置 → EasyPub”填写 Hexo 仓库的绝对路径。
+- 功能区仪表盘图标。
+- 命令 `Open Hexo management console`。
+- “设置 → EasyPub → 博客管理后台”。
 
-只修改 TypeScript 源码而不重新构建、只更新插件目录中的部分文件，都会导致 Obsidian
-继续运行旧代码。三个发布文件应始终来自同一次 `npm run build`。
+后台未运行时，EasyPub 启动仓库根目录的 `ManageBlog.bat`；已有有效会话时，直接在默认浏览器中打开。
 
-### 打开管理后台
+如果看不到入口，请按 [README 安装说明](../README.md#安装)重新复制同一次构建生成的三个插件文件，并重载 EasyPub。
 
-可以使用任一入口：
+## 2. 兼容条件
 
-- 左侧功能区的仪表盘图标。
-- 命令面板中的 `Open Hexo management console`。
-- “设置 → EasyPub → 博客管理后台”的“打开管理后台”按钮。
-
-首次打开时，EasyPub 会启动博客仓库根目录的 `ManageBlog.bat`，管理后台随后在默认
-浏览器中打开。后台已经运行时，EasyPub 会先验证本机会话，再直接打开现有页面，避免
-重复占用 4173 端口。
-
-## 兼容仓库约定
-
-EasyPub 只把同时满足以下条件的目录识别为兼容的 Blog Control Room：
+只有同时满足以下条件的 Hexo 仓库才会启用 Control Room：
 
 - 设置值是绝对路径。
 - 根目录存在 `package.json` 和 `ManageBlog.bat`。
 - 存在 `admin/server.js`。
-- `package.json` 中的 `scripts.gui` 必须精确等于 `node admin/server.js`。
+- `package.json` 中 `scripts.gui` 精确等于 `node admin/server.js`。
 
-不满足条件时，“打开管理后台”会给出错误；普通 Hexo 构建和部署能力仍按原流程工作。
+不满足条件时，管理后台入口会提示不兼容；普通 Hexo 本地构建和部署仍按原流程运行。
 
-## 会话发现协议
+## 3. 部署边界
 
-后台启动后，在被 Git 忽略的 `.blog-admin/control-room.json` 写入运行时信息：
+对于普通 Hexo 仓库：
+
+- `Build Hexo locally (no deploy)` 执行本地生成。
+- `Deploy to Hexo` 直接调用仓库本地 Hexo 完成部署。
+
+对于兼容 Control Room 的仓库：
+
+- `Deploy to Hexo` 打开管理后台。
+- 开启“自动部署”后，写入 Hexo 发布稿也只打开管理后台。
+- 后续检查、确认和部署由仓库自己的后台负责。
+
+EasyPub 不绕过兼容仓库定义的 Git、CI、分支或部署保护。
+
+## 4. 会话安全
+
+后台在 `.blog-admin/control-room.json` 写入临时会话。以下内容仅为结构示例，端口由后台实际会话决定：
 
 ```json
 {
@@ -54,50 +55,33 @@ EasyPub 只把同时满足以下条件的目录识别为兼容的 Blog Control R
 }
 ```
 
-EasyPub 在打开该地址前会执行以下检查：
+EasyPub 复用会话前会验证：
 
-1. 会话版本、进程号和端口格式有效。
-2. 协议只能是 HTTP，主机只能是 `127.0.0.1`。
-3. URL 只能包含一个 `token` 参数，令牌必须是 48 位小写十六进制。
-4. 请求带令牌的 `/api/status`，只有 HTTP 200 才复用会话。
+1. 版本、进程号和端口格式。
+2. HTTP 协议和 `127.0.0.1` 回环主机。
+3. URL 根路径、唯一的 `token` 参数和 48 位小写十六进制令牌。
+4. 带令牌请求 `/api/status`，且响应状态为 HTTP 200。
 
-外部域名、相对路径、额外查询参数、重复令牌、无效端口和失效会话都会被拒绝。令牌只是
-本次本机进程的临时访问凭证，不是博客文章密码；会话文件不得提交或复制到公开位置。
+相对地址、外部主机、额外查询参数、重复令牌和失效会话都会被拒绝。会话文件是本机临时凭证，不应提交到 Git 或复制到公开位置。
 
-## 部署行为
-
-对于普通 Hexo 仓库，`Deploy to Hexo` 仍使用仓库本地安装的 Hexo，依次执行
-`clean`、`generate --bail` 和 `deploy`。
-
-对于兼容的 Blog Control Room 仓库：
-
-- `Deploy to Hexo` 改为打开管理后台。
-- 开启“自动部署”后，生成 Hexo 发布稿也只会进入管理后台，不会静默部署。
-- 用户必须在后台完成受管源码选择、`SYNC SOURCE`、GitHub Actions 对齐和仓库规定的
-  Pages 部署确认。
-
-这样可以保留博客仓库的 `predeploy`、CNAME、固定远端和分支保护。
-
-## 故障排查
+## 5. 故障排查
 
 | 现象 | 检查与处理 |
 |------|------------|
-| 没有仪表盘图标或命令 | 确认三份插件文件来自最新 `release/`，然后重载 EasyPub |
-| 提示未提供兼容后台 | 核对 Hexo 绝对路径、三个兼容文件及精确的 `scripts.gui` |
-| 点击后没有打开 | 手工双击博客仓库的 `ManageBlog.bat`，查看命令窗口中的启动错误 |
-| 4173 端口已占用 | 关闭旧的 Blog Control Room 命令窗口，再重新打开 |
-| 会话文件存在但无法复用 | 会话可能来自异常退出；关闭残留进程并重新启动后台 |
-| 后台打开但部署仍锁定 | 在发布页检查工作区、`origin/main`、ahead/behind 和当前提交 CI |
-| 普通 Hexo 被直接部署 | 确认它是否真的满足兼容仓库约定；不兼容仓库不会启用后台门禁 |
+| 提示仓库不兼容 | 核对绝对路径、三个固定文件和精确的 `scripts.gui` |
+| 点击后没有打开 | 手动运行 `ManageBlog.bat`，查看后台启动错误 |
+| 提示端口占用 | 关闭旧后台进程，再重新打开 |
+| 会话文件存在但无法复用 | 关闭残留进程并重新启动后台 |
+| 部署命令只打开后台 | 这是兼容仓库的预期保护行为，请在后台继续 |
+| 普通仓库直接部署 | 这是非兼容仓库的预期行为；需要保护流程时补齐兼容条件 |
 
-## 开发验证
+## 6. 开发验证
 
-修改接入代码后执行：
+修改 Control Room 接入后执行：
 
 ```bash
 npm test
 npm run build
 ```
 
-测试覆盖绝对路径、固定 GUI 脚本、回环 URL、单一令牌参数、会话读取以及对外部 URL 的
-拒绝。生产构建会同步根目录和 `release/` 中的插件文件。
+测试应覆盖绝对路径、固定 GUI 脚本、回环 URL、唯一令牌、会话读取、状态探测以及外部 URL 拒绝。

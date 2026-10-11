@@ -12,7 +12,7 @@ PicGo 模式会在确认发布后上传 Obsidian 本地图片，并把发布稿�
 只发布到 Hexo 且希望图片跟随仓库管理时，无需启用 PicGo。默认复制位置是：
 
 ```text
-{hexoRepoPath}/source/images/easy-pub/{pub_id}/
+{hexoRepoPath}/source/picture/easy-pub/{pub_id}/
 ```
 
 ## 2. 准备 PicGo

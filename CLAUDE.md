@@ -65,7 +65,11 @@ For compatible Blog Control Room repositories:
 
 ## Image Invariants
 
-- Default Hexo image copies live under `source/images/easy-pub/{pub_id}` with deterministic names.
+- Default Hexo image copies live under `source/picture/easy-pub/{pub_id}` with path and content hashes in filenames. Existing assets are immutable.
+- Revalidate attachments and target content after confirmation; a changed or moved target requires a new publication attempt.
+- Search both `_posts` and `_drafts` recursively by `pub_id`; updates keep the current directory and draft/pending state.
+- Compatible Control Room repositories receive required title/categories/tags and a unique four-digit hex `abbrlink`; plaintext `password` is rejected.
+- Write target Markdown atomically. On failure, restore it only if it is still the version this operation wrote, and remove newly created assets only if no post or draft references them.
 - Preserve source attachments, note embeds, and examples inside fenced or inline code.
 - PicGo uploads occur only after publish confirmation.
 - Cache PicGo URLs by attachment path and content hash.

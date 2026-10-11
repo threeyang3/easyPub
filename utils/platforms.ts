@@ -44,17 +44,18 @@ export function getTargetPath(
 export function getHexoAssetTargetPath(
   settings: PluginSettings,
   pubId: string,
-  sourcePath: string
+  sourcePath: string,
+  contentHash?: string
 ): string {
   const extension = path.extname(sourcePath);
   const sourceName = path.basename(sourcePath, extension);
   const safeName = sanitizeFileName(sourceName);
   const pathHash = createHash("sha1").update(sourcePath).digest("hex").slice(0, 8);
-  const fileName = `${safeName}-${pathHash}${extension.toLowerCase()}`;
+  const fileName = `${safeName}-${pathHash}${contentHash ? `-${contentHash}` : ""}${extension.toLowerCase()}`;
   return path.join(
     settings.hexoRepoPath,
     "source",
-    "images",
+    "picture",
     "easy-pub",
     sanitizeFileName(pubId),
     fileName
@@ -63,7 +64,7 @@ export function getHexoAssetTargetPath(
 
 export function getHexoAssetRelativePath(pubId: string, targetPath: string): string {
   return [
-    "images",
+    "picture",
     "easy-pub",
     sanitizeFileName(pubId),
     path.basename(targetPath),

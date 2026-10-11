@@ -86,7 +86,8 @@ zhihu_type: 文章 # 可选：文章、想法
 
 默认模式下：
 
-- Hexo 将图片型 `![[附件]]` 复制到 `source/images/easy-pub/{pub_id}/`，并改写为普通 Markdown 图片链接。
+- Hexo 将图片型 `![[附件]]` 复制到 `source/picture/easy-pub/{pub_id}/`，并改写为普通 Markdown 图片链接。
+- 文件名包含附件路径与内容哈希；更新图片生成新文件，不覆盖旧图。失败时回滚发布稿，并清理本次创建且没有文章引用的图片。
 - 其他平台保留原始 Obsidian 嵌入。
 - 源文章正文和 Vault 原附件不会被修改；源文章的 `pub_id` 和 `子文件` 会更新。
 - 笔记嵌入以及 fenced/inline code 中的示例不会被改写。
@@ -112,3 +113,7 @@ EasyPub 不使用 `npx` 临时下载 Hexo。
 单个 Hexo 命令超过 10 分钟会停止。使用动态 permalink 插件时，本地生成或部署成功后会刷新当前文章的 `publish_url`。
 
 如果仓库满足 Blog Control Room 兼容条件，部署命令和自动部署只会打开受保护管理流程，不会绕过仓库门禁。参见 [Blog Control Room 接入](control-room.md)。
+
+兼容后台的文章自动补齐标题、空分类/标签和唯一 `abbrlink`，拒绝明文 `password`。更新同时查找 `_posts`、`_drafts` 及其子目录，保留草稿或待发布状态；确认期间目标或附件发生变化时停止写入，请重新发布查看新的差异。
+
+1.4.0 的本地图片位于 `source/images/easy-pub/`。升级不会删除或自动改写历史稿件；重新发布后使用新目录，旧图片在确认无引用后可人工清理。若仍有引用旧目录的文章，迁移文件时必须同步修改链接。

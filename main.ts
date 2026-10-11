@@ -28,6 +28,8 @@ import {
 import { generateHexoUrl, getHexoRootPath } from "./utils/linkUtils";
 import { prepareImageEmbeds, PreparedImageContent } from "./utils/imageEmbeds";
 import { getPicGoHeartbeatUrl, uploadWithPicGo } from "./utils/picgo";
+import { assertPublishUnchanged, completeControlRoomMetadata } from "./utils/publishSafety";
+import { writeImmutableAsset, writePublishedFile } from "./utils/publishFiles";
 import {
   findControlRoomIntegration,
   getControlRoomStatusUrl,
@@ -297,6 +299,7 @@ export default class EasyPub extends Plugin {
       }
     } else {
       searchPaths.push(getPublishPath(platform, this.settings, subFolder));
+      if (platform.id === "hexo") searchPaths.push(path.join(this.settings.hexoRepoPath, "source", "_drafts"));
     }
 
     for (const publishPath of searchPaths) {
@@ -327,13 +330,30 @@ export default class EasyPub extends Plugin {
     targetPath: string
   ): Promise<FrontMatterData> {
     const existingData = existingContent ? parseFrontMatter(existingContent).data : undefined;
-    const publishedData = mergePublishedFrontMatter({
+    let publishedData = mergePublishedFrontMatter({
       sourceData,
       existingData,
       pubId,
       sourceFileLink: createWikiLink(sourceFile.path),
       timestamp,
     });
+
+    if (platform.id === "hexo" && await findControlRoomIntegration(this.settings.hexoRepoPath)) {
+      const used = new Set<string>();
+      for (const directory of ["_posts", "_drafts"]) {
+        const root = path.join(this.settings.hexoRepoPath, "source", directory);
+        if (!await this.publishDirectoryExists(platform, root)) continue;
+        for (const file of await this.listPublishFiles(platform, root)) {
+          if (!file.endsWith(".md") || path.resolve(file) === path.resolve(targetPath)) continue;
+          const meta = parseFrontMatter(await this.readPublishFile(platform, file)).data;
+          if (meta.abbrlink !== undefined) used.add(String(meta.abbrlink));
+        }
+      }
+      publishedData = completeControlRoomMetadata(publishedData, sourceFile.basename, used);
+      if (path.relative(path.join(this.settings.hexoRepoPath, "source"), targetPath).split(path.sep)[0] === "_drafts") {
+        publishedData.workflow = existingData?.workflow === "pending" ? "pending" : "draft";
+      } else delete publishedData.workflow;
+    }
 
     if (platform.autoUrl && platform.id === "hexo" && this.settings.hexoRepoPath) {
       const url = await generateHexoUrl(
@@ -373,22 +393,61 @@ export default class EasyPub extends Plugin {
     if (diff.isNew && previousTargetContent !== null) {
       throw new Error("目标文件刚刚被创建，请重新发布以生成新的安全文件名");
     }
+    assertPublishUnchanged(diff.targetContent, previousTargetContent);
+    for (const upload of diff.picgoUploads ?? []) {
+      const attachment = this.app.vault.getAbstractFileByPath(upload.sourcePath);
+      if (!(attachment instanceof TFile)) throw new Error("图片已删除，请重新发布");
+      const current = await this.app.vault.readBinary(attachment);
+      if (createHash("sha256").update(new Uint8Array(current)).digest("hex") !== upload.contentHash) {
+        throw new Error("图片在确认期间发生变化，请重新发布");
+      }
+    }
 
     const picgoResult = await this.resolvePicGoUploads(
       diff.sourceContent,
       diff.picgoUploads ?? []
     );
     const finalContent = picgoResult.content;
-    await this.copyPublishAssets(diff.assets ?? []);
-    await this.writePublishFile(platform, diff.targetPath, finalContent);
-
+    const createdAssets: string[] = [];
+    let targetWritten = false;
     try {
+      await this.copyPublishAssets(diff.assets ?? [], createdAssets);
+      const current = await this.publishPathExists(platform, diff.targetPath)
+        ? await this.readPublishFile(platform, diff.targetPath) : null;
+      assertPublishUnchanged(diff.targetContent, current);
+      if (platform.id === "hexo") {
+        const actualPath = await this.findArticleByPubId(platform, diff.pub_id, diff.meta);
+        if (actualPath && path.resolve(actualPath) !== path.resolve(diff.targetPath)) {
+          throw new Error("文章已移动到其他位置，请重新发布以保留其状态");
+        }
+      }
+      await this.writePublishFile(platform, diff.targetPath, finalContent, diff.targetContent);
+      targetWritten = true;
       await this.updateSourceFile(sourceFile, platform, diff.targetPath, diff.pub_id);
     } catch (error) {
-      if (previousTargetContent === null) {
-        await this.deletePublishFile(platform, diff.targetPath);
-      } else {
-        await this.writePublishFile(platform, diff.targetPath, previousTargetContent);
+      if (targetWritten && await this.publishPathExists(platform, diff.targetPath)
+        && await this.readPublishFile(platform, diff.targetPath) === finalContent) {
+        if (previousTargetContent === null) await this.deletePublishFile(platform, diff.targetPath);
+        else await this.writePublishFile(platform, diff.targetPath, previousTargetContent, finalContent);
+      }
+      // Only remove assets which no current post or draft references.
+      if (createdAssets.length) {
+        try {
+          const documents: string[] = [];
+          for (const directory of ["_posts", "_drafts"]) {
+            const root = path.join(this.settings.hexoRepoPath, "source", directory);
+            if (!await this.publishDirectoryExists(platform, root)) continue;
+            for (const file of await this.listPublishFiles(platform, root)) {
+              if (file.endsWith(".md")) documents.push(await this.readPublishFile(platform, file));
+            }
+          }
+          for (const file of createdAssets) {
+            const name = path.basename(file);
+            if (!documents.some(text => text.includes(name) || text.includes(encodeURIComponent(name)))) {
+              await fs.unlink(file).catch(() => {});
+            }
+          }
+        } catch { /* Retain assets if reference discovery fails. */ }
       }
       throw error;
     }
@@ -506,13 +565,16 @@ export default class EasyPub extends Plugin {
     return this.app.vault.read(file);
   }
 
-  async writePublishFile(platform: Platform, filePath: string, content: string): Promise<void> {
+  async writePublishFile(platform: Platform, filePath: string, content: string, expected?: string | null): Promise<void> {
     if (platform.isExternal) {
-      await fs.writeFile(filePath, content, "utf8");
+      await writePublishedFile(filePath, content, expected);
       return;
     }
 
     const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (expected !== undefined) {
+      assertPublishUnchanged(expected, file instanceof TFile ? await this.app.vault.read(file) : null);
+    }
     if (file instanceof TFile) {
       await this.app.vault.modify(file, content);
       return;
@@ -536,9 +598,13 @@ export default class EasyPub extends Plugin {
   async listPublishFiles(platform: Platform, directoryPath: string): Promise<string[]> {
     if (platform.isExternal) {
       const entries = await fs.readdir(directoryPath, { withFileTypes: true });
-      return entries
-        .filter((entry) => entry.isFile())
-        .map((entry) => path.join(directoryPath, entry.name));
+      const files: string[] = [];
+      for (const entry of entries) {
+        const fullPath = path.join(directoryPath, entry.name);
+        if (entry.isFile()) files.push(fullPath);
+        else if (entry.isDirectory()) files.push(...await this.listPublishFiles(platform, fullPath));
+      }
+      return files;
     }
 
     const folder = this.app.vault.getAbstractFileByPath(directoryPath);
@@ -729,11 +795,13 @@ export default class EasyPub extends Plugin {
         return null;
       }
 
-      const targetPath = getHexoAssetTargetPath(this.settings, pubId, attachment.path);
+      const binary = await this.app.vault.readBinary(attachment);
+      const contentHash = createHash("sha256").update(new Uint8Array(binary)).digest("hex");
+      const targetPath = getHexoAssetTargetPath(this.settings, pubId, attachment.path, contentHash);
       const relativePath = getHexoAssetRelativePath(pubId, targetPath);
       const encodedRelativePath = relativePath
         .split("/")
-        .map((segment) => encodeURIComponent(segment))
+        .map((segment) => encodeURIComponent(segment).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`))
         .join("/");
       return {
         url: `${rootPath}${encodedRelativePath}`,
@@ -741,6 +809,7 @@ export default class EasyPub extends Plugin {
         asset: {
           sourcePath: attachment.path,
           targetPath,
+          contentHash,
         },
       };
     });
@@ -856,15 +925,18 @@ export default class EasyPub extends Plugin {
     return { content: resolvedContent, cacheUpdates };
   }
 
-  private async copyPublishAssets(assets: PublishAsset[]): Promise<void> {
+  private async copyPublishAssets(assets: PublishAsset[], created: string[]): Promise<void> {
     for (const asset of assets) {
       const sourceFile = this.app.vault.getAbstractFileByPath(asset.sourcePath);
       if (!(sourceFile instanceof TFile)) {
         throw new Error(`找不到图片附件：${asset.sourcePath}`);
       }
-      await fs.mkdir(path.dirname(asset.targetPath), { recursive: true });
       const content = await this.app.vault.readBinary(sourceFile);
-      await fs.writeFile(asset.targetPath, new Uint8Array(content));
+      const bytes = new Uint8Array(content);
+      if (!asset.contentHash || createHash("sha256").update(bytes).digest("hex") !== asset.contentHash) {
+        throw new Error("图片在确认期间发生变化，请重新发布");
+      }
+      if (await writeImmutableAsset(asset.targetPath, bytes, asset.contentHash)) created.push(asset.targetPath);
     }
   }
 
@@ -901,13 +973,15 @@ export default class EasyPub extends Plugin {
       return;
     }
 
+    assertPublishUnchanged(publishedContent, await this.readPublishFile(hexoPlatform, targetPath));
     await this.writePublishFile(
       hexoPlatform,
       targetPath,
       stringifyFrontMatter(publishedParsed.content, {
         ...publishedParsed.data,
         publish_url: publishUrl,
-      })
+      }),
+      publishedContent
     );
   }
 }

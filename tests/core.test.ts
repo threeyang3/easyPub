@@ -11,6 +11,13 @@ import {
   validateHexoDeployment,
 } from "../utils/hexoCommands";
 import { prepareImageEmbeds } from "../utils/imageEmbeds";
+import { assertPublishUnchanged, completeControlRoomMetadata } from "../utils/publishSafety";
+import { writeImmutableAsset, writePublishedFile } from "../utils/publishFiles";
+import { createHash } from "node:crypto";
+import EasyPubPlugin from "../main";
+import { TFile } from "obsidian";
+import { DEFAULT_SETTINGS, PLATFORMS } from "../types";
+import { getHexoAssetTargetPath } from "../utils/platforms";
 import {
   getPicGoHeartbeatUrl,
   normalizePicGoUploadUrl,
@@ -24,6 +31,74 @@ import {
 } from "../utils/controlRoom";
 
 async function run() {
+  const assetsRoot = await mkdtemp(path.join(os.tmpdir(), 'easy-pub-assets-'));
+  try {
+    const bytes = Buffer.from('fixture image bytes');
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    const target = path.join(assetsRoot, 'nested', 'image.png');
+    await mkdir(path.dirname(target));
+    const post = path.join(assetsRoot, 'post.md');
+    await writePublishedFile(post, 'first', null);
+    await assert.rejects(() => writePublishedFile(post, 'overwrite', null), /重新发布/);
+    await assert.rejects(() => writePublishedFile(post, 'overwrite', 'stale'), /重新发布/);
+    assert.equal(await readFile(post, 'utf8'), 'first');
+    await writePublishedFile(post, 'second', 'first');
+    assert.equal(await readFile(post, 'utf8'), 'second');
+    assert.equal(await writeImmutableAsset(target, bytes, hash), true);
+    assert.equal(await writeImmutableAsset(target, bytes, hash), false);
+    await assert.rejects(() => writeImmutableAsset(target, Buffer.from('changed'), hash), /重新发布/);
+    await writeFile(target, 'unexpected content');
+    await assert.rejects(() => writeImmutableAsset(target, bytes, hash), /内容不一致/);
+    assert.equal(await readFile(target, 'utf8'), 'unexpected content');
+  } finally { await rm(assetsRoot, { recursive: true, force: true }); }
+  assertPublishUnchanged("original", "original");
+  assertPublishUnchanged(null, null);
+  assert.throws(() => assertPublishUnchanged("original", "backend edit"), /重新发布/);
+  assert.throws(() => assertPublishUnchanged("original", null), /重新发布/);
+  const completed = completeControlRoomMetadata({ date: "2026-10-11" }, "Title", new Set());
+  assert.equal(completed.title, "Title");
+  assert.deepEqual(completed.categories, []);
+  assert.deepEqual(completed.tags, []);
+  assert.match(String(completed.abbrlink), /^[a-f0-9]{4}$/);
+  assert.equal(completeControlRoomMetadata(completed, "Title", new Set()).abbrlink, completed.abbrlink);
+  assert.throws(() => completeControlRoomMetadata(completed, "Title", new Set([String(completed.abbrlink)])), /重复/);
+  assert.throws(() => completeControlRoomMetadata({ password: "fixture" }, "Title", new Set()), /password_secret/);
+  const integrationRoot = await mkdtemp(path.join(os.tmpdir(), 'easy-pub-integration-'));
+  try {
+    const plugin = Object.create(EasyPubPlugin.prototype) as EasyPubPlugin;
+    plugin.settings = { ...DEFAULT_SETTINGS, hexoRepoPath: integrationRoot };
+    const platform = PLATFORMS.find(p => p.id === 'hexo')!;
+    await mkdir(path.join(integrationRoot, 'source/_drafts/nested'), { recursive: true });
+    await mkdir(path.join(integrationRoot, 'source/_posts'), { recursive: true });
+    await mkdir(path.join(integrationRoot, 'admin'));
+    await writeFile(path.join(integrationRoot, 'package.json'), JSON.stringify({ scripts: { gui: 'node admin/server.js' } }));
+    await writeFile(path.join(integrationRoot, 'ManageBlog.bat'), 'fixture');
+    await writeFile(path.join(integrationRoot, 'admin/server.js'), 'fixture');
+    await writeFile(path.join(integrationRoot, '_config.yml'), 'url: https://example.com\npermalink: posts/:abbrlink/\n');
+    const target = path.join(integrationRoot, 'source/_drafts/nested/Draft.md');
+    const original = '---\ntitle: Draft\npub_id: draft-id\nabbrlink: abcd\nworkflow: pending\n---\nOriginal';
+    await writeFile(target, original);
+    const source = Object.assign(new TFile(), { path: 'Draft.md', basename: 'Draft', extension: 'md' });
+    assert.equal(await plugin.findArticleByPubId(platform, 'draft-id', { title: 'Draft' }), target);
+    const meta = await plugin.buildPublishedFrontMatter(platform, source, { title: 'Draft', workflow: 'published' }, original, 'draft-id', '2026-10-11', target);
+    assert.equal(meta.workflow, 'pending');
+    assert.equal(meta.abbrlink, 'abcd');
+    assert.deepEqual(meta.tags, []);
+    const bytes = Buffer.from('fixture');
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    const assetTarget = getHexoAssetTargetPath(plugin.settings, 'draft-id', 'image.png', hash);
+    assert.ok(assetTarget.includes(path.join('source', 'picture', 'easy-pub')));
+    const diff = { pub_id: 'draft-id', sourcePath: source.path, targetPath: target, sourceContent: original + ' updated', targetContent: original, isNew: false, meta: { pub_id: 'draft-id', title: 'Draft' }, platform, assets: [{ sourcePath: 'image.png', targetPath: assetTarget, contentHash: hash }] };
+    Object.assign(plugin, { app: { vault: { getAbstractFileByPath: () => new TFile(), readBinary: async () => bytes } } });
+    await writeFile(target, original + ' backend edit');
+    await assert.rejects(() => plugin.copyAndOpenForEdit(diff, source), /重新发布/);
+    assert.equal(await readFile(target, 'utf8'), original + ' backend edit');
+    await writeFile(target, original);
+    plugin.updateSourceFile = async () => { throw new Error('source update failed'); };
+    await assert.rejects(() => plugin.copyAndOpenForEdit(diff, source), /source update failed/);
+    assert.equal(await readFile(target, 'utf8'), original);
+    await assert.rejects(() => readFile(assetTarget), /ENOENT/);
+  } finally { await rm(integrationRoot, { recursive: true, force: true }); }
   const controlRoomSession = parseControlRoomSession({
     version: 1,
     pid: 1234,

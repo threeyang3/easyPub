@@ -110,6 +110,7 @@ export interface ArticleDiff {
 export interface PublishAsset {
   sourcePath: string;
   targetPath: string;
+  contentHash?: string;
 }
 
 export interface PicGoPendingUpload {

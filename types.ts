@@ -105,6 +105,9 @@ export interface ArticleDiff {
   platform: Platform;
   assets?: PublishAsset[];
   picgoUploads?: PicGoPendingUpload[];
+  sourceSnapshot?: string;
+  settingsFingerprint?: string;
+  imageChecks?: Array<{ sourcePath: string; contentHash: string }>;
 }
 
 export interface PublishAsset {

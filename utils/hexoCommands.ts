@@ -2,11 +2,19 @@ import { execFile } from "child_process";
 import fs from "fs/promises";
 import path from "path";
 import { promisify } from "util";
+import { createRequire } from "module";
+import { parseYamlDocument } from "./frontMatter";
 
 const execFileAsync = promisify(execFile);
 const HEXO_COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
 
 export type HexoCommand = "clean" | "generate" | "deploy";
+
+export function getHexoNodeExecutable(electronVersion = process.versions.electron): string {
+  // Packaged Obsidian can disable Electron's runAsNode fuse. Use installed Node
+  // in the host instead of launching another Obsidian instance as if it were Node.
+  return electronVersion ? (process.platform === "win32" ? "node.exe" : "node") : process.execPath;
+}
 
 export async function validateHexoBlog(blogPath: string): Promise<void> {
   if (!path.isAbsolute(blogPath)) {
@@ -48,11 +56,12 @@ export async function runHexoCommand(
   }
 
   try {
-    const { stdout } = await execFileAsync(process.execPath, args, {
+    const { stdout } = await execFileAsync(getHexoNodeExecutable(), args, {
       cwd: blogPath,
       env: {
         ...process.env,
         GIT_TERMINAL_PROMPT: "0",
+        GCM_INTERACTIVE: "Never",
       },
       timeout: HEXO_COMMAND_TIMEOUT_MS,
       maxBuffer: 1024 * 1024 * 10,
@@ -66,6 +75,9 @@ export async function runHexoCommand(
       stderr?: string;
       stdout?: string;
     };
+    if (commandError.code === "ENOENT") {
+      throw new Error("找不到 Node.js，请安装 Node.js 并确认 node 在 PATH 中，然后重启 Obsidian");
+    }
     if (commandError.killed || commandError.code === "ETIMEDOUT") {
       throw new Error(`Hexo ${command} 超过 10 分钟，已停止执行`);
     }
@@ -81,45 +93,36 @@ export async function deployHexo(blogPath: string): Promise<void> {
 }
 
 export async function buildHexo(blogPath: string): Promise<void> {
+  await readHexoConfiguration(blogPath);
   await runHexoCommand("clean", blogPath);
   await runHexoCommand("generate", blogPath);
 }
 
-export async function validateHexoDeployment(blogPath: string): Promise<void> {
+async function readHexoConfiguration(blogPath: string) {
   await validateHexoBlog(blogPath);
   const configContent = await fs.readFile(path.join(blogPath, "_config.yml"), "utf8");
-  const lines = configContent.split(/\r?\n/);
-  const deployLineIndex = lines.findIndex((line) => /^deploy\s*:/.test(line));
-  if (deployLineIndex < 0) {
+  try {
+    return parseYamlDocument(configContent);
+  } catch {
+    throw new Error("Hexo _config.yml 格式错误，请修复 YAML 后再构建或部署");
+  }
+}
+
+export async function validateHexoDeployment(blogPath: string): Promise<void> {
+  const { deploy } = await readHexoConfiguration(blogPath);
+  const entries = Array.isArray(deploy) ? deploy : [deploy];
+  if (!entries.length || !entries.every(entry => entry && typeof entry === "object"
+    && typeof entry.type === "string" && entry.type.trim())) {
     throw new Error("Hexo 尚未配置部署方式，请先在 _config.yml 中设置 deploy.type");
   }
-
-  const inlineValue = lines[deployLineIndex].replace(/^deploy\s*:\s*/, "").trim();
-  if (/\btype\s*:/.test(inlineValue)) {
-    return;
-  }
-
-  for (let index = deployLineIndex + 1; index < lines.length; index++) {
-    const line = lines[index];
-    if (line.trim() === "" || line.trimStart().startsWith("#")) {
-      continue;
-    }
-    if (!/^\s/.test(line)) {
-      break;
-    }
-    if (/^\s+(?:-\s*)?type\s*:\s*\S/.test(line)) {
-      return;
-    }
-  }
-
-  throw new Error("Hexo 尚未配置部署方式，请先在 _config.yml 中设置 deploy.type");
 }
 
 async function resolveLocalHexoExecutable(blogPath: string): Promise<string> {
   const packageRequest = "hexo/package.json";
   let packageJsonPath: string;
   try {
-    packageJsonPath = require.resolve(packageRequest, { paths: [blogPath] });
+    // Obsidian's plugin require.resolve does not honor Node's paths option.
+    packageJsonPath = createRequire(path.join(blogPath, "package.json")).resolve(packageRequest);
   } catch {
     throw new Error("博客仓库未安装本地 Hexo，请先在该目录运行 npm install");
   }
@@ -134,7 +137,9 @@ async function resolveLocalHexoExecutable(blogPath: string): Promise<string> {
     if (!binPath) {
       throw new Error("Hexo 包没有声明命令入口");
     }
-    return path.resolve(path.dirname(packageJsonPath), binPath);
+    const executable = path.resolve(path.dirname(packageJsonPath), binPath);
+    if (!(await fs.stat(executable)).isFile()) throw new Error("Hexo 命令入口不是文件");
+    return executable;
   } catch (error) {
     if (error instanceof Error && error.message === "Hexo 包没有声明命令入口") {
       throw error;

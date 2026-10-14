@@ -95,6 +95,15 @@ export function getTargetDirectory(platform: Platform, filePath: string): string
   return lastSlashIndex >= 0 ? normalizedPath.slice(0, lastSlashIndex) : "";
 }
 
+export function isSourcePublishTarget(
+  platform: Platform, sourcePath: string, targetPath: string, vaultRoot?: string
+): boolean {
+  if (platform.isExternal && !vaultRoot) return false;
+  const source = platform.isExternal ? path.resolve(vaultRoot!, sourcePath) : normalizePath(sourcePath);
+  const target = platform.isExternal ? path.resolve(targetPath) : normalizePath(targetPath);
+  return process.platform === "win32" ? source.toLowerCase() === target.toLowerCase() : source === target;
+}
+
 export function formatChildReference(platform: Platform, filePath: string): string {
   return platform.isExternal ? filePath : createWikiLink(filePath);
 }

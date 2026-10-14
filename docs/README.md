@@ -13,6 +13,7 @@
 
 - [CLAUDE.md](../CLAUDE.md)：代码结构、核心不变量和发布约束。
 - [AGENTS.md](../AGENTS.md)：自动化开发必须遵守的简明规则。
+- [稳定性审查记录](reliability-review.md)：本轮修复、故障注入和 Obsidian 宿主验证的范围与限制。
 
 ## 文档职责
 

@@ -3,7 +3,7 @@ import path from "path";
 import { createHash } from "crypto";
 import { App, FileSystemAdapter, Modal, Notice, Plugin, Setting, TFile, TFolder, normalizePath, requestUrl } from "obsidian";
 import { EasyPubSettingTab } from "./settings";
-import { DEFAULT_SETTINGS, PluginSettings, ArticleMeta, ArticleDiff, Platform, PLATFORMS, FrontMatterData, PublishAsset, PicGoImageCacheEntry, PicGoPendingUpload } from "./types";
+import { PluginSettings, ArticleMeta, ArticleDiff, Platform, PLATFORMS, FrontMatterData, PublishAsset, PicGoImageCacheEntry, PicGoPendingUpload } from "./types";
 import {
   parseFrontMatter,
   stringifyFrontMatter,
@@ -24,12 +24,15 @@ import {
   getTargetDirectory,
   getHexoAssetTargetPath,
   getHexoAssetRelativePath,
+  isSourcePublishTarget,
 } from "./utils/platforms";
 import { generateHexoUrl, getHexoRootPath } from "./utils/linkUtils";
 import { prepareImageEmbeds, PreparedImageContent } from "./utils/imageEmbeds";
 import { getPicGoHeartbeatUrl, uploadWithPicGo } from "./utils/picgo";
 import { assertPublishUnchanged, completeControlRoomMetadata } from "./utils/publishSafety";
 import { writeImmutableAsset, writePublishedFile } from "./utils/publishFiles";
+import { withTimeout } from "./utils/async";
+import { normalizeSettings, publishSettingsFingerprint } from "./utils/settings";
 import {
   findControlRoomIntegration,
   getControlRoomStatusUrl,
@@ -50,6 +53,7 @@ const HEXO_IMAGE_EXTENSIONS = new Set([
 
 interface PreparedPublishContent extends PreparedImageContent {
   picgoUploads: PicGoPendingUpload[];
+  imageChecks?: Array<{ sourcePath: string; contentHash: string }>;
 }
 
 export default class EasyPub extends Plugin {
@@ -101,15 +105,13 @@ export default class EasyPub extends Plugin {
   onunload() {}
 
   async loadSettings() {
-    const saved = (await this.loadData()) as Partial<PluginSettings> | null;
-    this.settings = {
-      ...DEFAULT_SETTINGS,
-      ...saved,
-      picgoImageCache: {
-        ...DEFAULT_SETTINGS.picgoImageCache,
-        ...saved?.picgoImageCache,
-      },
-    };
+    try {
+      this.settings = normalizeSettings(await this.loadData());
+    } catch (error) {
+      this.settings = normalizeSettings(null);
+      console.warn("EasyPub could not load settings", error);
+      new Notice("EasyPub 设置读取失败，已使用默认值。请检查插件 data.json 或重新配置发布路径。", 10000);
+    }
   }
 
   async saveSettings() {
@@ -118,11 +120,11 @@ export default class EasyPub extends Plugin {
 
   async testPicGoConnection(): Promise<void> {
     try {
-      const response = await requestUrl({
+      const response = await withTimeout(requestUrl({
         url: getPicGoHeartbeatUrl(this.settings.picgoServerUrl),
         method: "POST",
         throw: false,
-      });
+      }), 10000, "PicGo 连接检查超时，请确认 Server 已启动");
       const data = response.json as { success?: boolean; result?: string };
       if (response.status === 200 && data?.success === true) {
         new Notice("PicGo Server 连接成功");
@@ -187,6 +189,7 @@ export default class EasyPub extends Plugin {
     }
 
     const content = await this.app.vault.read(activeFile);
+    const settingsFingerprint = publishSettingsFingerprint(this.settings);
     const sourceParsed = parseFrontMatter(content);
 
     let pubId = getFrontMatterString(sourceParsed.data, "pub_id");
@@ -216,7 +219,7 @@ export default class EasyPub extends Plugin {
       targetPath = await this.getAvailableTargetPath(platform, desiredTargetPath);
       new Notice(`发现同名文件，将保存为 ${this.getDisplayFileName(platform, targetPath)}`);
     }
-    const preparedContent = this.settings.imageHandling === "picgo"
+    const preparedContent: PreparedPublishContent = this.settings.imageHandling === "picgo"
       ? await this.preparePicGoContent(activeFile, sourceParsed.content)
       : platform.id === "hexo"
         ? await this.prepareHexoContent(activeFile, sourceParsed.content, pubId)
@@ -242,28 +245,36 @@ export default class EasyPub extends Plugin {
       platform,
       assets: preparedContent.assets,
       picgoUploads: preparedContent.picgoUploads,
+      sourceSnapshot: content,
+      settingsFingerprint,
+      imageChecks: preparedContent.imageChecks,
     };
 
     if (!isNew && existingContent !== null) {
       this.publishConfirmationOpen = true;
-      new DiffModal(this.app, diff, async (confirmed) => {
+      try {
+        new DiffModal(this.app, diff, async (confirmed) => {
+          this.publishConfirmationOpen = false;
+          if (confirmed) {
+            if (this.publishInProgress) {
+              new Notice("已有发布任务正在进行，请稍候");
+              return;
+            }
+            this.publishInProgress = true;
+            try {
+              await this.copyAndOpenForEdit(diff, activeFile);
+            } catch (error) {
+              console.error("EasyPub publish failed", error);
+              new Notice(`发布失败：${this.getErrorMessage(error)}`);
+            } finally {
+              this.publishInProgress = false;
+            }
+          }
+        }).open();
+      } catch (error) {
         this.publishConfirmationOpen = false;
-        if (confirmed) {
-          if (this.publishInProgress) {
-            new Notice("已有发布任务正在进行，请稍候");
-            return;
-          }
-          this.publishInProgress = true;
-          try {
-            await this.copyAndOpenForEdit(diff, activeFile);
-          } catch (error) {
-            console.error("EasyPub publish failed", error);
-            new Notice(`发布失败：${this.getErrorMessage(error)}`);
-          } finally {
-            this.publishInProgress = false;
-          }
-        }
-      }).open();
+        throw error;
+      }
     } else {
       await this.copyAndOpenForEdit(diff, activeFile);
     }
@@ -381,6 +392,7 @@ export default class EasyPub extends Plugin {
     sourceFile: TFile
   ) {
     const platform = diff.platform;
+    await this.validatePublishSource(diff, sourceFile);
 
     // 确保发布目录存在
     const publishPath = getTargetDirectory(platform, diff.targetPath);
@@ -394,15 +406,6 @@ export default class EasyPub extends Plugin {
       throw new Error("目标文件刚刚被创建，请重新发布以生成新的安全文件名");
     }
     assertPublishUnchanged(diff.targetContent, previousTargetContent);
-    for (const upload of diff.picgoUploads ?? []) {
-      const attachment = this.app.vault.getAbstractFileByPath(upload.sourcePath);
-      if (!(attachment instanceof TFile)) throw new Error("图片已删除，请重新发布");
-      const current = await this.app.vault.readBinary(attachment);
-      if (createHash("sha256").update(new Uint8Array(current)).digest("hex") !== upload.contentHash) {
-        throw new Error("图片在确认期间发生变化，请重新发布");
-      }
-    }
-
     const picgoResult = await this.resolvePicGoUploads(
       diff.sourceContent,
       diff.picgoUploads ?? []
@@ -412,6 +415,7 @@ export default class EasyPub extends Plugin {
     let targetWritten = false;
     try {
       await this.copyPublishAssets(diff.assets ?? [], createdAssets);
+      await this.validatePublishSource(diff, sourceFile);
       const current = await this.publishPathExists(platform, diff.targetPath)
         ? await this.readPublishFile(platform, diff.targetPath) : null;
       assertPublishUnchanged(diff.targetContent, current);
@@ -468,7 +472,36 @@ export default class EasyPub extends Plugin {
     }
 
     // 打开发布路径中的文章供编辑
-    await this.openPublishedFile(diff.targetPath, platform);
+    try {
+      await this.openPublishedFile(diff.targetPath, platform);
+    } catch (error) {
+      console.warn("EasyPub saved the article but could not open it", error);
+      new Notice(`发布稿已保存，但无法自动打开：${diff.targetPath}`, 10000);
+    }
+  }
+
+  private async validatePublishSource(diff: ArticleDiff, sourceFile: TFile): Promise<void> {
+    const adapter = this.app.vault.adapter;
+    if (isSourcePublishTarget(diff.platform, sourceFile.path, diff.targetPath,
+      adapter instanceof FileSystemAdapter ? adapter.getBasePath() : undefined)) {
+      throw new Error("当前文件就是目标发布稿，请先打开源文章再发布");
+    }
+    if (diff.settingsFingerprint !== undefined
+      && diff.settingsFingerprint !== publishSettingsFingerprint(this.settings)) {
+      throw new Error("发布设置已变化，请重新发布并确认新的差异");
+    }
+    if (diff.sourceSnapshot !== undefined && (sourceFile.path !== diff.sourcePath
+      || await this.app.vault.read(sourceFile) !== diff.sourceSnapshot)) {
+      throw new Error("源文章已变化，请重新发布并确认新的差异");
+    }
+    for (const image of diff.imageChecks ?? diff.picgoUploads ?? []) {
+      const attachment = this.app.vault.getAbstractFileByPath(image.sourcePath);
+      if (!(attachment instanceof TFile)) throw new Error("图片已删除，请重新发布");
+      const current = await this.app.vault.readBinary(attachment);
+      if (createHash("sha256").update(new Uint8Array(current)).digest("hex") !== image.contentHash) {
+        throw new Error("图片在确认期间发生变化，请重新发布");
+      }
+    }
   }
 
   async updateSourceFile(
@@ -645,16 +678,15 @@ export default class EasyPub extends Plugin {
       return;
     }
 
-    const controlRoom = await findControlRoomIntegration(this.settings.hexoRepoPath);
-    if (controlRoom) {
-      new Notice("此博客启用了部署保护，请在管理后台完成源码同步与部署");
-      await this.openHexoControlRoom();
-      return;
-    }
-
     this.deployInProgress = true;
-    new Notice("正在部署 Hexo...");
     try {
+      const controlRoom = await findControlRoomIntegration(this.settings.hexoRepoPath);
+      if (controlRoom) {
+        new Notice("此博客启用了部署保护，请在管理后台完成源码同步与部署");
+        await this.openHexoControlRoom();
+        return;
+      }
+      new Notice("正在部署 Hexo...");
       await deployHexo(this.settings.hexoRepoPath);
       try {
         await this.refreshActiveHexoPublishUrl();
@@ -690,11 +722,11 @@ export default class EasyPub extends Plugin {
       const session = await readControlRoomSession(integration.sessionPath);
       if (session) {
         try {
-          const response = await requestUrl({
+          const response = await withTimeout(requestUrl({
             url: getControlRoomStatusUrl(session),
             method: "GET",
             throw: false,
-          });
+          }), 5000, "博客管理后台响应超时");
           if (response.status === 200) {
             await electron.shell.openExternal(session.url);
             new Notice("已打开博客管理后台");
@@ -829,6 +861,7 @@ export default class EasyPub extends Plugin {
     }
 
     const uploads = new Map<string, PicGoPendingUpload>();
+    const imageChecks: Array<{ sourcePath: string; contentHash: string }> = [];
     const resolvedImages = new Map<string, { url: string; alt: string }>();
     const prepared = await prepareImageEmbeds(content, async (linkPath) => {
       const attachment = this.app.metadataCache.getFirstLinkpathDest(
@@ -855,6 +888,7 @@ export default class EasyPub extends Plugin {
       const contentHash = createHash("sha256")
         .update(new Uint8Array(binary))
         .digest("hex");
+      imageChecks.push({ sourcePath: attachment.path, contentHash });
       const cached = this.settings.picgoImageCache[attachment.path];
       if (
         cached?.hash === contentHash
@@ -865,7 +899,7 @@ export default class EasyPub extends Plugin {
         return result;
       }
 
-      const token = `easy-pub-picgo://${contentHash.slice(0, 16)}`;
+      const token = `easy-pub-picgo://${createHash("sha256").update(attachment.path).digest("hex")}${contentHash}`;
       uploads.set(attachment.path, {
         sourcePath: attachment.path,
         localPath: adapter.getFullPath(attachment.path),
@@ -880,6 +914,7 @@ export default class EasyPub extends Plugin {
     return {
       ...prepared,
       picgoUploads: [...uploads.values()],
+      imageChecks,
     };
   }
 
@@ -901,13 +936,13 @@ export default class EasyPub extends Plugin {
         secret: this.settings.picgoServerSecret,
       },
       async (request) => {
-        const response = await requestUrl({
+        const response = await withTimeout(requestUrl({
           url: request.url,
           method: "POST",
           headers: request.headers,
           body: request.body,
           throw: false,
-        });
+        }), 60000, "PicGo 上传等待超过 60 秒，本次发布已停止；请先检查 PicGo 中的上传结果");
         return { status: response.status, json: response.json };
       }
     );

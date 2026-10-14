@@ -1,4 +1,5 @@
 import matter from "gray-matter";
+import { randomBytes } from "crypto";
 import { FrontMatterData, ParsedFrontMatter } from "../types";
 
 const SOURCE_ONLY_PUBLISHED_OMIT_FIELDS = new Set([
@@ -19,7 +20,8 @@ export interface PublishedFrontMatterMergeOptions {
 }
 
 export function parseFrontMatter(content: string): ParsedFrontMatter {
-  const result = matter(content);
+  const rejectExecutable = () => { throw new Error("不支持可执行的 JavaScript Front Matter，请使用 YAML 或 JSON"); };
+  const result = matter(content, { engines: { javascript: rejectExecutable, js: rejectExecutable } });
   return {
     data: isFrontMatterData(result.data) ? result.data : {},
     content: result.content,
@@ -27,7 +29,17 @@ export function parseFrontMatter(content: string): ParsedFrontMatter {
 }
 
 export function stringifyFrontMatter(content: string, data: FrontMatterData): string {
-  return matter.stringify(content, data);
+  // This is already the body: do not parse a leading horizontal rule or code
+  // example as a second front-matter block (or execute a language engine).
+  return matter.stringify({ content }, data);
+}
+
+export function parseYamlDocument(content: string): FrontMatterData {
+  // A distinct delimiter keeps YAML document markers inside the parser input.
+  const delimiter = `easy-pub-${randomBytes(16).toString("hex")}`;
+  const result = matter(`${delimiter}\n${content}\n${delimiter}`, { delimiters: delimiter });
+  if (!isFrontMatterData(result.data)) throw new Error("YAML 配置必须是键值对象");
+  return result.data;
 }
 
 export function generatePubId(): string {

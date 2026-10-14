@@ -18,6 +18,7 @@ import EasyPubPlugin from "../main";
 import { TFile } from "obsidian";
 import { DEFAULT_SETTINGS, PLATFORMS } from "../types";
 import { getHexoAssetTargetPath } from "../utils/platforms";
+import { runReliabilityTests } from "./reliability.test";
 import {
   getPicGoHeartbeatUrl,
   normalizePicGoUploadUrl,
@@ -31,6 +32,7 @@ import {
 } from "../utils/controlRoom";
 
 async function run() {
+  await runReliabilityTests();
   const assetsRoot = await mkdtemp(path.join(os.tmpdir(), 'easy-pub-assets-'));
   try {
     const bytes = Buffer.from('fixture image bytes');
@@ -347,6 +349,7 @@ async function run() {
       [
         'const fs = require("fs");',
         'const path = require("path");',
+        'if (process.versions.electron) throw new Error("Hexo must run in Node");',
         'fs.appendFileSync(path.join(process.cwd(), "commands.log"), process.argv.slice(2).join(" ") + "\\n");',
         'if (process.argv[2] === "deploy" && fs.existsSync(path.join(process.cwd(), "fail-deploy"))) {',
         '  console.error("simulated deploy failure");',

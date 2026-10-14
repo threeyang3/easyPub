@@ -14,6 +14,8 @@ import {
 } from "./utils/frontMatter";
 import { buildHexo, deployHexo, validateHexoBlog } from "./utils/hexoCommands";
 import { DiffModal } from "./modals/DiffModal";
+import { BatchPubIdModal } from "./modals/BatchPubIdModal";
+import { fillMissingPubIds, externalPubIdDocuments, needsPubId, PubIdBatchResult } from "./utils/batchPubIds";
 import {
   getPublishPath,
   getTargetPath,
@@ -61,6 +63,7 @@ export default class EasyPub extends Plugin {
   private publishInProgress = false;
   private publishConfirmationOpen = false;
   private deployInProgress = false;
+  private pubIdBatchInProgress = false;
 
   async onload() {
     await this.loadSettings();
@@ -100,6 +103,46 @@ export default class EasyPub extends Plugin {
     });
 
     this.addSettingTab(new EasyPubSettingTab(this.app, this));
+    this.addCommand({
+      id: "fill-missing-pub-ids",
+      name: "批量补齐文件夹中的 pub_id",
+      callback: () => this.showBatchPubIdModal(),
+    });
+  }
+
+  showBatchPubIdModal() {
+    new BatchPubIdModal(this.app, this.app.workspace.getActiveFile()?.parent?.path || "/",
+      (scope, folder) => this.fillFolderPubIds(scope, folder)).open();
+  }
+
+  async fillFolderPubIds(scope: "vault" | "external", folder: string): Promise<PubIdBatchResult> {
+    if (this.pubIdBatchInProgress || this.publishInProgress || this.publishConfirmationOpen || this.deployInProgress) {
+      throw new Error("已有 EasyPub 任务正在进行，请稍候");
+    }
+    this.pubIdBatchInProgress = true;
+    try {
+      if (scope === "external") return await fillMissingPubIds(await externalPubIdDocuments(folder.trim()));
+      const input = folder.trim().replace(/\\/g, "/");
+      if (!input) throw new Error("请输入文件夹路径；/ 表示整个 Vault");
+      if (input !== "/" && (path.isAbsolute(input) || input.split("/").includes(".."))) {
+        throw new Error("Vault 文件夹请使用库内相对路径");
+      }
+      const root = input === "/" ? "" : normalizePath(input).replace(/\/$/, "");
+      const directory = root ? this.app.vault.getAbstractFileByPath(root) : this.app.vault.getRoot();
+      if (!(directory instanceof TFolder)) throw new Error("Vault 文件夹不存在");
+      const files = this.app.vault.getMarkdownFiles().filter(file => !root || file.path.startsWith(`${root}/`));
+      return await fillMissingPubIds(files.map(file => ({
+        path: file.path,
+        read: () => this.app.vault.read(file),
+        assign: async (id: string) => {
+          let added = false;
+          await this.app.fileManager.processFrontMatter(file, data => {
+            if (needsPubId(data.pub_id)) { data.pub_id = id; added = true; }
+          });
+          return added;
+        },
+      })));
+    } finally { this.pubIdBatchInProgress = false; }
   }
 
   onunload() {}
@@ -152,7 +195,7 @@ export default class EasyPub extends Plugin {
   }
 
   async preparePublish(platform: Platform) {
-    if (this.publishInProgress || this.publishConfirmationOpen) {
+    if (this.publishInProgress || this.publishConfirmationOpen || this.pubIdBatchInProgress) {
       new Notice("已有发布任务正在进行，请稍候");
       return;
     }
@@ -673,7 +716,7 @@ export default class EasyPub extends Plugin {
       new Notice("请先在设置中填写 Hexo 仓库路径");
       return;
     }
-    if (this.deployInProgress) {
+    if (this.deployInProgress || this.pubIdBatchInProgress) {
       new Notice("Hexo 任务正在进行，请稍候");
       return;
     }
@@ -751,7 +794,7 @@ export default class EasyPub extends Plugin {
       new Notice("请先在设置中填写 Hexo 仓库路径");
       return;
     }
-    if (this.deployInProgress) {
+    if (this.deployInProgress || this.pubIdBatchInProgress) {
       new Notice("Hexo 任务正在进行，请稍候");
       return;
     }

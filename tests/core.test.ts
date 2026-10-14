@@ -19,6 +19,7 @@ import { TFile } from "obsidian";
 import { DEFAULT_SETTINGS, PLATFORMS } from "../types";
 import { getHexoAssetTargetPath } from "../utils/platforms";
 import { runReliabilityTests } from "./reliability.test";
+import { runBatchPubIdTests } from "./batchPubIds.test";
 import {
   getPicGoHeartbeatUrl,
   normalizePicGoUploadUrl,
@@ -32,6 +33,7 @@ import {
 } from "../utils/controlRoom";
 
 async function run() {
+  await runBatchPubIdTests();
   await runReliabilityTests();
   const assetsRoot = await mkdtemp(path.join(os.tmpdir(), 'easy-pub-assets-'));
   try {

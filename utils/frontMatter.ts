@@ -19,9 +19,10 @@ export interface PublishedFrontMatterMergeOptions {
   forcePublishUrl?: boolean;
 }
 
-export function parseFrontMatter(content: string): ParsedFrontMatter {
+export function parseFrontMatter(content: string, requireMapping = false): ParsedFrontMatter {
   const rejectExecutable = () => { throw new Error("不支持可执行的 JavaScript Front Matter，请使用 YAML 或 JSON"); };
   const result = matter(content, { engines: { javascript: rejectExecutable, js: rejectExecutable } });
+  if (requireMapping && !isFrontMatterData(result.data)) throw new Error("Front Matter 必须是键值对象");
   return {
     data: isFrontMatterData(result.data) ? result.data : {},
     content: result.content,

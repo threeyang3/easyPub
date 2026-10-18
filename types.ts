@@ -6,6 +6,7 @@ export interface PluginSettings {
   picgoServerUrl: string;
   picgoServerSecret: string;
   picgoImageCache: Record<string, PicGoImageCacheEntry>;
+  wechat: WechatSettings;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -16,6 +17,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   picgoServerUrl: "http://127.0.0.1:36677/upload",
   picgoServerSecret: "",
   picgoImageCache: {},
+  wechat: { appId: "", encryptedSecret: "", defaultAuthor: "", assets: {}, drafts: {} },
 };
 
 export interface PicGoImageCacheEntry {
@@ -121,4 +123,55 @@ export interface PicGoPendingUpload {
   localPath: string;
   contentHash: string;
   token: string;
+}
+
+export interface WechatCrop { x: number; y: number; width: number; height: number }
+export interface WechatArticleSettings {
+  title?: string;
+  author?: string;
+  digest?: string;
+  sourceUrl?: string;
+  cover?: string;
+  cropWide?: WechatCrop;
+  cropSquare?: WechatCrop;
+}
+export interface WechatArticle {
+  title: string;
+  author: string;
+  digest: string;
+  content: string;
+  content_source_url: string;
+  thumb_media_id: string;
+  cover_info: { crop_percent_list: Array<{ ratio: string; x1: string; y1: string; x2: string; y2: string }> };
+}
+export interface WechatAssetCache { mediaId?: string; url: string }
+export interface WechatDraftState {
+  mediaId?: string;
+  fingerprint?: string;
+  syncedAt?: string;
+  uncertain?: boolean;
+}
+export interface WechatSettings {
+  appId: string;
+  encryptedSecret: string;
+  defaultAuthor: string;
+  assets: Record<string, WechatAssetCache>;
+  drafts: Record<string, WechatDraftState>;
+}
+export interface WechatImage {
+  source: string;
+  hash: string;
+  originalHash: string;
+  bytes: Uint8Array;
+  mime: string;
+  width: number;
+  height: number;
+  previewUrl: string;
+  localPath?: string;
+  originalSize: number;
+}
+export interface WechatPreparedDocument {
+  html: string;
+  images: WechatImage[];
+  issues: string[];
 }

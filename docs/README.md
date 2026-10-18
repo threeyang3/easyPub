@@ -8,12 +8,14 @@
 2. [发布机制与平台行为](publishing.md)：了解目标路径、更新规则、Front Matter、Hexo 构建与部署。
 3. [PicGo 图片上传](picgo.md)（可选）：需要把本地图片转换为网络链接时阅读。
 4. [Blog Control Room 接入](control-room.md)（可选）：Hexo 仓库提供兼容管理后台时阅读。
+5. [微信公众号工作台](wechat.md)：本地成稿、配图、封面、预览与微信草稿箱同步。
 
 ## 开发者入口
 
 - [CLAUDE.md](../CLAUDE.md)：代码结构、核心不变量和发布约束。
 - [AGENTS.md](../AGENTS.md)：自动化开发必须遵守的简明规则。
 - [稳定性审查记录](reliability-review.md)：本轮修复、故障注入和 Obsidian 宿主验证的范围与限制。
+- [微信公众号验收记录](wechat-acceptance.md)：自动化、原生宿主验证及真实账号待验收清单。
 
 ## 文档职责
 
@@ -23,4 +25,5 @@
 | `docs/publishing.md` | 日常使用者 | 发布流程、平台差异、元数据和 Hexo 行为 |
 | `docs/picgo.md` | PicGo 使用者 | 图床配置、安全边界和排障 |
 | `docs/control-room.md` | 兼容 Hexo 仓库使用者 | 后台发现、会话安全和部署边界 |
+| `docs/wechat.md` | 公众号使用者 | 成稿保护、封面裁剪、微信配图与草稿恢复 |
 | `CLAUDE.md` / `AGENTS.md` | 开发者与自动化工具 | 实现约束，不重复用户操作指南 |

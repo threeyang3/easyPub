@@ -35,6 +35,12 @@ import { assertPublishUnchanged, completeControlRoomMetadata } from "./utils/pub
 import { writeImmutableAsset, writePublishedFile } from "./utils/publishFiles";
 import { withTimeout } from "./utils/async";
 import { normalizeSettings, publishSettingsFingerprint } from "./utils/settings";
+import { WechatApi } from "./utils/wechatApi";
+import { decryptWechatSecret, encryptWechatSecret } from "./utils/wechatSecret";
+import { rebaseWechatImages } from "./utils/wechatMarkdown";
+import { relativeVaultAttachment } from "./utils/platforms";
+import { WECHAT_VIEW, WechatView, isWechatDraft } from "./views/WechatView";
+import { WechatSetupModal } from "./modals/WechatSetupModal";
 import {
   findControlRoomIntegration,
   getControlRoomStatusUrl,
@@ -64,9 +70,23 @@ export default class EasyPub extends Plugin {
   private publishConfirmationOpen = false;
   private deployInProgress = false;
   private pubIdBatchInProgress = false;
+  wechatSyncInProgress = false;
+  wechatCredentialRevision = 0;
+  private wechatSessionSecret = "";
+  private wechatApi?: WechatApi;
+  private wechatApiIdentity = "";
 
   async onload() {
     await this.loadSettings();
+
+    this.registerView(WECHAT_VIEW, leaf => new WechatView(leaf, this));
+    this.addCommand({ id: "wechat-setup", name: "引导配置微信公众号", callback: () => this.openWechatSetup() });
+    this.addCommand({ id: "wechat-preview", name: "预览并同步公众号草稿", callback: () => {
+      void this.openActiveWechatDraft().catch(error => new Notice((error as Error).message));
+    } });
+    this.addCommand({ id: "wechat-refresh-source", name: "从源文章更新公众号本地稿（确认后替换正文）", callback: () => {
+      void this.preparePublish(PLATFORMS.find(p => p.id === "wechat")!, true);
+    } });
 
     // 发布命令 - 显示平台选择
     this.addRibbonIcon("upload-cloud", "Publish", () => {
@@ -145,7 +165,83 @@ export default class EasyPub extends Plugin {
     } finally { this.pubIdBatchInProgress = false; }
   }
 
-  onunload() {}
+  onunload() { this.wechatSessionSecret = ""; this.wechatApi = undefined; }
+
+  relativeWechatAttachment(draftPath: string, attachmentPath: string): string {
+    return relativeVaultAttachment(draftPath, attachmentPath);
+  }
+
+  async setWechatSecret(secret: string): Promise<boolean> {
+    this.wechatSessionSecret = secret;
+    this.settings.wechat.encryptedSecret = encryptWechatSecret(secret);
+    this.wechatCredentialRevision++;
+    this.wechatApi = undefined;
+    await this.saveSettings();
+    return Boolean(this.settings.wechat.encryptedSecret);
+  }
+
+  hasWechatCredentials(): boolean {
+    return Boolean(this.settings.wechat.appId && (this.wechatSessionSecret || decryptWechatSecret(this.settings.wechat.encryptedSecret)));
+  }
+
+  openWechatSetup(finished?: () => void): void { new WechatSetupModal(this, finished).open(); }
+
+  async saveWechatConfiguration(appId: string, secret: string, author: string): Promise<boolean> {
+    if (this.wechatSyncInProgress) throw new Error("请等待当前公众号同步任务完成后再修改账号");
+    if (!appId || /\s/.test(appId)) throw new Error("请填写有效的 AppID，不应包含空格");
+    if (!secret && (appId !== this.settings.wechat.appId || !this.hasWechatCredentials())) throw new Error("请填写此账号的 AppSecret");
+    const previous = { appId: this.settings.wechat.appId, encryptedSecret: this.settings.wechat.encryptedSecret, defaultAuthor: this.settings.wechat.defaultAuthor };
+    const session = this.wechatSessionSecret;
+    Object.assign(this.settings.wechat, { appId, defaultAuthor: author });
+    if (secret) { this.wechatSessionSecret = secret; this.settings.wechat.encryptedSecret = encryptWechatSecret(secret); }
+    this.wechatCredentialRevision++; this.wechatApi = undefined;
+    try { await this.saveSettings(); }
+    catch { Object.assign(this.settings.wechat, previous); this.wechatSessionSecret = session; this.wechatCredentialRevision++; throw new Error("公众号配置保存失败，请重试"); }
+    return Boolean(this.settings.wechat.encryptedSecret);
+  }
+
+  async setWechatAppId(appId: string): Promise<void> {
+    if (appId === this.settings.wechat.appId) return;
+    this.settings.wechat.appId = appId;
+    this.settings.wechat.encryptedSecret = "";
+    this.wechatSessionSecret = "";
+    this.wechatApi = undefined;
+    this.wechatCredentialRevision++;
+    await this.saveSettings();
+  }
+
+  getWechatApi(): WechatApi {
+    const secret = this.wechatSessionSecret || decryptWechatSecret(this.settings.wechat.encryptedSecret);
+    const identity = createHash("sha256").update(this.settings.wechat.appId + "\0" + secret).digest("hex");
+    if (!this.wechatApi || identity !== this.wechatApiIdentity) {
+      this.wechatApi = new WechatApi(this.settings.wechat.appId, secret);
+      this.wechatApiIdentity = identity;
+    }
+    return this.wechatApi;
+  }
+
+  async openWechatBackend(): Promise<void> {
+    const electron = require("electron") as { shell?: { openExternal(url: string): Promise<void> } };
+    if (!electron.shell) throw new Error("当前环境无法打开桌面浏览器");
+    await electron.shell.openExternal("https://mp.weixin.qq.com/");
+  }
+
+  async openActiveWechatDraft(): Promise<void> {
+    const file = this.app.workspace.getActiveFile();
+    if (!file || file.extension !== "md" || !isWechatDraft(file, await this.app.vault.read(file), this)) {
+      throw new Error("请先打开公众号本地稿；可从源文章选择“发布 → 微信公众号”生成");
+    }
+    await this.openWechatDraft(file);
+  }
+
+  async openWechatDraft(file: TFile): Promise<void> {
+    const existing = this.app.workspace.getLeavesOfType(WECHAT_VIEW)[0];
+    const leaf = existing ?? this.app.workspace.getRightLeaf(false);
+    if (!leaf) throw new Error("无法打开公众号工作台");
+    if (!existing) await leaf.setViewState({ type: WECHAT_VIEW, active: true });
+    await (leaf.view as WechatView).bind(file);
+    await this.app.workspace.revealLeaf(leaf);
+  }
 
   async loadSettings() {
     try {
@@ -194,7 +290,7 @@ export default class EasyPub extends Plugin {
     }).open();
   }
 
-  async preparePublish(platform: Platform) {
+  async preparePublish(platform: Platform, updateWechatFromSource = false) {
     if (this.publishInProgress || this.publishConfirmationOpen || this.pubIdBatchInProgress) {
       new Notice("已有发布任务正在进行，请稍候");
       return;
@@ -202,7 +298,7 @@ export default class EasyPub extends Plugin {
 
     this.publishInProgress = true;
     try {
-      await this.performPublish(platform);
+      await this.performPublish(platform, updateWechatFromSource);
     } catch (error) {
       console.error("EasyPub publish failed", error);
       new Notice(`发布失败：${this.getErrorMessage(error)}`);
@@ -211,7 +307,7 @@ export default class EasyPub extends Plugin {
     }
   }
 
-  private async performPublish(platform: Platform) {
+  private async performPublish(platform: Platform, updateWechatFromSource = false) {
     const activeFile = this.app.workspace.getActiveFile();
     if (!activeFile) {
       new Notice("请先打开要发布的文章");
@@ -234,6 +330,11 @@ export default class EasyPub extends Plugin {
     const content = await this.app.vault.read(activeFile);
     const settingsFingerprint = publishSettingsFingerprint(this.settings);
     const sourceParsed = parseFrontMatter(content);
+    if (platform.id === "wechat" && isWechatDraft(activeFile, content, this)) {
+      if (updateWechatFromSource) throw new Error("请打开源文章后执行更新，不会把本地成稿再次当作源文章");
+      await this.openWechatDraft(activeFile);
+      return;
+    }
 
     let pubId = getFrontMatterString(sourceParsed.data, "pub_id");
     let isNew = true;
@@ -250,6 +351,14 @@ export default class EasyPub extends Plugin {
       pubId = generatePubId();
     }
 
+    if (platform.id === "wechat" && existingPath && !updateWechatFromSource) {
+      const draft = this.app.vault.getAbstractFileByPath(existingPath);
+      if (draft instanceof TFile) {
+        await this.openPublishedFile(existingPath, platform);
+        return;
+      }
+    }
+
     const sourceDataWithPubId: FrontMatterData = {
       ...sourceParsed.data,
       pub_id: pubId,
@@ -262,7 +371,9 @@ export default class EasyPub extends Plugin {
       targetPath = await this.getAvailableTargetPath(platform, desiredTargetPath);
       new Notice(`发现同名文件，将保存为 ${this.getDisplayFileName(platform, targetPath)}`);
     }
-    const preparedContent: PreparedPublishContent = this.settings.imageHandling === "picgo"
+    const preparedContent: PreparedPublishContent = platform.id === "wechat"
+      ? { content: await rebaseWechatImages(this.app, sourceParsed.content, activeFile.path, targetPath), assets: [], picgoUploads: [] }
+      : this.settings.imageHandling === "picgo"
       ? await this.preparePicGoContent(activeFile, sourceParsed.content)
       : platform.id === "hexo"
         ? await this.prepareHexoContent(activeFile, sourceParsed.content, pubId)
@@ -276,6 +387,11 @@ export default class EasyPub extends Plugin {
       new Date().toISOString(),
       targetPath
     );
+    if (platform.id === "wechat") {
+      // The local draft owns its platform-specific settings, even on an explicit
+      // source refresh. Never import a source's WeChat settings over them.
+      proposedPublishedData.wechat = existingContent ? parseFrontMatter(existingContent).data.wechat ?? {} : {};
+    }
 
     const diff: ArticleDiff = {
       pub_id: pubId,
@@ -360,7 +476,9 @@ export default class EasyPub extends Plugin {
       if (!(await this.publishDirectoryExists(platform, publishPath))) {
         continue;
       }
-      const files = await this.listPublishFiles(platform, publishPath);
+      const files = platform.id === "wechat"
+        ? this.app.vault.getMarkdownFiles().filter(file => file.path.startsWith(`${publishPath}/`)).map(file => file.path)
+        : await this.listPublishFiles(platform, publishPath);
       for (const file of files) {
         if (file.endsWith(".md")) {
           const content = await this.readPublishFile(platform, file);
@@ -591,6 +709,7 @@ export default class EasyPub extends Plugin {
       const leaf = this.app.workspace.getLeaf(false);
       await leaf.openFile(file);
       new Notice(`已打开${platform.name}发布稿`);
+      if (platform.id === "wechat") await this.openWechatDraft(file);
       return;
     }
 

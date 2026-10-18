@@ -54,10 +54,46 @@ export class EasyPubSettingTab extends PluginSettingTab {
           })
       );
 
+    new Setting(containerEl).setName("微信公众号").setHeading();
+    new Setting(containerEl).setName("首次配置向导").setDesc("准备账号 → 保存凭据 → 检查连接；也可用于更换账号")
+      .addButton(button => button.setButtonText("引导配置公众号").setCta().onClick(() => this.plugin.openWechatSetup(() => this.display())));
+    new Setting(containerEl).setName("AppID").setDesc("单个公众号；切换账号后素材缓存与草稿关联自动隔离")
+      .addText(text => text.setValue(this.plugin.settings.wechat.appId).onChange(async value => {
+        await this.plugin.setWechatAppId(value.trim());
+      }));
+    new Setting(containerEl).setName("AppSecret")
+      .setDesc("点击保存后使用系统加密保存；系统加密不可用时仅在本次会话有效。不会显示已保存的密钥。")
+      .addText(text => {
+        text.inputEl.type = "password";
+        text.setPlaceholder(this.plugin.settings.wechat.encryptedSecret ? "已加密保存；输入新值替换" : "输入 AppSecret");
+        text.inputEl.autocomplete = "off";
+        new Setting(containerEl).setName("保存密钥").addButton(button => button.setButtonText("保存 AppSecret").onClick(async () => {
+          if (!text.getValue().trim()) return;
+          try {
+            const persisted = await this.plugin.setWechatSecret(text.getValue().trim());
+            text.setValue("");
+            text.setPlaceholder(persisted ? "已加密保存" : "本次会话已保存，重启后需重新输入");
+          } catch { text.setPlaceholder("密钥保存失败，请重试"); }
+        }));
+      });
+    new Setting(containerEl).setName("默认作者").setDesc("仅用于尚未设置作者的公众号本地稿")
+      .addText(text => text.setValue(this.plugin.settings.wechat.defaultAuthor).onChange(async value => {
+        this.plugin.settings.wechat.defaultAuthor = value;
+        await this.plugin.saveSettings();
+      }));
+    const connection = new Setting(containerEl).setName("公众号连接检查")
+      .setDesc("检查令牌、素材读取和草稿读取；不会上传图片或创建草稿。需配置出口 IP 白名单。")
+      .addButton(button => button.setButtonText("检查连接").onClick(async () => {
+        button.setDisabled(true);
+        try { connection.setDesc((await this.plugin.getWechatApi().checkConnection()).join("；")); }
+        catch (error) { connection.setDesc((error as Error).message); }
+        finally { button.setDisabled(false); }
+      }));
+
     new Setting(containerEl).setName("图片").setHeading();
     new Setting(containerEl)
       .setName("本地图片处理")
-      .setDesc("默认复制到 Hexo；也可以交给 PicGo 上传并写入网络链接")
+      .setDesc("Hexo、知乎、小红书的图片设置；微信公众号使用独立的微信素材上传流程")
       .addDropdown((dropdown) =>
         dropdown
           .addOption("local", "平台默认")

@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-19",
+  "title": "EasyPub接口测试-可删除",
+  "sameDraft": true,
+  "digest": "仅用于验证 EasyPub 的图片上传、封面裁剪和草稿更新，可随时删除。不会自动发布。",
+  "listItems": 3,
+  "listWhitespace": 0,
+  "coverInfo": {
+    "crop_percent_list": [
+      {
+        "ratio": "2.35_1",
+        "x1": "0",
+        "y1": "0",
+        "x2": "1",
+        "y2": "0.638298"
+      },
+      {
+        "ratio": "1_1",
+        "x1": "0",
+        "y1": "0",
+        "x2": "0.666667",
+        "y2": "1"
+      }
+    ]
+  },
+  "images": 1,
+  "editorVisualAcceptance": "user screenshot confirms visible list spacing, body image and wide cover; square cover and mobile preview pending",
+  "published": false
+}

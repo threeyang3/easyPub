@@ -1,0 +1,212 @@
+import { chromium } from "playwright-core";
+import { build } from "esbuild";
+import { readFile, mkdtemp, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import assert from "node:assert/strict";
+
+const chrome = process.env.EASYPUB_CHROME_PATH ?? [
+  "C:/Program Files/Google/Chrome/Application/chrome.exe",
+  "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+  "/usr/bin/google-chrome", "/usr/bin/chromium",
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+].find(existsSync);
+if (!chrome) throw new Error("Set EASYPUB_CHROME_PATH to an installed Chromium browser to run UI tests.");
+const bundle = await build({ entryPoints: ["tests/fixtures/wechat-workbench.ts"], bundle: true, platform: "browser", format: "esm", write: false,
+  plugins: [{ name: "browser-fixtures", setup(build) {
+    build.onResolve({ filter: /^obsidian$/ }, () => ({ path: path.resolve("tests/fixtures/wechat-obsidian.ts") }));
+    build.onResolve({ filter: /^crypto$/ }, () => ({ path: "crypto", namespace: "fixture" }));
+    build.onResolve({ filter: /^path$/ }, () => ({ path: "path", namespace: "path-fixture" }));
+    build.onLoad({ filter: /.*/, namespace: "path-fixture" }, () => ({ contents: `export default { join: (...parts) => parts.join('/') };`, loader: "js" }));
+    // Deterministic fixture hashes only; real SHA-256 is covered by Node tests.
+    build.onLoad({ filter: /.*/, namespace: "fixture" }, () => ({ contents: `
+      export const createHash = () => ({ data: '', update(v) { this.data = typeof v === 'string' ? v : Array.from(v).join(','); return this; }, digest() { let h=2166136261; for(const c of this.data) h=Math.imul(h^c.charCodeAt(0),16777619); return (h>>>0).toString(16).padStart(8,'0').repeat(8); } });
+      export const randomBytes = n => ({ toString: () => 'a'.repeat(n*2) });
+    `, loader: "js" }));
+  } }],
+});
+const temp = await mkdtemp(path.join(os.tmpdir(), "easy-pub-ui-"));
+const browser = await chromium.launch({ executablePath: chrome, headless: true });
+try {
+  const page = await browser.newPage({ viewport: { width: 1000, height: 1000 }, deviceScaleFactor: 1 });
+  const errors = [];
+  page.on("pageerror", error => { errors.push(error.message); console.error("Browser error:", error.message); });
+  await page.setContent(`<!doctype html><html><head><meta charset="UTF-8"></head><body><main><h1>本地公众号成稿</h1><p>该区域模拟 Obsidian 编辑区，公众号样式不应影响这里。</p><ol id="unrelated"><li>其他平台的内容</li></ol></main><aside id="workbench"></aside></body></html>`);
+  await page.addStyleTag({ content: `:root { --background-primary:#fafbf9;--background-secondary:#f0f2ef;--background-modifier-border:#dce2dc;--text-muted:#6e786f;--text-normal:#253329;--text-error:#bd3b3b;--text-warning:#9b640f; } * { box-sizing:border-box; } body { margin:0;display:grid;grid-template-columns:1fr 450px;height:100vh;font:14px sans-serif;color:#253329;background:#f5f6f4; } main { padding:40px; } aside { height:100vh;background:var(--background-primary);border-left:1px solid #dce2dc; } button,input,textarea,select { font:inherit;border:1px solid #cfd7ce;border-radius:4px;padding:7px;background:#fff;color:inherit; } button { cursor:pointer; } button:disabled{opacity:.4;} details { font-size:13px; } small {font-size:11px;} button.mod-cta{font-weight:600;} ` });
+  const unrelatedBefore = await page.locator("#unrelated").evaluate(el => getComputedStyle(el).paddingLeft);
+  await page.addStyleTag({ content: await readFile("styles.css", "utf8") });
+  await page.addScriptTag({ content: bundle.outputFiles[0].text, type: "module" });
+  await page.waitForFunction(() => window.fixtureReady === true);
+  assert.equal(await page.locator("#unrelated").evaluate(el => getComputedStyle(el).paddingLeft), unrelatedBefore);
+  await page.getByRole("button", { name: "同步草稿箱", exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "同步草稿箱", exact: true }).isDisabled(), false);
+  assert.match(await page.locator(".epw-identity").innerText(), /发布\/微信公众号/);
+  // Pause must cancel queued refreshes and discard an already running render.
+  await page.evaluate(() => {
+    window.fixture.modify("暂停前排队内容");
+    [...document.querySelectorAll('button')].find(b => b.textContent === '暂停刷新').click();
+  });
+  await page.waitForTimeout(800);
+  assert.doesNotMatch(await page.locator(".epw-paper").innerText(), /暂停前排队内容/);
+  assert.equal(await page.getByRole("button", { name: "同步草稿箱", exact: true }).isDisabled(), true);
+  await page.getByRole("button", { name: "恢复刷新", exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector(".epw-footer .mod-cta").disabled);
+  await page.evaluate(() => { window.fixture.setDelay(300); window.fixture.modify("暂停时正在渲染"); });
+  await page.waitForFunction(() => document.querySelector(".epw-status").textContent.includes("正在检查"));
+  await page.getByRole("button", { name: "暂停刷新", exact: true }).click();
+  await page.waitForTimeout(900);
+  assert.doesNotMatch(await page.locator(".epw-paper").innerText(), /暂停时正在渲染/);
+  assert.equal(await page.getByRole("button", { name: "同步草稿箱", exact: true }).isDisabled(), true);
+  await page.evaluate(() => window.fixture.setDelay(0));
+  // Explicit refresh remains available while paused.
+  await page.getByRole("button", { name: "刷新预览", exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector(".epw-footer .mod-cta").disabled);
+  await page.getByRole("button", { name: "恢复刷新", exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector(".epw-footer .mod-cta").disabled);
+  await page.getByRole("button", { name: "暂停刷新", exact: true }).click();
+  await page.evaluate(() => window.fixture.modify("暂停期间新增的内容"));
+  assert.equal(await page.getByRole("button", { name: "同步草稿箱", exact: true }).isDisabled(), true);
+  assert.doesNotMatch(await page.locator(".epw-paper").innerText(), /暂停期间/);
+  await page.getByRole("button", { name: "恢复刷新", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector(".epw-paper").textContent.includes("暂停期间"));
+  await page.evaluate(() => window.fixture.openSource());
+  assert.match(await page.locator(".epw-identity").innerText(), /local.md/);
+  assert.equal(await page.evaluate(() => window.fixture.sourceReads()), 0);
+  // A modification DURING an async refresh must eventually render the latest text.
+  await page.evaluate(() => { window.fixture.setDelay(350); window.fixture.modify("快速编辑第一版"); });
+  await page.waitForTimeout(650);
+  await page.evaluate(() => window.fixture.modify("快速编辑最终版"));
+  await page.waitForFunction(() => document.querySelector(".epw-paper").textContent.includes("快速编辑最终版"), null, { timeout: 10000 });
+  await page.evaluate(() => window.fixture.setDelay(0));
+  const opaque = await page.evaluate(() => window.fixture.processImage(false));
+  const transparent = await page.evaluate(() => window.fixture.processImage(true));
+  assert.equal(opaque.mime, "image/jpeg"); assert.equal(transparent.mime, "image/png");
+  assert.ok(opaque.width <= 1280 && transparent.size < 1024 * 1024);
+  assert.ok((await page.evaluate(() => window.fixture.networkImage(200))).size > 0);
+  assert.match((await page.evaluate(() => window.fixture.networkImage(404))).error, /下载失败 HTTP 404/);
+  const screenshot = process.env.EASYPUB_UI_SCREENSHOT ?? path.join(temp, "workbench.png");
+  await page.screenshot({ path: screenshot, fullPage: true });
+  await page.getByRole("tab", { name: "信息、配图与封面", exact: true }).click();
+  await page.getByRole('button', {name:'从正文重新提取摘要',exact:true}).click();
+  assert.doesNotMatch(await page.locator('.epw-field textarea').inputValue(), /const message|发布之前|交给工具/);
+  await page.getByLabel('横版 2.35:1构图位置').selectOption('top');
+  assert.equal(await page.evaluate(()=>window.fixture.view.article.cropWide.y), 0);
+  await page.getByLabel('方形 1:1构图位置').selectOption('top-left');
+  assert.equal(await page.evaluate(()=>window.fixture.view.article.cropSquare.x), 0);
+  await page.locator('.epw-zoom').first().fill('4');
+  assert.match(await page.locator('.epw-crop-resolution').first().innerText(), /清晰度较低/);
+  assert.doesNotMatch(await page.locator('.epw-crop-resolution').nth(1).innerText(), /清晰度较低/);
+  await page.locator('.epw-zoom').first().fill('1');
+  assert.match(await page.locator('.epw-crop-resolution').first().innerText(), /清晰度充足/);
+  await page.getByRole("button", { name: "保存设置并刷新", exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector(".epw-footer .mod-cta").disabled);
+  // Editing settings while a debounce is pending must cancel the old refresh.
+  await page.evaluate(() => {
+    window.fixture.modify("等待刷新时的正文修改");
+    const input = document.querySelector(".epw-field input");
+    input.value = "保留未保存标题"; input.dispatchEvent(new Event("input"));
+  });
+  await page.waitForTimeout(800);
+  assert.equal(await page.locator(".epw-field input").first().inputValue(), "保留未保存标题");
+  assert.equal(await page.getByRole("button", { name: "同步草稿箱", exact: true }).isDisabled(), true);
+  // A changed document rejects saving against the old snapshot, but explicit
+  // refresh preserves edits and provides a usable path back to saving.
+  await page.getByRole("button", { name: "保存设置并刷新", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector(".epw-status").textContent.includes("本地稿已变化"));
+  await page.getByRole("button", { name: "刷新预览", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector(".epw-status").textContent.includes("未保存设置已保留"));
+  assert.match(await page.locator(".epw-paper").innerText(), /等待刷新时的正文修改/);
+  assert.equal(await page.locator(".epw-field input").first().inputValue(), "保留未保存标题");
+  assert.equal(await page.getByRole("button", { name: "同步草稿箱", exact: true }).isDisabled(), true);
+  await page.getByRole("button", { name: "保存设置并刷新", exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector(".epw-footer .mod-cta").disabled);
+  const saved = await page.evaluate(() => window.fixture.read());
+  assert.match(saved, /保留未保存标题/); assert.match(saved, /等待刷新时的正文修改/);
+  // Edits during an already running async render must also survive its result.
+  await page.evaluate(() => { window.fixture.setDelay(350); window.fixture.modify("渲染期间的正文修改"); });
+  await page.waitForFunction(() => document.querySelector(".epw-status").textContent.includes("正在检查"));
+  await page.locator(".epw-field input").first().fill("渲染期间的新标题");
+  await page.waitForTimeout(1100);
+  assert.equal(await page.locator(".epw-field input").first().inputValue(), "渲染期间的新标题");
+  await page.evaluate(() => window.fixture.setDelay(0));
+  await page.getByRole("button", { name: "刷新预览", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector(".epw-status").textContent.includes("未保存设置已保留"));
+  const crop = page.locator(".epw-crop").first();
+  await crop.scrollIntoViewIfNeeded();
+  await crop.focus(); await page.keyboard.press("ArrowRight");
+  assert.match(await page.locator(".epw-status").innerText(), /设置待保存/);
+  assert.equal(await page.getByRole("button", { name: "同步草稿箱", exact: true }).isDisabled(), true);
+  const cropBefore = await page.evaluate(() => JSON.stringify(window.fixture.view.article.cropWide));
+  await page.evaluate(() => window.fixture.modify("裁剪后继续编辑正文"));
+  await page.getByRole("button", { name: "刷新预览", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector(".epw-status").textContent.includes("未保存设置已保留"));
+  assert.equal(await page.evaluate(() => JSON.stringify(window.fixture.view.article.cropWide)), cropBefore);
+  await page.getByRole("button", { name: "保存设置并刷新", exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector(".epw-footer .mod-cta").disabled);
+  assert.equal(await page.evaluate(() => JSON.stringify(window.fixture.view.article.cropWide)), cropBefore);
+  assert.match(await page.evaluate(() => window.fixture.read()), /裁剪后继续编辑正文/);
+  await page.evaluate(() => window.fixture.markUncertain());
+  await page.getByRole('button', { name: '查询 / 恢复关联', exact: true }).click();
+  await page.getByRole('button', { name: '1. 恢复测试草稿', exact: true }).click();
+  await page.getByRole('button', { name: '关联此草稿', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('.epw-status').textContent.includes('关联状态已保存'));
+  assert.deepEqual(await page.evaluate(() => window.fixture.draftState()), { mediaId: 'recovered' });
+  await page.evaluate(() => window.fixture.markUncertain());
+  await page.getByRole('button', { name: '查询 / 恢复关联', exact: true }).click();
+  await page.getByRole('button', { name: '已核对后台，解除不确定状态', exact: true }).click();
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await page.evaluate(() => window.fixture.setup());
+  await page.getByRole('button', { name: '开始配置', exact: true }).click();
+  await page.getByRole('button', { name: '保存并继续', exact: true }).click();
+  assert.match(await page.locator('.epw-setup-status').innerText(), /AppID/);
+  await page.locator('.epw-setup-field input').nth(0).fill('test-app');
+  await page.getByRole('button', { name: '保存并继续', exact: true }).click();
+  assert.match(await page.locator('.epw-setup-status').innerText(), /AppSecret/);
+  await page.locator('.epw-setup-field input').nth(1).fill('test-not-a-real-secret');
+  assert.equal(await page.locator('.epw-setup-field input').nth(1).getAttribute('type'), 'password');
+  await page.getByRole('button', { name: '稍后配置', exact: true }).click();
+  assert.equal(await page.evaluate(() => window.fixtureSetupSaves ?? 0), 0);
+  await page.evaluate(() => window.fixture.setup());
+  await page.getByRole('button', { name: '开始配置', exact: true }).click();
+  await page.locator('.epw-setup-field input').nth(0).fill('test-app');
+  await page.locator('.epw-setup-field input').nth(1).fill('test-not-a-real-secret');
+  await page.getByRole('button', { name: '保存并继续', exact: true }).click();
+  await page.getByRole('button', { name: '运行只读检查', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('.epw-setup-results').textContent.includes('访问令牌正常'));
+  assert.match(await page.locator('.epw-setup-results').innerText(), /素材读取失败/);
+  assert.match(await page.locator('.epw-setup-summary').innerText(), /未全部通过/);
+  await page.evaluate(() => { window.fixtureSetupCheck = 'error'; });
+  await page.getByRole('button', { name: '运行只读检查', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('.epw-setup-results').textContent.includes('40164'));
+  assert.equal(await page.locator('.epw-setup-results .is-success').count(), 0);
+  await page.evaluate(() => { window.fixtureSetupCheck = 'success'; });
+  await page.getByRole('button', { name: '运行只读检查', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('.epw-setup-summary').textContent.includes('连接检查通过'));
+  assert.equal(await page.locator('.epw-setup-results .is-success').count(), 3);
+  assert.equal(await page.locator('.epw-setup-results .is-error').count(), 0);
+  assert.match(await page.locator('.easy-pub-wechat-setup').innerText(), /不是报错/);
+  await page.screenshot({ path: screenshot.replace(/\.png$/, '-setup-success.png'), fullPage: true });
+  assert.match(await page.locator('.easy-pub-wechat-setup').innerText(), /本次会话/);
+  assert.doesNotMatch(await page.locator('.easy-pub-wechat-setup').innerText(), /test-not-a-real-secret/);
+  await page.getByRole('button', { name: '完成，返回编辑', exact: true }).click();
+  assert.equal(await page.evaluate(() => window.fixture.draftState().uncertain), true);
+  await page.evaluate(() => { void window.fixture.compare(); });
+  assert.equal(await page.locator('.epw-comparison').count(), 2);
+  assert.equal(await page.locator('.epw-comparison mark').count(), 4);
+  assert.equal(await page.locator('.epw-comparison script').count(), 0);
+  await page.screenshot({ path: screenshot.replace(/\.png$/, '-comparison.png'), fullPage: true });
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await page.locator("#workbench").evaluate(el => { el.scrollTop = 0; });
+  await page.screenshot({ path: screenshot.replace(/\.png$/, "-cover.png"), fullPage: true });
+  await page.evaluate(() => window.fixture.close());
+  assert.equal(await page.locator(".epw-header").count(), 0);
+  assert.deepEqual(errors, []);
+  console.log(`WeChat browser tests passed (native Canvas, crop, refresh races, binding and CSS isolation).${process.env.EASYPUB_UI_SCREENSHOT ? ` Screenshot: ${screenshot}` : ""}`);
+} catch (error) {
+  console.error(error);
+  for (const page of browser.contexts().flatMap(context => context.pages())) {
+    console.error(await page.evaluate(() => ({ text: document.body.innerText, errors: window.fixtureErrors })).catch(() => "page unavailable"));
+  }
+  throw error;
+} finally { await browser.close(); await rm(temp, { recursive: true, force: true }); }

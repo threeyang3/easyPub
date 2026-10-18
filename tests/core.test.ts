@@ -20,6 +20,7 @@ import { DEFAULT_SETTINGS, PLATFORMS } from "../types";
 import { getHexoAssetTargetPath } from "../utils/platforms";
 import { runReliabilityTests } from "./reliability.test";
 import { runBatchPubIdTests } from "./batchPubIds.test";
+import { runWechatTests } from "./wechat.test";
 import {
   getPicGoHeartbeatUrl,
   normalizePicGoUploadUrl,
@@ -35,6 +36,7 @@ import {
 async function run() {
   await runBatchPubIdTests();
   await runReliabilityTests();
+  await runWechatTests();
   const assetsRoot = await mkdtemp(path.join(os.tmpdir(), 'easy-pub-assets-'));
   try {
     const bytes = Buffer.from('fixture image bytes');

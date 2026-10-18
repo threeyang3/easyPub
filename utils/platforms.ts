@@ -141,3 +141,12 @@ export function sanitizeFileName(fileName: string): string {
   }
   return sanitized;
 }
+
+export function relativeVaultAttachment(targetPath: string, attachmentPath: string): string {
+  return path.posix.relative(path.posix.dirname(normalizePath(targetPath)), normalizePath(attachmentPath));
+}
+
+export function isWechatDraftPath(filePath: string, settings: PluginSettings): boolean {
+  const platform = PLATFORMS.find(p => p.id === "wechat")!;
+  return normalizePath(filePath).startsWith(`${getPublishPath(platform, settings)}/`);
+}

@@ -15,18 +15,21 @@ try {
     format: "cjs",
     outfile: outputFile,
     logLevel: "silent",
+    external: ["electron", "jsdom"],
     plugins: [{ name: 'obsidian-test-runtime', setup(build) {
       build.onResolve({ filter: /^obsidian$/ }, () => ({ path: 'obsidian', namespace: 'test' }));
       build.onLoad({ filter: /.*/, namespace: 'test' }, () => ({ contents: `
         export class App {} export class Plugin {} export class Modal {}
         export class Notice {} export class Setting {} export class PluginSettingTab {}
+        export class ItemView {} export class FuzzySuggestModal {} export class Component {}
+        export class MarkdownRenderer {}
         export class TFile {} export class TFolder {} export class FileSystemAdapter {}
         export const normalizePath = p => p.replaceAll('\\\\', '/');
         export const requestUrl = () => { throw new Error('Unexpected network request in test'); };
       `, loader: 'js' }));
     } }],
   });
-  execFileSync(process.execPath, [outputFile], { stdio: "inherit" });
+  execFileSync(process.execPath, [outputFile], { stdio: "inherit", env: { ...process.env, NODE_PATH: path.join(process.cwd(), "node_modules") } });
 } finally {
   await rm(outputDirectory, { recursive: true, force: true });
 }

@@ -1,3 +1,4 @@
+import { fromMarkdown } from "mdast-util-from-markdown";
 import { PublishAsset } from "../types";
 
 export interface ResolvedImage {
@@ -16,100 +17,43 @@ export async function prepareImageEmbeds(
   resolveImage: (linkPath: string) => Promise<ResolvedImage | null>
 ): Promise<PreparedImageContent> {
   const assets = new Map<string, PublishAsset>();
-  const lines = content.match(/[^\r\n]*(?:\r\n|\n|$)/g) ?? [content];
-  let fenceCharacter: "`" | "~" | null = null;
-  let fenceLength = 0;
-
-  const transformedLines: string[] = [];
-  for (const line of lines) {
-    if (line === "") {
-      continue;
+  // Read syntax positions only. Never reserialize the author's Markdown.
+  const blocked: Array<[number, number]> = [];
+  type Node = { type: string; position?: { start: { offset?: number }; end: { offset?: number } }; children?: Node[] };
+  const visit = (node: Node) => {
+    if (["code", "inlineCode", "html", "image", "imageReference"].includes(node.type)) {
+      const start = node.position?.start.offset;
+      const end = node.position?.end.offset;
+      if (start !== undefined && end !== undefined) blocked.push([start, end]);
+      return;
     }
-    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/);
-    if (fenceMatch) {
-      const marker = fenceMatch[1];
-      const character = marker[0] as "`" | "~";
-      if (fenceCharacter === null) {
-        fenceCharacter = character;
-        fenceLength = marker.length;
-      } else if (character === fenceCharacter && marker.length >= fenceLength) {
-        fenceCharacter = null;
-        fenceLength = 0;
-      }
-      transformedLines.push(line);
-      continue;
-    }
-
-    if (fenceCharacter !== null) {
-      transformedLines.push(line);
-      continue;
-    }
-
-    transformedLines.push(await transformLine(line, resolveImage, assets));
-  }
-
-  return {
-    content: transformedLines.join(""),
-    assets: [...assets.values()],
+    node.children?.forEach(visit);
   };
-}
-
-async function transformLine(
-  line: string,
-  resolveImage: (linkPath: string) => Promise<ResolvedImage | null>,
-  assets: Map<string, PublishAsset>
-): Promise<string> {
+  visit(fromMarkdown(content));
   const embedPattern = /!\[\[([^\]\r\n]+)\]\]/g;
   let result = "";
   let lastIndex = 0;
   let match: RegExpExecArray | null;
-
-  while ((match = embedPattern.exec(line)) !== null) {
-    result += line.slice(lastIndex, match.index);
-    if (isInsideInlineCode(line, match.index)) {
+  while ((match = embedPattern.exec(content)) !== null) {
+    result += content.slice(lastIndex, match.index);
+    let slashes = 0;
+    for (let cursor = match.index - 1; cursor >= 0 && content[cursor] === "\\"; cursor--) slashes++;
+    if (slashes % 2 || blocked.some(([start, end]) => match!.index >= start && match!.index < end)) {
       result += match[0];
       lastIndex = embedPattern.lastIndex;
       continue;
     }
-
     const linkPath = match[1].split("|", 1)[0].split("#", 1)[0].trim();
     const resolved = linkPath ? await resolveImage(linkPath) : null;
     if (!resolved) {
       result += match[0];
     } else {
-      if (resolved.asset) {
-        assets.set(resolved.asset.targetPath, resolved.asset);
-      }
+      if (resolved.asset) assets.set(resolved.asset.targetPath, resolved.asset);
       result += `![${escapeAltText(resolved.alt)}](${resolved.url})`;
     }
     lastIndex = embedPattern.lastIndex;
   }
-
-  return result + line.slice(lastIndex);
-}
-
-function isInsideInlineCode(line: string, index: number): boolean {
-  let delimiterLength = 0;
-  let inCode = false;
-  for (let cursor = 0; cursor < index;) {
-    if (line[cursor] !== "`" || line[cursor - 1] === "\\") {
-      cursor++;
-      continue;
-    }
-    let runLength = 1;
-    while (line[cursor + runLength] === "`") {
-      runLength++;
-    }
-    if (!inCode) {
-      inCode = true;
-      delimiterLength = runLength;
-    } else if (runLength === delimiterLength) {
-      inCode = false;
-      delimiterLength = 0;
-    }
-    cursor += runLength;
-  }
-  return inCode;
+  return { content: result + content.slice(lastIndex), assets: [...assets.values()] };
 }
 
 function escapeAltText(value: string): string {

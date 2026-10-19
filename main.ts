@@ -34,6 +34,7 @@ import { getPicGoHeartbeatUrl, uploadWithPicGo } from "./utils/picgo";
 import { assertPublishUnchanged, completeControlRoomMetadata } from "./utils/publishSafety";
 import { writeImmutableAsset, writePublishedFile } from "./utils/publishFiles";
 import { withTimeout } from "./utils/async";
+import { assertPublishIdentity } from "./utils/publishIdentity";
 import { normalizeSettings, publishSettingsFingerprint } from "./utils/settings";
 import { WechatApi } from "./utils/wechatApi";
 import { decryptWechatSecret, encryptWechatSecret } from "./utils/wechatSecret";
@@ -342,7 +343,7 @@ export default class EasyPub extends Plugin {
     let existingPath: string | null = null;
 
     if (pubId) {
-      existingPath = await this.findArticleByPubId(platform, pubId, sourceParsed.data);
+      existingPath = await this.findArticleByPubId(platform, pubId, sourceParsed.data, activeFile.path);
       if (existingPath) {
         isNew = false;
         existingContent = await this.readPublishFile(platform, existingPath);
@@ -442,9 +443,11 @@ export default class EasyPub extends Plugin {
   async findArticleByPubId(
     platform: Platform,
     pubId: string,
-    meta: FrontMatterData
+    meta: FrontMatterData,
+    sourcePath?: string
   ): Promise<string | null> {
     const subFolder = getSubFolder(platform, meta);
+    const matches = new Map<string, string>();
 
     // 先检查已知路径
     const title = getFrontMatterString(meta, "title");
@@ -454,7 +457,7 @@ export default class EasyPub extends Plugin {
         const content = await this.readPublishFile(platform, expectedPath);
         const parsed = parseFrontMatter(content);
         if (getFrontMatterString(parsed.data, "pub_id") === pubId) {
-          return expectedPath;
+          matches.set(expectedPath, content);
         }
       }
     }
@@ -484,12 +487,15 @@ export default class EasyPub extends Plugin {
           const content = await this.readPublishFile(platform, file);
           const parsed = parseFrontMatter(content);
           if (getFrontMatterString(parsed.data, "pub_id") === pubId) {
-            return file;
+            matches.set(file, content);
           }
         }
       }
     }
-    return null;
+    if (sourcePath) await assertPublishIdentity(this.app, sourcePath, pubId,
+      [...matches].map(([path, content]) => ({ path, content })),
+      PLATFORMS.filter(platform => !platform.isExternal).map(platform => getPublishPath(platform, this.settings)));
+    return matches.keys().next().value ?? null;
   }
 
   async buildPublishedFrontMatter(
@@ -559,7 +565,8 @@ export default class EasyPub extends Plugin {
     const publishPath = getTargetDirectory(platform, diff.targetPath);
     await this.ensurePublishDirectory(platform, publishPath);
 
-    // 写入发布路径；若源文件元数据更新失败，则恢复目标文件，避免半成功状态。
+    // Existing targets may be restored with a content guard. Never delete a newly
+    // created target on failure: an editor may have changed it since creation.
     const previousTargetContent = await this.publishPathExists(platform, diff.targetPath)
       ? await this.readPublishFile(platform, diff.targetPath)
       : null;
@@ -580,8 +587,8 @@ export default class EasyPub extends Plugin {
       const current = await this.publishPathExists(platform, diff.targetPath)
         ? await this.readPublishFile(platform, diff.targetPath) : null;
       assertPublishUnchanged(diff.targetContent, current);
-      if (platform.id === "hexo") {
-        const actualPath = await this.findArticleByPubId(platform, diff.pub_id, diff.meta);
+      {
+        const actualPath = await this.findArticleByPubId(platform, diff.pub_id, diff.meta, sourceFile.path);
         if (actualPath && path.resolve(actualPath) !== path.resolve(diff.targetPath)) {
           throw new Error("文章已移动到其他位置，请重新发布以保留其状态");
         }
@@ -590,10 +597,21 @@ export default class EasyPub extends Plugin {
       targetWritten = true;
       await this.updateSourceFile(sourceFile, platform, diff.targetPath, diff.pub_id);
     } catch (error) {
-      if (targetWritten && await this.publishPathExists(platform, diff.targetPath)
-        && await this.readPublishFile(platform, diff.targetPath) === finalContent) {
-        if (previousTargetContent === null) await this.deletePublishFile(platform, diff.targetPath);
-        else await this.writePublishFile(platform, diff.targetPath, previousTargetContent, finalContent);
+      if (targetWritten) {
+        let recovery: string;
+        if (previousTargetContent === null) {
+          recovery = "新建稿件已保留，请核对稿件和源文章的关联后重试";
+        } else {
+          try {
+            await this.writePublishFile(platform, diff.targetPath, previousTargetContent, finalContent);
+            recovery = "发布稿已恢复为本次操作前的内容，请核对源文章关联后重试";
+          } catch (restoreError) {
+            recovery = `未能恢复旧稿，未继续执行删除或强制覆盖，请核对当前稿件。恢复错误：${this.getErrorMessage(restoreError)}`;
+          }
+        }
+        // A written target or another editor can still reference these assets.
+        // Retention is safer than a scan followed by an unguarded delete.
+        throw new Error(`发布未完成：${this.getErrorMessage(error)}。${recovery}。目标：${diff.targetPath}。本次新增附件已保留。`);
       }
       // Only remove assets which no current post or draft references.
       if (createdAssets.length) {
@@ -762,32 +780,22 @@ export default class EasyPub extends Plugin {
 
   async writePublishFile(platform: Platform, filePath: string, content: string, expected?: string | null): Promise<void> {
     if (platform.isExternal) {
-      await writePublishedFile(filePath, content, expected);
+      await writePublishedFile(filePath, content, expected,
+        path.join(path.resolve(this.settings.hexoRepoPath), ".easy-pub-backups"));
       return;
     }
 
     const file = this.app.vault.getAbstractFileByPath(filePath);
-    if (expected !== undefined) {
-      assertPublishUnchanged(expected, file instanceof TFile ? await this.app.vault.read(file) : null);
-    }
     if (file instanceof TFile) {
-      await this.app.vault.modify(file, content);
+      await this.app.vault.process(file, current => {
+        if (expected !== undefined) assertPublishUnchanged(expected, current);
+        return content;
+      });
       return;
     }
 
+    if (expected !== undefined) assertPublishUnchanged(expected, null);
     await this.app.vault.create(filePath, content);
-  }
-
-  async deletePublishFile(platform: Platform, filePath: string): Promise<void> {
-    if (platform.isExternal) {
-      await fs.unlink(filePath);
-      return;
-    }
-
-    const file = this.app.vault.getAbstractFileByPath(filePath);
-    if (file instanceof TFile) {
-      await this.app.vault.delete(file);
-    }
   }
 
   async listPublishFiles(platform: Platform, directoryPath: string): Promise<string[]> {
@@ -1151,7 +1159,7 @@ export default class EasyPub extends Plugin {
       return;
     }
 
-    const targetPath = await this.findArticleByPubId(hexoPlatform, pubId, sourceData);
+    const targetPath = await this.findArticleByPubId(hexoPlatform, pubId, sourceData, activeFile.path);
     if (!targetPath) {
       return;
     }

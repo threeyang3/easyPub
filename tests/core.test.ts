@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile, readdir } from "node:fs/promises";
 import os from "node:os";
+import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { mergePublishedFrontMatter, mergeSourceFrontMatter } from "../utils/frontMatter";
 import { generateHexoUrl, getHexoRootPath } from "../utils/linkUtils";
@@ -50,6 +51,44 @@ async function run() {
     assert.equal(await readFile(post, 'utf8'), 'first');
     await writePublishedFile(post, 'second', 'first');
     assert.equal(await readFile(post, 'utf8'), 'second');
+    const backupDirectory = path.join(assetsRoot, '.easy-pub-backups');
+    const originalBackup = path.join(backupDirectory, createHash('sha256').update('first').digest('hex') + '.bak');
+    assert.equal(await readFile(originalBackup, 'utf8'), 'first');
+    const lock = path.join(assetsRoot, '.post.md.easy-pub.lock');
+    await writeFile(lock, 'another instance');
+    await assert.rejects(writePublishedFile(post, 'blocked', 'second'), /目标正在发布/);
+    assert.equal(await readFile(post, 'utf8'), 'second');
+    await rm(lock);
+    const concurrent = await Promise.allSettled([
+      writePublishedFile(post, 'third-a', 'second'), writePublishedFile(post, 'third-b', 'second'),
+    ]);
+    assert.equal(concurrent.filter(result => result.status === 'fulfilled').length, 1);
+    assert.equal(await readFile(path.join(backupDirectory, createHash('sha256').update('second').digest('hex') + '.bak'), 'utf8'), 'second');
+    const winner = await readFile(post, 'utf8');
+    const blockedBackup = path.join(assetsRoot, 'not-a-directory');
+    await writeFile(blockedBackup, 'fixture');
+    await assert.rejects(writePublishedFile(post, 'lost', winner, blockedBackup));
+    assert.equal(await readFile(post, 'utf8'), winner);
+    assert.ok(!(await readdir(assetsRoot)).some(name => name.endsWith('.lock') || name.endsWith('.tmp')));
+    await writePublishedFile(post, 'retry succeeds', winner);
+    const unlink = fsPromises.unlink;
+    const warn = console.warn;
+    let cleanupWarning = false;
+    try {
+      fsPromises.unlink = async file => {
+        if (String(file) === lock) throw new Error('lock cleanup failure');
+        return unlink(file);
+      };
+      console.warn = () => { cleanupWarning = true; };
+      await writePublishedFile(post, 'committed despite cleanup failure', 'retry succeeds');
+      assert.equal(await readFile(post, 'utf8'), 'committed despite cleanup failure');
+      assert.ok(cleanupWarning);
+      await assert.rejects(writePublishedFile(post, 'blocked'), /目标正在发布/);
+    } finally {
+      fsPromises.unlink = unlink;
+      console.warn = warn;
+      await rm(lock, { force: true });
+    }
     assert.equal(await writeImmutableAsset(target, bytes, hash), true);
     assert.equal(await writeImmutableAsset(target, bytes, hash), false);
     await assert.rejects(() => writeImmutableAsset(target, Buffer.from('changed'), hash), /重新发布/);
@@ -95,7 +134,7 @@ async function run() {
     const assetTarget = getHexoAssetTargetPath(plugin.settings, 'draft-id', 'image.png', hash);
     assert.ok(assetTarget.includes(path.join('source', 'picture', 'easy-pub')));
     const diff = { pub_id: 'draft-id', sourcePath: source.path, targetPath: target, sourceContent: original + ' updated', targetContent: original, isNew: false, meta: { pub_id: 'draft-id', title: 'Draft' }, platform, assets: [{ sourcePath: 'image.png', targetPath: assetTarget, contentHash: hash }] };
-    Object.assign(plugin, { app: { vault: { getAbstractFileByPath: () => new TFile(), readBinary: async () => bytes } } });
+    Object.assign(plugin, { app: { vault: { getMarkdownFiles: () => [], getAbstractFileByPath: () => new TFile(), readBinary: async () => bytes } } });
     await writeFile(target, original + ' backend edit');
     await assert.rejects(() => plugin.copyAndOpenForEdit(diff, source), /重新发布/);
     assert.equal(await readFile(target, 'utf8'), original + ' backend edit');
@@ -103,7 +142,28 @@ async function run() {
     plugin.updateSourceFile = async () => { throw new Error('source update failed'); };
     await assert.rejects(() => plugin.copyAndOpenForEdit(diff, source), /source update failed/);
     assert.equal(await readFile(target, 'utf8'), original);
-    await assert.rejects(() => readFile(assetTarget), /ENOENT/);
+    assert.equal(await readFile(path.join(integrationRoot, '.easy-pub-backups',
+      createHash('sha256').update(original).digest('hex') + '.bak'), 'utf8'), original);
+    assert.deepEqual(await readFile(assetTarget), bytes);
+    plugin.updateSourceFile = async () => {
+      await writeFile(target, 'edited while updating source');
+      throw new Error('source update failed');
+    };
+    await assert.rejects(plugin.copyAndOpenForEdit(diff, source), error => {
+      assert.match(String(error), /source update failed/);
+      assert.match(String(error), /未能恢复旧稿/);
+      assert.ok(String(error).includes(target));
+      return true;
+    });
+    assert.equal(await readFile(target, 'utf8'), 'edited while updating source');
+    await rm(target);
+    plugin.updateSourceFile = async () => {
+      await writeFile(target, 'new draft edited by user');
+      throw new Error('source update failed');
+    };
+    await assert.rejects(plugin.copyAndOpenForEdit({ ...diff, isNew: true, targetContent: null }, source), /新建稿件已保留/);
+    assert.equal(await readFile(target, 'utf8'), 'new draft edited by user');
+    assert.deepEqual(await readFile(assetTarget), bytes);
   } finally { await rm(integrationRoot, { recursive: true, force: true }); }
   const controlRoomSession = parseControlRoomSession({
     version: 1,
@@ -232,6 +292,38 @@ async function run() {
     sourcePath: "images/Cover Image.PNG",
     targetPath: "/blog/source/images/easy-pub/id/cover.png",
   }]);
+
+  // These are code/escaped examples, not attachment upload requests. Preserve
+  // CRLF and every character outside genuine body embeds.
+  const protectedExamples = [
+    '```md\n```not-a-close\n![[example.png]]\n```',
+    '~~~~md\n~~~\n![[example.png]]\n~~~~',
+    '```\n~~~\n![[example.png]]\n```',
+    '```md\n![[example.png]]',
+    '> ```md\n> ![[example.png]]\n> ```',
+    '- ```md\n  ![[example.png]]\n  ```',
+    '    ![[example.png]]',
+    '`line one\n![[example.png]]`',
+    '\\![[example.png]]',
+    '<!-- ![[example.png]] -->',
+  ];
+  for (const example of protectedExamples) {
+    for (const text of [example, example.replace(/\n/g, '\r\n')]) {
+      const result = await prepareImageEmbeds(text, async () => {
+        assert.fail('Code examples must not resolve or upload attachments');
+      });
+      assert.equal(result.content, text);
+      assert.deepEqual(result.assets, []);
+    }
+  }
+  const bodyAfterCode = '```md\r\n![[code.png]]\r\n``` \t\r\n正文 ![[body.png]]\r\n';
+  const resolvedPaths: string[] = [];
+  const afterCode = await prepareImageEmbeds(bodyAfterCode, async source => {
+    resolvedPaths.push(source);
+    return { url: '/body.png', alt: 'body' };
+  });
+  assert.deepEqual(resolvedPaths, ['body.png']);
+  assert.equal(afterCode.content, bodyAfterCode.replace('![[body.png]]', '![body](/body.png)'));
 
   assert.equal(
     normalizePicGoUploadUrl("http://127.0.0.1:36677"),

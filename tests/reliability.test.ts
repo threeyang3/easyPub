@@ -11,6 +11,7 @@ import { withTimeout } from "../utils/async";
 import { isSourcePublishTarget } from "../utils/platforms";
 import { parseFrontMatter, parseYamlDocument, stringifyFrontMatter } from "../utils/frontMatter";
 import { buildHexo, getHexoNodeExecutable, validateHexoDeployment } from "../utils/hexoCommands";
+import { assertPublishIdentity } from "../utils/publishIdentity";
 
 async function expectReportedFailure(action: () => Promise<unknown>) {
   const error = console.error;
@@ -27,6 +28,46 @@ async function expectReportedFailure(action: () => Promise<unknown>) {
 }
 
 export async function runReliabilityTests() {
+  const atomicPlugin = Object.create(EasyPub.prototype) as EasyPub;
+  const atomicFile = Object.assign(new TFile(), { path: '发布/知乎/atomic.md' });
+  let atomicContent = 'concurrent edit';
+  atomicPlugin.app = { vault: {
+    getAbstractFileByPath: () => atomicFile,
+    process: async (_file: TFile, transform: (data: string) => string) => { atomicContent = transform(atomicContent); return atomicContent; },
+    modify: async () => { throw new Error('Non-atomic write must not be used'); },
+  } } as any;
+  const vaultPlatform = PLATFORMS.find(p => p.id === 'zhihu')!;
+  await assert.rejects(atomicPlugin.writePublishFile(vaultPlatform, atomicFile.path, 'replacement', 'old'), /重新发布/);
+  assert.equal(atomicContent, 'concurrent edit');
+  await atomicPlugin.writePublishFile(vaultPlatform, atomicFile.path, 'replacement', 'concurrent edit');
+  assert.equal(atomicContent, 'replacement');
+  const sourceA = Object.assign(new TFile(), { path: "notes/A.md", extension: "md" });
+  const sourceB = Object.assign(new TFile(), { path: "notes/B.md", extension: "md" });
+  const legacyTarget = Object.assign(new TFile(), { path: "发布/知乎/old.md", extension: "md" });
+  let notes = [sourceA, sourceB, legacyTarget];
+  const contents = new Map(notes.map(file => [file.path, stringifyFrontMatter("unchanged body", { pub_id: "old-123" })]));
+  const identityApp = { vault: {
+    getMarkdownFiles: () => notes,
+    getAbstractFileByPath: (path: string) => notes.find(file => file.path === path),
+    read: async (file: TFile) => contents.get(file.path)!,
+  }, metadataCache: { getFirstLinkpathDest: (link: string) => notes.find(file => file.path.replace(/\.md$/, "").endsWith(link.replace(/\.md$/, ""))) } } as any;
+  const target = (owner?: string) => [{ path: legacyTarget.path, content: stringifyFrontMatter("edited draft", { pub_id: "old-123", ...(owner ? { source_file: owner } : {}) }) }];
+  for (const owner of ['[[notes/A]]', '[[notes/A.md|alias]]', 'notes/A.md', '[[A]]']) {
+    await assert.rejects(assertPublishIdentity(identityApp, sourceB.path, 'old-123', target(owner), ['发布/知乎']), /另一篇源文章/);
+  }
+  await assert.rejects(assertPublishIdentity(identityApp, sourceB.path, 'old-123', target(), ['发布/知乎']), /另一篇源文章/);
+  await assert.rejects(assertPublishIdentity(identityApp, sourceB.path, 'old-123', [], ['发布/知乎']), /另一篇源文章/);
+  notes = [sourceB, legacyTarget]; // Original source moved/renamed; legacy ID still valid.
+  for (const owner of [undefined, '[[notes/A]]', '[[notes/B]]']) {
+    await assertPublishIdentity(identityApp, sourceB.path, 'old-123', target(owner), ['发布/知乎']);
+  }
+  await assert.rejects(assertPublishIdentity(identityApp, sourceB.path, 'old-123', [...target(), { ...target()[0], path:'发布/知乎/duplicate.md' }], ['发布/知乎']), /多个发布稿/);
+  assert.equal(contents.get(sourceB.path), stringifyFrontMatter('unchanged body', { pub_id:'old-123' }));
+  const unrelated = Object.assign(new TFile(), { path:'notes/broken.md', extension:'md' });
+  contents.set(unrelated.path, '---\ntitle: [broken\n---\nUnrelated');
+  notes.push(unrelated);
+  await assertPublishIdentity(identityApp, sourceB.path, 'old-123', target(), ['发布/知乎']);
+  assert.equal(contents.get(unrelated.path), '---\ntitle: [broken\n---\nUnrelated');
   const zhihu = PLATFORMS.find(p => p.id === "zhihu")!;
   assert.equal(isSourcePublishTarget(zhihu, "发布/知乎/文章/a.md", "发布/知乎/文章/a.md"), true);
   assert.equal(isSourcePublishTarget(zhihu, "文章/a.md", "发布/知乎/文章/a.md"), false);
@@ -86,6 +127,7 @@ export async function runReliabilityTests() {
     let imageBytes = Buffer.from("original image");
     Object.assign(plugin, { app: {
       vault: {
+        getMarkdownFiles: () => [source],
         read: async () => sourceText,
         getAbstractFileByPath: () => image,
         readBinary: async () => imageBytes,

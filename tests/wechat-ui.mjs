@@ -73,6 +73,25 @@ try {
   await page.evaluate(() => window.fixture.openSource());
   assert.match(await page.locator(".epw-identity").innerText(), /local.md/);
   assert.equal(await page.evaluate(() => window.fixture.sourceReads()), 0);
+  const beforeMissing = await page.evaluate(() => window.fixture.read());
+  await page.evaluate(() => window.fixture.modify('![缺失](missing.png)\n![重复](../../assets/cover.png)'));
+  await page.waitForFunction(() => document.querySelector('.epw-inspector').textContent.includes('1 处失败'));
+  assert.equal(await page.locator('.epw-image-row').count(), 3);
+  assert.equal(await page.getByRole('button', { name: '同步草稿箱', exact: true }).isDisabled(), true);
+  const failedRow = page.locator('.epw-image-row').filter({ hasText: 'missing.png' });
+  await failedRow.getByRole('button').click();
+  const opened = await page.evaluate(() => window.fixtureOpened);
+  const currentText = await page.evaluate(() => window.fixture.read());
+  assert.equal(opened.path, '发布/微信公众号/local.md');
+  assert.equal(opened.options.eState.line, currentText.split('\n').findIndex(line => line.includes('![缺失]')));
+  await page.getByRole('button', { name: '暂停刷新', exact: true }).click();
+  await page.evaluate(() => window.fixture.modify('定位前改变正文'));
+  await failedRow.getByRole('button').click();
+  assert.match(await page.locator('.epw-status').innerText(), /先刷新预览再定位/);
+  await page.evaluate(text => window.fixture.replace(text), beforeMissing);
+  await page.getByRole('button', { name: '恢复刷新', exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('.epw-footer .mod-cta').disabled);
+  await page.getByRole('button', { name: '正文预览', exact: true }).click();
   // A modification DURING an async refresh must eventually render the latest text.
   await page.evaluate(() => { window.fixture.setDelay(350); window.fixture.modify("快速编辑第一版"); });
   await page.waitForTimeout(650);
@@ -87,7 +106,35 @@ try {
   assert.match((await page.evaluate(() => window.fixture.networkImage(404))).error, /下载失败 HTTP 404/);
   const screenshot = process.env.EASYPUB_UI_SCREENSHOT ?? path.join(temp, "workbench.png");
   await page.screenshot({ path: screenshot, fullPage: true });
-  await page.getByRole("tab", { name: "信息、配图与封面", exact: true }).click();
+  await page.getByRole("button", { name: "信息、配图与封面", exact: true }).click();
+  const narrowPanels = await page.evaluate(() => {
+    const p = document.querySelector('.epw-paper').getBoundingClientRect();
+    const i = document.querySelector('.epw-inspector').getBoundingClientRect();
+    return { previewHeight:p.height, inspectorHeight:i.height, stacked:i.top >= p.bottom, visible:i.bottom <= innerHeight };
+  });
+  assert.ok(narrowPanels.previewHeight > 100 && narrowPanels.inspectorHeight > 100 && narrowPanels.stacked && narrowPanels.visible);
+  await page.locator('.epw-paper').evaluate(el => { el.scrollTop = 150; });
+  await page.getByRole('button', { name:'刷新预览', exact:true }).click();
+  await page.waitForFunction(() => !document.querySelector('.epw-footer .mod-cta').disabled);
+  assert.equal(await page.locator('.epw-paper').evaluate(el => el.scrollTop), 150);
+  await page.setViewportSize({ width:1400, height:1000 });
+  await page.evaluate(() => { document.body.style.gridTemplateColumns = '1fr 800px'; });
+  const widePanels = await page.evaluate(() => {
+    const p = document.querySelector('.epw-paper').getBoundingClientRect();
+    const i = document.querySelector('.epw-inspector').getBoundingClientRect();
+    return { beside:i.left >= p.right, aligned:Math.abs(i.top-p.top)<2 };
+  });
+  assert.ok(widePanels.beside && widePanels.aligned);
+  await page.evaluate(() => { document.body.style.gridTemplateColumns = ''; });
+  await page.setViewportSize({ width:1000, height:480 });
+  const shortPanels = await page.evaluate(() => ({
+    preview:document.querySelector('.epw-paper').getBoundingClientRect().height,
+    settings:document.querySelector('.epw-inspector').getBoundingClientRect().height,
+  }));
+  assert.ok(shortPanels.preview >= 80 && shortPanels.settings >= 80);
+  await page.getByRole('button', { name:'保存设置并刷新', exact:true }).scrollIntoViewIfNeeded();
+  assert.equal(await page.getByRole('button', { name:'保存设置并刷新', exact:true }).isVisible(), true);
+  await page.setViewportSize({ width:1000, height:1000 });
   await page.getByRole('button', {name:'从正文重新提取摘要',exact:true}).click();
   assert.doesNotMatch(await page.locator('.epw-field textarea').inputValue(), /const message|发布之前|交给工具/);
   await page.getByLabel('横版 2.35:1构图位置').selectOption('top');

@@ -170,8 +170,15 @@ export interface WechatImage {
   localPath?: string;
   originalSize: number;
 }
+export interface WechatImageReference {
+  source: string;
+  line: number;
+  status: "ready" | "error";
+  error?: string;
+}
 export interface WechatPreparedDocument {
   html: string;
   images: WechatImage[];
   issues: string[];
+  imageReferences?: WechatImageReference[];
 }

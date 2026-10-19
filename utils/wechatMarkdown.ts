@@ -1,6 +1,7 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { App, TFile } from "obsidian";
 import { relativeVaultAttachment } from "./platforms";
+import type { WechatImageReference } from "../types";
 
 export const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "svg"]);
 export const escapeHtml = (value: string): string => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -86,8 +87,9 @@ export async function rebaseWechatImages(app: App, body: string, sourcePath: str
 }
 
 export async function prepareWechatMarkdown(body: string,
-  resolve: (source: string) => Promise<string>): Promise<{ markdown: string; issues: string[] }> {
+  resolve: (source: string) => Promise<string>): Promise<{ markdown: string; issues: string[]; imageReferences: WechatImageReference[] }> {
   const issues: string[] = [];
+  const imageReferences: WechatImageReference[] = [];
   const wiki = await transformWechatWikiImages(body, async source => {
     if (!IMAGE_EXTENSIONS.has(source.split(".").pop()?.toLowerCase() ?? "")) {
       issues.push(`不支持的笔记或媒体嵌入：${source}`); return null;
@@ -97,8 +99,16 @@ export async function prepareWechatMarkdown(body: string,
     return `![${(source.split("/").pop() ?? source).replace(/[\[\]\\]/g, "\\$&")}](${url})`;
   });
   const markdown = await transformMarkdownImages(wiki, async (source, alt, line) => {
-    try { return `<img src="${escapeHtml(await resolve(source))}" alt="${escapeHtml(alt)}" />`; }
-    catch (error) { issues.push(`第 ${line} 行 · ${source}：${(error as Error).message}`); return `[图片处理失败：${escapeHtml(alt || source)}]`; }
+    try {
+      const url = await resolve(source);
+      imageReferences.push({ source, line, status: "ready" });
+      return `<img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}" />`;
+    } catch (error) {
+      const message = (error as Error).message;
+      imageReferences.push({ source, line, status: "error", error: message });
+      issues.push(`正文第 ${line} 行 · ${source}：${message}`);
+      return `<span>图片处理失败：${escapeHtml(alt || source)}</span>`;
+    }
   });
-  return { markdown, issues };
+  return { markdown, issues, imageReferences };
 }

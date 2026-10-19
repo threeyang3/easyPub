@@ -53,13 +53,18 @@
 /* WeChat workbench: every selector is scoped; none style other platform views. */
 .easy-pub-wechat {
   --epw-green: #28735c;
-  padding: 0 14px 18px;
+  padding: 0 14px;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
   overflow-y: auto;
   container-type: inline-size;
 }
-.easy-pub-wechat .epw-header { padding: 24px 2px 16px; border-bottom: 1px solid var(--background-modifier-border); }
+.easy-pub-wechat .epw-header { padding: 10px 2px 6px; border-bottom: 1px solid var(--background-modifier-border); max-height:30%; overflow:auto; flex-shrink:0; }
 .easy-pub-wechat .epw-eyebrow { color: var(--epw-green); font-size: 10px; font-weight: 700; letter-spacing: 2px; }
-.easy-pub-wechat .epw-header h2 { margin: 7px 0 10px; font-family: "Noto Serif SC", "Songti SC", "SimSun", serif; font-size: 24px; }
+.easy-pub-wechat .epw-header h2 { margin: 4px 0; font-family: "Noto Serif SC", "Songti SC", "SimSun", serif; font-size: 20px; }
 .easy-pub-wechat .epw-identity { font-size: 12px; color: var(--text-muted); overflow-wrap: anywhere; }
 .easy-pub-wechat .epw-tools, .easy-pub-wechat .epw-footer { display: flex; flex-wrap: wrap; gap: 7px; padding: 12px 0; }
 .easy-pub-wechat .epw-tools button, .easy-pub-wechat .epw-footer button { font-size: 12px; }
@@ -74,7 +79,7 @@
 .easy-pub-wechat .epw-field textarea { min-height: 76px; resize: vertical; }
 .easy-pub-wechat .epw-tabs { display:flex; gap:16px; margin:4px 0 12px; border-bottom:1px solid var(--background-modifier-border); }
 .easy-pub-wechat .epw-tabs button { border:0; border-radius:0; box-shadow:none; padding:8px 0; background:transparent; color:var(--text-muted); font-size:12px; }
-.easy-pub-wechat .epw-tabs button[aria-selected="true"] { color:var(--epw-green); border-bottom:2px solid var(--epw-green); }
+.easy-pub-wechat .epw-tabs button[aria-pressed="true"], .easy-pub-wechat .epw-tabs button[aria-expanded="true"] { color:var(--epw-green); border-bottom:2px solid var(--epw-green); }
 .easy-pub-wechat .epw-paper[hidden], .easy-pub-wechat .epw-inspector[hidden] { display:none; }
 .easy-pub-wechat .epw-section select { margin: 0 0 8px; }
 .easy-pub-wechat .epw-cover-source { display: block; color: var(--text-muted); overflow-wrap: anywhere; margin: 8px 0; }
@@ -90,7 +95,16 @@
 .easy-pub-wechat .epw-issues { border-left: 3px solid var(--text-error); padding: 1px 10px; background: var(--background-secondary); margin: 10px 0; }
 .easy-pub-wechat .epw-issues p, .easy-pub-wechat .epw-warning { font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .easy-pub-wechat .epw-warning { color: var(--text-warning); }
-.easy-pub-wechat .epw-paper { margin: 16px auto; width: 100%; max-width: 390px; height: calc(100vh - 340px); min-height: 300px; overflow-y: auto; padding: 24px 18px; background: #fff; color: #292d32; border: 1px solid #e0e4e1; border-radius: 5px; box-shadow: 0 8px 24px #00000008; }
+.easy-pub-wechat .epw-body { flex:1 0 180px; min-height:180px; display:grid; grid-template-rows:minmax(0,1fr); gap:10px; }
+.easy-pub-wechat.epw-settings-open .epw-body { grid-template-rows:minmax(0,1fr) minmax(0,1fr); }
+.easy-pub-wechat .epw-inspector { min-height:0; overflow:auto; padding:0 6px 12px; border-top:1px solid var(--background-modifier-border); }
+.easy-pub-wechat .epw-paper { margin: 0 auto; width: 100%; max-width: 390px; min-height:0; overflow-y: auto; padding: 24px 18px; background: #fff; color: #292d32; border: 1px solid #e0e4e1; border-radius: 5px; box-shadow: 0 8px 24px #00000008; overflow-anchor:none; }
+.easy-pub-wechat > .epw-tools, .easy-pub-wechat > .epw-tabs, .easy-pub-wechat > .epw-footer { flex-shrink:0; }
+.easy-pub-wechat > .epw-status { flex-shrink:0; max-height:80px; overflow:auto; }
+@container (min-width: 700px) {
+  .easy-pub-wechat.epw-settings-open .epw-body { grid-template-rows:minmax(0,1fr); grid-template-columns:minmax(0,1fr) minmax(260px,1fr); }
+  .easy-pub-wechat .epw-inspector { border-top:0; border-left:1px solid var(--background-modifier-border); padding-left:14px; }
+}
 .easy-pub-wechat .epw-paper section { user-select: text; }
 .easy-pub-wechat .epw-inspector > button { margin-top: 12px; }
 .easy-pub-wechat-dialog .easy-pub-wechat-details { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-height: 420px; overflow: auto; }

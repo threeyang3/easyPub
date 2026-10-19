@@ -66,7 +66,8 @@ export class WechatView extends ItemView {
     header.createEl("span", { text: "EASYPUB / WECHAT", cls: "epw-eyebrow" });
     header.createEl("h2", { text: "公众号工作台" });
     this.identity = header.createDiv({ cls: "epw-identity", text: "请从公众号本地稿打开此工作台" });
-    const setup = header.createDiv({ cls: "epw-setup-entry" });
+    const setup = header.createEl("details", { cls: "epw-setup-entry" });
+    setup.createEl("summary", { text: "公众号连接设置" });
     setup.createEl("p", { text: this.plugin.hasWechatCredentials() ? "公众号凭据已保存，可检查连接或更换账号。" : "首次同步前，请先连接你的公众号。" });
     this.button(setup, "配置公众号", () => this.plugin.openWechatSetup(() => {
       setup.querySelector("p")!.textContent = "公众号配置已保存，请检查连接并刷新预览。";
@@ -88,12 +89,12 @@ export class WechatView extends ItemView {
     });
     this.button(tools, "打开本地稿", () => this.run(async () => { if (this.file) await this.app.workspace.getLeaf(false).openFile(this.file); }));
     this.status = root.createDiv({ cls: "epw-status", text: "等待选择公众号本地稿" });
-    const tabs = root.createDiv({ cls: "epw-tabs", attr: { role: "tablist", "aria-label": "公众号工作台内容" } });
+    const tabs = root.createDiv({ cls: "epw-tabs", attr: { "aria-label": "预览布局" } });
     this.previewTab = this.button(tabs, "正文预览", () => this.showSettings(false));
     this.settingsTab = this.button(tabs, "信息、配图与封面", () => this.showSettings(true));
-    this.previewTab.setAttribute("role", "tab"); this.settingsTab.setAttribute("role", "tab");
-    this.inspector = root.createDiv({ cls: "epw-inspector", attr: { role: "tabpanel", "aria-label": "信息、配图与封面" } });
-    this.preview = root.createDiv({ cls: "epw-paper", attr: { role: "tabpanel", "aria-label": "公众号正文预览" } });
+    const body = root.createDiv({ cls: "epw-body" });
+    this.preview = body.createDiv({ cls: "epw-paper", attr: { role: "region", "aria-label": "公众号正文预览", tabindex: "0" } });
+    this.inspector = body.createDiv({ cls: "epw-inspector", attr: { role: "region", "aria-label": "信息、配图与封面", tabindex: "0" } });
     this.showSettings(false);
     const footer = root.createDiv({ cls: "epw-footer" });
     this.syncButton = this.button(footer, "同步草稿箱", () => this.run(() => this.sync()));
@@ -117,8 +118,9 @@ export class WechatView extends ItemView {
     const button = parent.createEl("button", { text: label }); button.addEventListener("click", action); return button;
   }
   private showSettings(show: boolean) {
-    this.inspector.hidden = !show; this.preview.hidden = show;
-    this.previewTab.setAttribute("aria-selected", String(!show)); this.settingsTab.setAttribute("aria-selected", String(show));
+    this.inspector.hidden = !show;
+    this.contentEl.classList.toggle("epw-settings-open", show);
+    this.previewTab.setAttribute("aria-pressed", String(!show)); this.settingsTab.setAttribute("aria-expanded", String(show));
   }
   private async run(action: () => Promise<void>) {
     if (this.busy) return;
@@ -144,7 +146,7 @@ export class WechatView extends ItemView {
     if (this.syncButton) this.syncButton.disabled = this.busy || this.stale || this.dirty || !this.prepared || !this.cover || this.prepared.issues.length > 0;
   }
   private invalidate() {
-    this.version++; this.stale = true; this.updateSyncState(); this.message("预览待更新 · 本地稿或附件已变化");
+    this.version++; this.stale = true; this.updateSyncState(); this.message(this.paused ? "预览待更新 · 已暂停自动刷新，请手动刷新或恢复刷新" : "预览待更新 · 本地稿或附件已变化");
     this.rerenderRequested = true;
     if (this.timer) clearTimeout(this.timer);
     if (!this.paused && !this.dirty && !this.busy) this.scheduleRefresh();
@@ -255,18 +257,34 @@ export class WechatView extends ItemView {
       this.cropEditor(covers, "cropSquare", 1, "方形 1:1");
     }
     const images = parent.createEl("details", { cls: "epw-section" });
-    images.createEl("summary", { text: `正文图片 · ${this.prepared?.images.length ?? 0} 张` });
-    for (const image of this.prepared?.images ?? []) {
+    const references = this.prepared?.imageReferences ?? [];
+    const failures = references.filter(ref => ref.status === "error").length;
+    images.createEl("summary", { text: `正文图片 · ${references.length} 处引用${failures ? ` · ${failures} 处失败` : ""}` });
+    images.open = failures > 0;
+    for (const ref of references) {
+      const image = this.prepared?.images.find(image => image.source === ref.source);
       const row = images.createDiv({ cls: "epw-image-row" });
-      row.createEl("img", { attr: { src: image.previewUrl, alt: image.source } });
-      const info = row.createDiv(); info.createEl("span", { text: image.source });
-      info.createEl("small", { text: `${image.width} × ${image.height} · ${Math.ceil(image.originalSize / 1024)} → ${Math.ceil(image.bytes.length / 1024)} KB · ${image.mime.split("/")[1].toUpperCase()}` });
+      if (image) row.createEl("img", { attr: { src: image.previewUrl, alt: ref.source } });
+      const info = row.createDiv(); info.createEl("span", { text: ref.source });
+      if (image) info.createEl("small", { text: `已就绪 · ${image.width} × ${image.height} · ${Math.ceil(image.originalSize / 1024)} → ${Math.ceil(image.bytes.length / 1024)} KB · ${image.mime.split("/")[1].toUpperCase()}` });
+      if (ref.error) info.createEl("small", { text: `处理失败 · ${ref.error}`, cls: "epw-error" });
+      this.button(info, `定位正文第 ${ref.line} 行`, () => this.run(() => this.openImageReference(ref.line)));
     }
     if (this.prepared?.issues.length) {
       const issues = parent.createDiv({ cls: "epw-issues" });
       for (const issue of this.prepared.issues) issues.createEl("p", { text: issue });
     }
     this.button(parent, "保存设置并刷新", () => this.run(() => this.saveArticle()));
+  }
+  private async openImageReference(bodyLine: number) {
+    const file = this.file;
+    if (!file || file.path !== this.snapshotPath || await this.app.vault.read(file) !== this.snapshot) {
+      throw new Error("本地稿已变化，请先刷新预览再定位图片");
+    }
+    const body = parseFrontMatter(this.snapshot).content;
+    const prefix = this.snapshot.slice(0, this.snapshot.length - body.length);
+    const line = prefix.split(/\r?\n/).length - 1 + bodyLine - 1;
+    await this.app.workspace.getLeaf(false).openFile(file, { eState: { line } });
   }
   private relativeCoverPath(path: string): string {
     // Stored paths use the same relative-to-draft convention as Markdown images.
@@ -442,6 +460,6 @@ export class WechatView extends ItemView {
     this.closed = true; this.version++;
     if (this.timer) clearTimeout(this.timer);
     this.disposePrepared(); this.contentEl.empty();
-    this.contentEl.classList.remove("easy-pub-wechat"); this.contentEl.removeAttribute("inert");
+    this.contentEl.classList.remove("easy-pub-wechat", "epw-settings-open"); this.contentEl.removeAttribute("inert");
   }
 }

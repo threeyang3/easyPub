@@ -37,14 +37,14 @@ const app: any = {
       listeners.get(event)!.add(listener); return () => listeners.get(event)?.delete(listener);
     },
   },
-  metadataCache: { getFirstLinkpathDest: () => attachment },
+  metadataCache: { getFirstLinkpathDest: (path: string) => path.includes('missing') ? null : attachment },
   fileManager: { processFrontMatter: async (_file: TFile, callback: (data: any) => void) => {
     const parsed = parseFrontMatter(text);
     callback(parsed.data);
     text = stringifyFrontMatter(parsed.content, parsed.data);
     emit("modify", file);
   } },
-  workspace: { getLeaf: () => ({ openFile: async () => {} }) },
+  workspace: { getLeaf: () => ({ openFile: async (file: TFile, options: unknown) => { globals.fixtureOpened = { path: file.path, options }; } }) },
 };
 const plugin: any = { app, settings: normalizeSettings(null), wechatSyncInProgress: false, wechatCredentialRevision: 0,
   hasWechatCredentials: () => true, openWechatSetup: () => {},
@@ -81,6 +81,7 @@ globals.fixture = { view,
   draftState: () => plugin.settings.wechat.drafts[":local-id"],
   markUncertain: () => { plugin.settings.wechat.drafts[":local-id"] = { mediaId: "old", uncertain: true }; },
   read: () => text,
+  replace: (value: string) => { text = value; emit("modify", file); },
   modify: (suffix: string) => { text += `\n\n${suffix}`; emit("modify", file); },
   setDelay: (value: number) => { delay = value; },
   sourceReads: () => sourceReads,

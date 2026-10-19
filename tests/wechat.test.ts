@@ -29,6 +29,12 @@ async function testMarkdownAndHtml() {
   });
   assert.match(prepared.markdown, /blob:good/);
   assert.equal(prepared.issues.length, 2);
+  assert.deepEqual(prepared.imageReferences.map(ref => [ref.source, ref.line, ref.status]), [['a.png', 1, 'ready'], ['b.png', 3, 'error']]);
+  const duplicates = await prepareWechatMarkdown('![one](same.png)\n\n![[missing.png]]\n\n![two](same.png)\n\n```md\n![example](ignore.png)\n```', async source => {
+    if (source === 'missing.png') throw new Error('missing');
+    return 'blob:good';
+  });
+  assert.deepEqual(duplicates.imageReferences.map(ref => [ref.source, ref.line, ref.status]), [['same.png', 1, 'ready'], ['missing.png', 3, 'error'], ['same.png', 5, 'ready']]);
   assert.match(prepared.markdown, /`!\[\[sample.png\]\]`/);
   const examples = "> ```md\n> ![[quoted.png]]\n> ```\n\n`multi\n![[inline.png]]\nline`\n\n\\![[escaped.png]]\n\n![[actual.png]]";
   const wikiCalls: string[] = [];

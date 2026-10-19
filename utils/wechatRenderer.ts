@@ -50,6 +50,9 @@ export function normalizeWechatHtml(container: HTMLElement, images: WechatImage[
       const image = imageMap.get(src);
       if (!image) { issues.push(`未能处理的 HTML 图片：${alt || src}`); el.remove(); continue; }
       el.setAttribute("src", `easy-pub-image://${image.hash}`); el.setAttribute("alt", alt);
+      // Reserve the image's aspect ratio before decoding, so refresh does not
+      // temporarily collapse the preview and clamp its reading position.
+      el.setAttribute("width", String(image.width)); el.setAttribute("height", String(image.height));
     }
     if (tag === "a") {
       if (internal || !/^https?:\/\//i.test(href)) { el.replaceWith(...Array.from(el.childNodes)); continue; }
@@ -100,7 +103,7 @@ export async function renderWechatDocument(app: App, body: string, filePath: str
     await MarkdownRenderer.render(app, prepared.markdown, container, filePath, component);
     const issues = [...prepared.issues, ...normalizeWechatHtml(container, images)];
     container.setAttribute("style", WECHAT_TEMPLATE.section);
-    return { html: container.outerHTML, images, issues: [...new Set(issues)] };
+    return { html: container.outerHTML, images, issues: [...new Set(issues)], imageReferences: prepared.imageReferences };
   } catch (error) { releaseWechatImages(images); throw error; }
 }
 

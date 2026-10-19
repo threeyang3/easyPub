@@ -12,12 +12,14 @@ export class EasyPubSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
+    containerEl.addClass("easy-pub-settings");
 
     new Setting(containerEl).setName("EasyPub").setHeading();
+    containerEl.createEl("p", { text: "按需要配置使用的平台。公众号账号通过向导保存；其余设置修改后自动保存。", cls: "ep-settings-intro" });
     new Setting(containerEl).setName("Hexo").setHeading();
     new Setting(containerEl)
       .setName("Hexo 仓库路径")
-      .setDesc("Hexo 博客根目录的绝对路径，例如 /path/to/blog")
+      .setDesc("Hexo 博客根目录的绝对路径，例如 E:\\Blog 或 /home/user/blog")
       .addText((text) =>
         text
           .setPlaceholder("/path/to/blog")
@@ -40,10 +42,10 @@ export class EasyPubSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl).setName("其他平台").setHeading();
+    new Setting(containerEl).setName("本地发布稿").setHeading();
     new Setting(containerEl)
       .setName("发布根目录")
-      .setDesc("其他平台的发布目录，相对于 Vault 根目录")
+      .setDesc("知乎、微信公众号、小红书的本地稿目录，相对于 Vault 根目录")
       .addText((text) =>
         text
           .setPlaceholder("发布")
@@ -55,27 +57,9 @@ export class EasyPubSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl).setName("微信公众号").setHeading();
-    new Setting(containerEl).setName("首次配置向导").setDesc("准备账号 → 保存凭据 → 检查连接；也可用于更换账号")
+    new Setting(containerEl).setName(this.plugin.hasWechatCredentials() ? "管理公众号账号" : "连接公众号")
+      .setDesc(this.plugin.hasWechatCredentials() ? `当前 AppID：${this.plugin.settings.wechat.appId}。通过向导检查连接或更换账号，确认保存后生效。` : "准备账号 → 保存凭据 → 检查连接；需要 AppID、AppSecret 和 API IP 白名单。")
       .addButton(button => button.setButtonText("引导配置公众号").setCta().onClick(() => this.plugin.openWechatSetup(() => this.display())));
-    new Setting(containerEl).setName("AppID").setDesc("单个公众号；切换账号后素材缓存与草稿关联自动隔离")
-      .addText(text => text.setValue(this.plugin.settings.wechat.appId).onChange(async value => {
-        await this.plugin.setWechatAppId(value.trim());
-      }));
-    new Setting(containerEl).setName("AppSecret")
-      .setDesc("点击保存后使用系统加密保存；系统加密不可用时仅在本次会话有效。不会显示已保存的密钥。")
-      .addText(text => {
-        text.inputEl.type = "password";
-        text.setPlaceholder(this.plugin.settings.wechat.encryptedSecret ? "已加密保存；输入新值替换" : "输入 AppSecret");
-        text.inputEl.autocomplete = "off";
-        new Setting(containerEl).setName("保存密钥").addButton(button => button.setButtonText("保存 AppSecret").onClick(async () => {
-          if (!text.getValue().trim()) return;
-          try {
-            const persisted = await this.plugin.setWechatSecret(text.getValue().trim());
-            text.setValue("");
-            text.setPlaceholder(persisted ? "已加密保存" : "本次会话已保存，重启后需重新输入");
-          } catch { text.setPlaceholder("密钥保存失败，请重试"); }
-        }));
-      });
     new Setting(containerEl).setName("默认作者").setDesc("仅用于尚未设置作者的公众号本地稿")
       .addText(text => text.setValue(this.plugin.settings.wechat.defaultAuthor).onChange(async value => {
         this.plugin.settings.wechat.defaultAuthor = value;

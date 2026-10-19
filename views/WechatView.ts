@@ -88,7 +88,7 @@ export class WechatView extends ItemView {
       else void this.run(() => this.refresh(true));
     });
     this.button(tools, "打开本地稿", () => this.run(async () => { if (this.file) await this.app.workspace.getLeaf(false).openFile(this.file); }));
-    this.status = root.createDiv({ cls: "epw-status", text: "等待选择公众号本地稿" });
+    this.status = root.createDiv({ cls: "epw-status", text: "等待选择公众号本地稿", attr: { role: "status", "aria-live": "polite" } });
     const tabs = root.createDiv({ cls: "epw-tabs", attr: { "aria-label": "预览布局" } });
     this.previewTab = this.button(tabs, "正文预览", () => this.showSettings(false));
     this.settingsTab = this.button(tabs, "信息、配图与封面", () => this.showSettings(true));
@@ -236,8 +236,16 @@ export class WechatView extends ItemView {
     for (const [key, label, limit] of [["title", "标题", 32], ["author", "作者", 16], ["digest", "摘要", 120], ["sourceUrl", "阅读原文链接", 1024]] as const) {
       const wrapper = fields.createEl("label", { cls: "epw-field", text: label });
       const input = key === "digest" ? wrapper.createEl("textarea") : wrapper.createEl("input", { type: "text" });
-      input.value = this.article[key] ?? ""; input.maxLength = limit * 2;
-      input.addEventListener("input", () => { this.article[key] = input.value; this.changed(); });
+      input.value = this.article[key] ?? "";
+      const count = wrapper.createEl("small", { cls: "epw-field-count" });
+      const updateCount = () => {
+        const length = key === "sourceUrl" ? new TextEncoder().encode(input.value).length : Array.from(input.value).length;
+        count.textContent = `${length} / ${limit} ${key === "sourceUrl" ? "字节" : "字"}${length > limit ? " · 超出限制，请缩短" : ""}`;
+        input.setAttribute("aria-invalid", String(length > limit));
+        count.classList.toggle("epw-error", length > limit);
+      };
+      updateCount();
+      input.addEventListener("input", () => { this.article[key] = input.value; updateCount(); this.changed(); });
     }
     const covers = parent.createEl("details", { cls: "epw-section" }); covers.open = true;
     this.button(fields, "从正文重新提取摘要", () => {
@@ -274,7 +282,8 @@ export class WechatView extends ItemView {
       const issues = parent.createDiv({ cls: "epw-issues" });
       for (const issue of this.prepared.issues) issues.createEl("p", { text: issue });
     }
-    this.button(parent, "保存设置并刷新", () => this.run(() => this.saveArticle()));
+    const actions = parent.createDiv({ cls: "epw-inspector-actions" });
+    this.button(actions, "保存设置并刷新", () => this.run(() => this.saveArticle())).addClass("mod-cta");
   }
   private async openImageReference(bodyLine: number) {
     const file = this.file;

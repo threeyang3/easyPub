@@ -25,6 +25,8 @@ export class DiffModal extends Modal {
     contentEl.createEl("p", {
       text: `标题：${this.diff.meta.title || "Untitled"}`,
     });
+    contentEl.createEl("p", { text: this.diff.isNew ? "确认后创建目标稿件。" : "确认后将按下方差异更新目标稿件，请先核对。" });
+    contentEl.createEl("p", { text: `目标：${this.diff.targetPath}`, cls: "ep-diff-target" });
 
     if (!this.diff.isNew && this.diff.targetContent) {
       this.renderDiff(contentEl);
@@ -44,7 +46,7 @@ export class DiffModal extends Modal {
       )
       .addButton((btn) =>
         btn
-          .setButtonText("继续编辑")
+          .setButtonText(this.diff.isNew ? "确认创建稿件" : "确认更新稿件")
           .setCta()
           .onClick(() => {
             this.respond(true);

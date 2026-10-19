@@ -107,6 +107,21 @@ try {
   const screenshot = process.env.EASYPUB_UI_SCREENSHOT ?? path.join(temp, "workbench.png");
   await page.screenshot({ path: screenshot, fullPage: true });
   await page.getByRole("button", { name: "信息、配图与封面", exact: true }).click();
+  const titleInput = page.locator('.epw-field input').first();
+  const originalTitle = await titleInput.inputValue();
+  await titleInput.fill('😀'.repeat(33));
+  assert.equal(await titleInput.getAttribute('aria-invalid'), 'true');
+  assert.match(await page.locator('.epw-field-count').first().innerText(), /33 \/ 32/);
+  assert.equal(await page.getByRole('button', { name:'同步草稿箱', exact:true }).isDisabled(), true);
+  await titleInput.fill(originalTitle);
+  assert.equal(await titleInput.getAttribute('aria-invalid'), 'false');
+  await page.getByRole('button', { name:'保存设置并刷新', exact:true }).click();
+  await page.waitForFunction(() => !document.querySelector('.epw-footer .mod-cta').disabled);
+  await page.evaluate(() => {
+    const unrelated = document.createElement('div'); unrelated.className = 'diff-container';
+    unrelated.id = 'unrelated-diff'; document.querySelector('main').appendChild(unrelated);
+  });
+  assert.equal(await page.locator('#unrelated-diff').evaluate(el => getComputedStyle(el).maxHeight), 'none');
   const narrowPanels = await page.evaluate(() => {
     const p = document.querySelector('.epw-paper').getBoundingClientRect();
     const i = document.querySelector('.epw-inspector').getBoundingClientRect();
@@ -245,6 +260,11 @@ try {
   await page.screenshot({ path: screenshot.replace(/\.png$/, '-comparison.png'), fullPage: true });
   await page.getByRole('button', { name: '取消', exact: true }).click();
   await page.locator("#workbench").evaluate(el => { el.scrollTop = 0; });
+  await page.evaluate(() => document.body.classList.add('theme-dark'));
+  assert.equal(await page.locator('.easy-pub-wechat').evaluate(el => getComputedStyle(el).getPropertyValue('--epw-green').trim()), '#79bea5');
+  await page.getByRole('button', { name:'信息、配图与封面', exact:true }).focus();
+  assert.equal(await page.getByRole('button', { name:'信息、配图与封面', exact:true }).evaluate(el => el === document.activeElement), true);
+  await page.evaluate(() => document.body.classList.remove('theme-dark'));
   await page.screenshot({ path: screenshot.replace(/\.png$/, "-cover.png"), fullPage: true });
   await page.evaluate(() => window.fixture.close());
   assert.equal(await page.locator(".epw-header").count(), 0);

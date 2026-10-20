@@ -11,6 +11,7 @@ import {
   getFrontMatterString,
   mergePublishedFrontMatter,
   mergeSourceFrontMatter,
+  normalizeChildReferences,
 } from "./utils/frontMatter";
 import { buildHexo, deployHexo, validateHexoBlog } from "./utils/hexoCommands";
 import { DiffModal } from "./modals/DiffModal";
@@ -18,6 +19,7 @@ import { BatchPubIdModal } from "./modals/BatchPubIdModal";
 import { fillMissingPubIds, externalPubIdDocuments, needsPubId, PubIdBatchResult } from "./utils/batchPubIds";
 import {
   getPublishPath,
+  getPublishBackupDirectory,
   getTargetPath,
   getSubFolder,
   createWikiLink,
@@ -34,7 +36,8 @@ import { getPicGoHeartbeatUrl, uploadWithPicGo } from "./utils/picgo";
 import { assertPublishUnchanged, completeControlRoomMetadata } from "./utils/publishSafety";
 import { writeImmutableAsset, writePublishedFile } from "./utils/publishFiles";
 import { withTimeout } from "./utils/async";
-import { assertPublishIdentity } from "./utils/publishIdentity";
+import { assertPublishIdentity, PublishIdentityIndex } from "./utils/publishIdentity";
+import { backupGitMessage, inspectPublishBackups } from "./utils/publishBackups";
 import { normalizeSettings, publishSettingsFingerprint } from "./utils/settings";
 import { WechatApi } from "./utils/wechatApi";
 import { decryptWechatSecret, encryptWechatSecret } from "./utils/wechatSecret";
@@ -77,8 +80,16 @@ export default class EasyPub extends Plugin {
   private wechatApi?: WechatApi;
   private wechatApiIdentity = "";
 
+  private identityIndex?: PublishIdentityIndex;
+
   async onload() {
     await this.loadSettings();
+    this.identityIndex = new PublishIdentityIndex();
+    const invalidateIdentity = (file: unknown) => this.identityIndex?.invalidate(file);
+    this.registerEvent(this.app.vault.on("create", invalidateIdentity));
+    this.registerEvent(this.app.vault.on("modify", invalidateIdentity));
+    this.registerEvent(this.app.vault.on("delete", invalidateIdentity));
+    this.registerEvent(this.app.vault.on("rename", invalidateIdentity));
 
     this.registerView(WECHAT_VIEW, leaf => new WechatView(leaf, this));
     this.addCommand({ id: "wechat-setup", name: "引导配置微信公众号", callback: () => this.openWechatSetup() });
@@ -166,7 +177,7 @@ export default class EasyPub extends Plugin {
     } finally { this.pubIdBatchInProgress = false; }
   }
 
-  onunload() { this.wechatSessionSecret = ""; this.wechatApi = undefined; }
+  onunload() { this.wechatSessionSecret = ""; this.wechatApi = undefined; this.identityIndex?.clear(); }
 
   relativeWechatAttachment(draftPath: string, attachmentPath: string): string {
     return relativeVaultAttachment(draftPath, attachmentPath);
@@ -448,17 +459,24 @@ export default class EasyPub extends Plugin {
   ): Promise<string | null> {
     const subFolder = getSubFolder(platform, meta);
     const matches = new Map<string, string>();
+    const inspected = new Set<string>();
+    const invalid: string[] = [];
+    const inspect = async (file: string) => {
+      if (inspected.has(file)) return;
+      inspected.add(file);
+      const content = await this.readPublishFile(platform, file);
+      let parsed;
+      try { parsed = parseFrontMatter(content, true); }
+      catch { invalid.push(file); return; }
+      if (getFrontMatterString(parsed.data, "pub_id") === pubId) matches.set(file, content);
+    };
 
     // 先检查已知路径
     const title = getFrontMatterString(meta, "title");
     if (title) {
       const expectedPath = getTargetPath(platform, this.settings, title, subFolder);
       if (await this.publishPathExists(platform, expectedPath)) {
-        const content = await this.readPublishFile(platform, expectedPath);
-        const parsed = parseFrontMatter(content);
-        if (getFrontMatterString(parsed.data, "pub_id") === pubId) {
-          matches.set(expectedPath, content);
-        }
+        await inspect(expectedPath);
       }
     }
 
@@ -484,17 +502,14 @@ export default class EasyPub extends Plugin {
         : await this.listPublishFiles(platform, publishPath);
       for (const file of files) {
         if (file.endsWith(".md")) {
-          const content = await this.readPublishFile(platform, file);
-          const parsed = parseFrontMatter(content);
-          if (getFrontMatterString(parsed.data, "pub_id") === pubId) {
-            matches.set(file, content);
-          }
+          await inspect(file);
         }
       }
     }
+    if (invalid.length) throw new Error(`以下发布稿的 Front Matter 无法解析，不能排除 pub_id 冲突。请修复后重新发布，文件未被修改：\n${invalid.join("\n")}`);
     if (sourcePath) await assertPublishIdentity(this.app, sourcePath, pubId,
       [...matches].map(([path, content]) => ({ path, content })),
-      PLATFORMS.filter(platform => !platform.isExternal).map(platform => getPublishPath(platform, this.settings)));
+      PLATFORMS.filter(platform => !platform.isExternal).map(platform => getPublishPath(platform, this.settings)), this.identityIndex);
     return matches.keys().next().value ?? null;
   }
 
@@ -595,7 +610,9 @@ export default class EasyPub extends Plugin {
       }
       await this.writePublishFile(platform, diff.targetPath, finalContent, diff.targetContent);
       targetWritten = true;
-      await this.updateSourceFile(sourceFile, platform, diff.targetPath, diff.pub_id);
+      await this.validatePublishSource(diff, sourceFile);
+      await this.updateSourceFile(sourceFile, platform, diff.targetPath, diff.pub_id,
+        diff.sourceSnapshot === undefined ? undefined : { path: diff.sourcePath, data: parseFrontMatter(diff.sourceSnapshot).data });
     } catch (error) {
       if (targetWritten) {
         let recovery: string;
@@ -687,11 +704,17 @@ export default class EasyPub extends Plugin {
     sourceFile: TFile,
     platform: Platform,
     targetPath: string,
-    pubId: string
+    pubId: string,
+    expected?: { path: string; data: FrontMatterData }
   ) {
     const childReference = formatChildReference(platform, targetPath);
     const obsoleteChildReferences = getObsoleteChildReferences(platform, targetPath);
     await this.app.fileManager.processFrontMatter(sourceFile, (frontmatter) => {
+      if (expected && (sourceFile.path !== expected.path
+        || ["pub_id", "source_file"].some(key => getFrontMatterString(frontmatter, key) !== getFrontMatterString(expected.data, key))
+        || JSON.stringify(normalizeChildReferences(frontmatter.子文件)) !== JSON.stringify(normalizeChildReferences(expected.data.子文件)))) {
+        throw new Error("源文章身份或关联已变化，已停止写回，请重新发布");
+      }
       const sourceData = mergeSourceFrontMatter(
         frontmatter as FrontMatterData,
         pubId,
@@ -778,10 +801,21 @@ export default class EasyPub extends Plugin {
     return this.app.vault.read(file);
   }
 
+  private backupNoticeRoots?: Set<string>;
+
   async writePublishFile(platform: Platform, filePath: string, content: string, expected?: string | null): Promise<void> {
     if (platform.isExternal) {
+      const backupDirectory = getPublishBackupDirectory(this.settings.hexoRepoPath);
+      const notified = this.backupNoticeRoots ??= new Set();
+      if (expected !== null && !notified.has(backupDirectory)) {
+        let message: string;
+        try { message = backupGitMessage((await inspectPublishBackups(this.settings.hexoRepoPath)).git); }
+        catch { message = "无法检查备份目录和 Git 状态，请在设置中检查备份。"; }
+        new Notice(`Hexo 覆盖前会保留全文备份，可能包含未公开内容。${message} 位置：${backupDirectory}`, 15000);
+        notified.add(backupDirectory);
+      }
       await writePublishedFile(filePath, content, expected,
-        path.join(path.resolve(this.settings.hexoRepoPath), ".easy-pub-backups"));
+        backupDirectory);
       return;
     }
 

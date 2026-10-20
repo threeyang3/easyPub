@@ -7,6 +7,11 @@ export function getPlatform(id: string): Platform | undefined {
   return PLATFORMS.find((p) => p.id === id);
 }
 
+export function getPublishBackupDirectory(blogPath: string): string {
+  if (!path.isAbsolute(blogPath)) throw new Error("请先填写 Hexo 仓库的绝对路径");
+  return path.join(path.resolve(blogPath), ".easy-pub-backups");
+}
+
 export function getAllPlatforms(): Platform[] {
   return PLATFORMS;
 }

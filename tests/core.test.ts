@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile, readdir } from "node:fs/promises";
 import os from "node:os";
 import fsPromises from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { inspectPublishBackups } from "../utils/publishBackups";
 import path from "node:path";
 import { mergePublishedFrontMatter, mergeSourceFrontMatter } from "../utils/frontMatter";
 import { generateHexoUrl, getHexoRootPath } from "../utils/linkUtils";
@@ -39,6 +41,27 @@ async function run() {
   await runReliabilityTests();
   await runWechatTests();
   const assetsRoot = await mkdtemp(path.join(os.tmpdir(), 'easy-pub-assets-'));
+  const backupRepo = await mkdtemp(path.join(os.tmpdir(), 'easy-pub-backup-git-'));
+  try {
+    await assert.rejects(inspectPublishBackups('relative/blog'), /绝对路径/);
+    assert.equal((await inspectPublishBackups(backupRepo)).git, 'unknown');
+    execFileSync('git', ['init', '--quiet', backupRepo]);
+    assert.equal((await inspectPublishBackups(backupRepo)).git, 'unprotected');
+    const backupFolder = path.join(backupRepo, '.easy-pub-backups');
+    await mkdir(backupFolder);
+    const backup = path.join(backupFolder, 'a'.repeat(64) + '.bak');
+    await writeFile(backup, 'private draft');
+    await writeFile(path.join(backupFolder, 'unrelated.txt'), 'not counted');
+    const stats = await inspectPublishBackups(backupRepo);
+    assert.equal(stats.count, 1);
+    assert.equal(stats.bytes, Buffer.byteLength('private draft'));
+    await writeFile(path.join(backupRepo, '.gitignore'), '.easy-pub-backups/\n');
+    assert.equal((await inspectPublishBackups(backupRepo)).git, 'ignored');
+    execFileSync('git', ['add', '-f', '--', backup], { cwd: backupRepo });
+    assert.equal((await inspectPublishBackups(backupRepo)).git, 'tracked');
+    assert.equal(await readFile(backup, 'utf8'), 'private draft');
+    assert.equal(await readFile(path.join(backupRepo, '.gitignore'), 'utf8'), '.easy-pub-backups/\n');
+  } finally { await rm(backupRepo, { recursive: true, force: true }); }
   try {
     const bytes = Buffer.from('fixture image bytes');
     const hash = createHash('sha256').update(bytes).digest('hex');
@@ -125,6 +148,17 @@ async function run() {
     await writeFile(target, original);
     const source = Object.assign(new TFile(), { path: 'Draft.md', basename: 'Draft', extension: 'md' });
     assert.equal(await plugin.findArticleByPubId(platform, 'draft-id', { title: 'Draft' }), target);
+    const brokenTargets = [path.join(integrationRoot, 'source/_posts/broken-one.md'), path.join(integrationRoot, 'source/_drafts/broken-two.md')];
+    for (const broken of brokenTargets) await writeFile(broken, '---\npub_id: [broken\n---\nuntouched');
+    await assert.rejects(plugin.findArticleByPubId(platform, 'draft-id', { title: 'Draft' }), error => {
+      assert.match(String(error), /不能排除 pub_id 冲突/);
+      for (const broken of brokenTargets) assert.ok(String(error).includes(broken));
+      return true;
+    });
+    for (const broken of brokenTargets) {
+      assert.equal(await readFile(broken, 'utf8'), '---\npub_id: [broken\n---\nuntouched');
+      await rm(broken);
+    }
     const meta = await plugin.buildPublishedFrontMatter(platform, source, { title: 'Draft', workflow: 'published' }, original, 'draft-id', '2026-10-11', target);
     assert.equal(meta.workflow, 'pending');
     assert.equal(meta.abbrlink, 'abcd');

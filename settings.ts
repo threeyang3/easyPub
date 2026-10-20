@@ -1,5 +1,6 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import type EasyPub from "./main";
+import { backupGitMessage, inspectPublishBackups } from "./utils/publishBackups";
 
 export class EasyPubSettingTab extends PluginSettingTab {
   plugin: EasyPub;
@@ -41,6 +42,19 @@ export class EasyPubSettingTab extends PluginSettingTab {
             await this.plugin.openHexoControlRoom();
           })
       );
+
+    const backups = new Setting(containerEl).setName("发布历史备份")
+      .setDesc("覆盖 Hexo 稿件前保留全文备份，可能包含未公开内容。不会自动清理。")
+      .addButton(button => button.setButtonText("检查备份").onClick(async () => {
+        const repository = this.plugin.settings.hexoRepoPath;
+        button.setDisabled(true);
+        try {
+          const status = await inspectPublishBackups(repository);
+          if (repository !== this.plugin.settings.hexoRepoPath || !containerEl.contains(backups.settingEl)) return;
+          backups.setDesc(`${status.directory}；${status.count} 份备份，共 ${status.bytes.toLocaleString()} 字节。${backupGitMessage(status.git)} 恢复或清理前请停止发布，打开 .bak 核对原文，另存需要保留的副本后再手动处理。`);
+        } catch (error) { backups.setDesc(`无法检查备份：${(error as Error).message}`); }
+        finally { button.setDisabled(false); }
+      }));
 
     new Setting(containerEl).setName("本地发布稿").setHeading();
     new Setting(containerEl)

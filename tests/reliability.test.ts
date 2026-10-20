@@ -11,7 +11,7 @@ import { withTimeout } from "../utils/async";
 import { isSourcePublishTarget } from "../utils/platforms";
 import { parseFrontMatter, parseYamlDocument, stringifyFrontMatter } from "../utils/frontMatter";
 import { buildHexo, getHexoNodeExecutable, validateHexoDeployment } from "../utils/hexoCommands";
-import { assertPublishIdentity } from "../utils/publishIdentity";
+import { assertPublishIdentity, PublishIdentityIndex } from "../utils/publishIdentity";
 
 async function expectReportedFailure(action: () => Promise<unknown>) {
   const error = console.error;
@@ -28,6 +28,51 @@ async function expectReportedFailure(action: () => Promise<unknown>) {
 }
 
 export async function runReliabilityTests() {
+  const identityIndex = new PublishIdentityIndex();
+  const indexedFiles = Array.from({ length: 200 }, (_, i) => Object.assign(new TFile(), {
+    path: `notes/${i}.md`, stat: { mtime: 1, size: 100 },
+  }));
+  let indexedBody = '---\npub_id: unrelated\n---\nbody';
+  let reads = 0;
+  const indexedApp = { vault: {
+    getMarkdownFiles: () => indexedFiles,
+    read: async () => { reads++; return indexedBody; },
+  } } as any;
+  const checkIndexed = () => assertPublishIdentity(indexedApp, 'source.md', 'wanted', [], [], identityIndex);
+  await checkIndexed();
+  assert.equal(reads, 200);
+  await checkIndexed();
+  assert.equal(reads, 200, 'Unchanged unrelated notes should not be re-read');
+  indexedBody = '---\npub_id: wanted\n---\nbody';
+  identityIndex.invalidate(indexedFiles[0]); // Even when mtime and size are identical.
+  await assert.rejects(checkIndexed(), /另一篇源文章/);
+  const afterConflict = reads;
+  await assert.rejects(checkIndexed(), /另一篇源文章/);
+  assert.equal(reads, afterConflict + 1, 'Matching candidates must always be read again');
+  indexedBody = '---\npub_id: unrelated\n---\nbody';
+  await checkIndexed();
+  indexedFiles[1].stat.mtime++;
+  const beforeStatChange = reads;
+  await checkIndexed();
+  assert.equal(reads, beforeStatChange + 1);
+  identityIndex.invalidate({}); // Folder rename invalidates all entries.
+  const beforeFolderChange = reads;
+  await checkIndexed();
+  assert.equal(reads, beforeFolderChange + 200);
+  identityIndex.clear();
+  let invalidateDuringRead = true;
+  indexedApp.vault.read = async () => {
+    reads++;
+    if (invalidateDuringRead) { invalidateDuringRead = false; identityIndex.invalidate(indexedFiles[0]); }
+    return indexedBody;
+  };
+  await checkIndexed();
+  const afterRacingRead = reads;
+  await checkIndexed();
+  assert.equal(reads, afterRacingRead + 1, 'In-flight invalidation must not install stale cache');
+  identityIndex.invalidate(indexedFiles[0]);
+  indexedApp.vault.read = async () => { throw new Error('read denied'); };
+  await assert.rejects(checkIndexed(), /read denied/);
   const atomicPlugin = Object.create(EasyPub.prototype) as EasyPub;
   const atomicFile = Object.assign(new TFile(), { path: '发布/知乎/atomic.md' });
   let atomicContent = 'concurrent edit';
@@ -37,6 +82,34 @@ export async function runReliabilityTests() {
     modify: async () => { throw new Error('Non-atomic write must not be used'); },
   } } as any;
   const vaultPlatform = PLATFORMS.find(p => p.id === 'zhihu')!;
+  const originalIdentity = { pub_id: 'legacy-id', 子文件: ['[[old]]'], custom: 'preserved' };
+  for (const changed of [
+    { ...originalIdentity, pub_id: 'another-id' },
+    { ...originalIdentity, pub_id: undefined },
+    { ...originalIdentity, source_file: '[[another-source]]' },
+    { ...originalIdentity, 子文件: ['[[different]]'] },
+  ]) {
+    const before = JSON.stringify(changed);
+    atomicPlugin.app.fileManager = { processFrontMatter: async (_file: TFile, callback: (data: any) => void) => callback(changed) } as any;
+    await assert.rejects(atomicPlugin.updateSourceFile(atomicFile, vaultPlatform, 'published.md', 'legacy-id',
+      { path: atomicFile.path, data: originalIdentity }), /身份或关联已变化/);
+    assert.equal(JSON.stringify(changed), before);
+  }
+  const unchanged = { ...originalIdentity };
+  atomicPlugin.app.fileManager = { processFrontMatter: async (_file: TFile, callback: (data: any) => void) => callback(unchanged) } as any;
+  await assert.rejects(atomicPlugin.updateSourceFile(atomicFile, vaultPlatform, 'published.md', 'legacy-id',
+    { path: 'old-source-name.md', data: originalIdentity }), /身份或关联已变化/);
+  await atomicPlugin.updateSourceFile(atomicFile, vaultPlatform, 'published.md', 'legacy-id',
+    { path: atomicFile.path, data: originalIdentity });
+  assert.equal(unchanged.pub_id, 'legacy-id');
+  assert.equal(unchanged.custom, 'preserved');
+  assert.ok(unchanged.子文件.includes('[[old]]'));
+  const legacyWithoutId: Record<string, unknown> = { title: 'Old source', custom: 'keep' };
+  atomicPlugin.app.fileManager = { processFrontMatter: async (_file: TFile, callback: (data: any) => void) => callback(legacyWithoutId) } as any;
+  await atomicPlugin.updateSourceFile(atomicFile, vaultPlatform, 'published.md', 'new-id',
+    { path: atomicFile.path, data: { ...legacyWithoutId } });
+  assert.equal(legacyWithoutId.pub_id, 'new-id');
+  assert.equal(legacyWithoutId.custom, 'keep');
   await assert.rejects(atomicPlugin.writePublishFile(vaultPlatform, atomicFile.path, 'replacement', 'old'), /重新发布/);
   assert.equal(atomicContent, 'concurrent edit');
   await atomicPlugin.writePublishFile(vaultPlatform, atomicFile.path, 'replacement', 'concurrent edit');

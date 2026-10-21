@@ -77,6 +77,38 @@ async function run() {
     const backupDirectory = path.join(assetsRoot, '.easy-pub-backups');
     const originalBackup = path.join(backupDirectory, createHash('sha256').update('first').digest('hex') + '.bak');
     assert.equal(await readFile(originalBackup, 'utf8'), 'first');
+    for (const failure of ['write', 'sync']) {
+      const failureTarget = path.join(assetsRoot, `${failure}.md`);
+      const oldBody = `original-${failure}`;
+      await writeFile(failureTarget, oldBody);
+      const open = fsPromises.open;
+      try {
+        fsPromises.open = (async (...args: Parameters<typeof open>) => {
+          const handle = await open(...args);
+          if (/\.bak\..*\.tmp$/.test(String(args[0]))) {
+            if (failure === 'write') {
+              const write = handle.writeFile.bind(handle);
+              handle.writeFile = async () => { await write('partial'); throw new Error('injected write failure'); };
+            } else handle.sync = async () => { throw new Error('injected sync failure'); };
+          }
+          return handle;
+        }) as typeof open;
+        await assert.rejects(writePublishedFile(failureTarget, 'replacement', oldBody), /injected/);
+      } finally { fsPromises.open = open; }
+      assert.equal(await readFile(failureTarget, 'utf8'), oldBody);
+      const backupPath = path.join(backupDirectory, createHash('sha256').update(oldBody).digest('hex') + '.bak');
+      await assert.rejects(readFile(backupPath), /ENOENT/);
+      assert.ok(!(await readdir(backupDirectory)).some(name => name.endsWith('.tmp')));
+      await writePublishedFile(failureTarget, 'replacement', oldBody);
+      assert.equal(await readFile(backupPath, 'utf8'), oldBody);
+    }
+    const corruptTarget = path.join(assetsRoot, 'corrupt-backup.md');
+    await writeFile(corruptTarget, 'historical');
+    const corruptBackup = path.join(backupDirectory, createHash('sha256').update('historical').digest('hex') + '.bak');
+    await writeFile(corruptBackup, 'existing damaged backup');
+    await assert.rejects(writePublishedFile(corruptTarget, 'replacement', 'historical'), /备份损坏/);
+    assert.equal(await readFile(corruptTarget, 'utf8'), 'historical');
+    assert.equal(await readFile(corruptBackup, 'utf8'), 'existing damaged backup');
     const lock = path.join(assetsRoot, '.post.md.easy-pub.lock');
     await writeFile(lock, 'another instance');
     await assert.rejects(writePublishedFile(post, 'blocked', 'second'), /目标正在发布/);

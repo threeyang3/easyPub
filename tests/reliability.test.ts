@@ -66,10 +66,25 @@ export async function runReliabilityTests() {
     if (invalidateDuringRead) { invalidateDuringRead = false; identityIndex.invalidate(indexedFiles[0]); }
     return indexedBody;
   };
-  await checkIndexed();
+  await assert.rejects(checkIndexed(), /身份检查期间笔记发生变化/);
   const afterRacingRead = reads;
   await checkIndexed();
   assert.equal(reads, afterRacingRead + 1, 'In-flight invalidation must not install stale cache');
+  identityIndex.clear();
+  let changeIdentityDuringRead = true;
+  indexedApp.vault.read = async () => {
+    const snapshot = indexedBody;
+    if (changeIdentityDuringRead) {
+      changeIdentityDuringRead = false;
+      indexedBody = '---\npub_id: wanted\n---\nbody';
+      identityIndex.invalidate(indexedFiles[0]);
+    }
+    // Return old contents for this scan to simulate a read already in flight.
+    return snapshot.replace('wanted', 'unrelated');
+  };
+  await assert.rejects(checkIndexed(), /身份检查期间笔记发生变化/);
+  indexedApp.vault.read = async () => indexedBody;
+  await assert.rejects(checkIndexed(), /另一篇源文章/);
   identityIndex.invalidate(indexedFiles[0]);
   indexedApp.vault.read = async () => { throw new Error('read denied'); };
   await assert.rejects(checkIndexed(), /read denied/);

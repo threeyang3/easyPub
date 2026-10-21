@@ -30,15 +30,19 @@ export async function writePublishedFile(target: string, content: string, expect
       const hash = createHash("sha256").update(current).digest("hex");
       const backup = path.join(backupDirectory, `${hash}.bak`);
       await fs.mkdir(backupDirectory, { recursive: true });
-      let handle;
-      try { handle = await fs.open(backup, "wx"); }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        if (await fs.readFile(backup, "utf8") !== current) throw new Error(`发布备份损坏，请检查：${backup}`);
-      }
-      if (handle) {
+      const backupTemporary = `${backup}.${randomBytes(8).toString("hex")}.tmp`;
+      try {
+        const handle = await fs.open(backupTemporary, "wx");
         try { await handle.writeFile(current, "utf8"); await handle.sync(); }
         finally { await handle.close(); }
+        // Publish only complete, flushed bytes; never replace an existing backup.
+        try { await fs.link(backupTemporary, backup); }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+          if (await fs.readFile(backup, "utf8") !== current) throw new Error(`发布备份损坏，请检查：${backup}`);
+        }
+      } finally {
+        await fs.unlink(backupTemporary).catch(() => {});
       }
     }
     await fs.writeFile(temporary, content, { encoding: "utf8", flag: "wx" });

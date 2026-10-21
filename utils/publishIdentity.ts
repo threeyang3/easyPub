@@ -6,6 +6,10 @@ import type { FrontMatterData } from "../types";
 export class PublishIdentityIndex {
   private entries = new Map<TFile, { mtime: number; size: number; data: FrontMatterData }>();
   private revision = 0;
+  getRevision(): number { return this.revision; }
+  assertRevision(revision: number): void {
+    if (revision !== this.revision) throw new Error("身份检查期间笔记发生变化，请重新发布");
+  }
   invalidate(file: unknown): void {
     this.revision++;
     if (file instanceof TFile) this.entries.delete(file);
@@ -39,6 +43,7 @@ export class PublishIdentityIndex {
 /** Read-only validation: old IDs and source_file formats are never migrated. */
 export async function assertPublishIdentity(app: App, sourcePath: string, pubId: string,
   targets: Array<{ path: string; content: string }>, publishedRoots: string[], index?: PublishIdentityIndex): Promise<void> {
+  const revision = index?.getRevision();
   if (targets.length > 1) throw new Error(`多个发布稿使用相同 pub_id，请先核对关联：${targets.map(t => t.path).join("、")}`);
   const conflict = (owner: string) => new Error(`pub_id 与另一篇源文章冲突：${owner}。已停止发布，不会覆盖或重新关联。若当前文章是副本，请仅删除副本的 pub_id 和子文件字段后重新发布；若是移动或重命名，请先核对原有关系。`);
   for (const target of targets) {
@@ -70,4 +75,6 @@ export async function assertPublishIdentity(app: App, sourcePath: string, pubId:
     if (getFrontMatterString(data, "pub_id") !== pubId || data.source_file) continue;
     throw conflict(file.path);
   }
+  // Reject this scan, not just its cache, if any observed Vault event raced it.
+  if (index && revision !== undefined) index.assertRevision(revision);
 }

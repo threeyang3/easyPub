@@ -97,6 +97,15 @@ async function testMarkdownAndHtml() {
   const vault = { metadataCache: { getFirstLinkpathDest: (_p: string, context: string) => context === 'a/draft.md' ? first : second },
     vault: { readBinary: async (file: TFile) => Buffer.from(file.path) } } as any;
   assert.equal((await readWechatImage(vault, 'p.png', 'b/draft.md')).localPath, 'b/p.png');
+  let downloads = 0;
+  const download = async () => { downloads++; return new Uint8Array([1]); };
+  await assert.rejects(readWechatImage(vault, 'https://example.com/a.png', 'b/draft.md', download, () => false), /仅允许 Vault/);
+  assert.equal(downloads, 0);
+  assert.equal((await readWechatImage(vault, 'p.png', 'b/draft.md', download, () => false)).localPath, 'b/p.png');
+  let allowed = true;
+  await assert.rejects(readWechatImage(vault, 'https://example.com/a.png', 'b/draft.md', async () => { allowed = false; return new Uint8Array([1]); }, () => allowed), /权限已关闭/);
+  assert.equal(normalizeSettings({ wechat: { allowRemoteImages: false } }).wechat.allowRemoteImages, false);
+  assert.equal(normalizeSettings({}).wechat.allowRemoteImages, true);
   await assert.rejects(readWechatImage(vault, 'file:///outside.png', 'b/draft.md'), /仅支持/);
 }
 

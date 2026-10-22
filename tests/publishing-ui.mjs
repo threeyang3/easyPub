@@ -8,11 +8,13 @@ const bundle = await build({
   stdin: { contents: `
     import { PublishBackupsModal } from './modals/PublishBackupsModal';
     import { PublishDirectoryModal } from './modals/PublishDirectoryModal';
+    import { PicGoTransportModal } from './modals/PicGoTransportModal';
     const pending = [];
     window.pending = pending;
     window.defer = (kind, args) => new Promise((resolve, reject) => pending.push({kind, args, resolve, reject}));
     window.openBackups = () => { window.modal = new PublishBackupsModal({}, '/blog'); window.modal.open(); };
     window.openDirectory = () => { window.modal = new PublishDirectoryModal({}, (...args) => window.defer('inspect', args)); window.modal.open(); };
+    window.openTransport = () => { window.consent = null; window.modal = new PicGoTransportModal({}, 'http://example.com', value => { window.consent = value; }); window.modal.open(); };
   `, resolveDir: process.cwd() },
   bundle: true, platform: 'browser', format: 'esm', write: false,
   plugins: [{ name: 'publishing-ui-fixtures', setup(builder) {
@@ -95,5 +97,14 @@ try {
   await settle(10, { checked: 1, issues: [] });
   assert.equal(await page.evaluate(() => window.modal.contentEl.textContent), '');
   assert.deepEqual(errors, []);
+  await page.evaluate(() => window.openTransport());
+  assert.equal(await page.evaluate(() => document.activeElement.textContent), '取消');
+  await button('取消').click();
+  assert.equal(await page.evaluate(() => window.consent), false);
+  await page.evaluate(() => { window.openTransport(); window.modal.close(); });
+  assert.equal(await page.evaluate(() => window.consent), false);
+  await page.evaluate(() => window.openTransport());
+  await button('仅允许本次上传').click();
+  assert.equal(await page.evaluate(() => window.consent), true);
   console.log('Publishing UI: pagination, retry, stale reads, cancellation and readonly text passed.');
 } finally { await browser.close(); }

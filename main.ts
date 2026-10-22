@@ -34,7 +34,8 @@ import {
 } from "./utils/platforms";
 import { generateHexoUrl, getHexoRootPath } from "./utils/linkUtils";
 import { prepareImageEmbeds, PreparedImageContent } from "./utils/imageEmbeds";
-import { getPicGoHeartbeatUrl, uploadWithPicGo, hasInsecurePicGoSecretTransport } from "./utils/picgo";
+import { getPicGoHeartbeatUrl, uploadWithPicGo } from "./utils/picgo";
+import { confirmPicGoTransport } from "./modals/PicGoTransportModal";
 import { isDeepStrictEqual } from "util";
 import { assertPublishUnchanged, completeControlRoomMetadata } from "./utils/publishSafety";
 import { writeImmutableAsset, writePublishedFile } from "./utils/publishFiles";
@@ -1222,16 +1223,16 @@ export default class EasyPub extends Plugin {
     if (this.settings.picgoEncryptedSecret && !this.settings.picgoServerSecret) {
       throw new Error("无法解密已保存的 PicGo Secret，请在设置中重新填写；若已关闭 Server 认证，请明确清空原密钥。");
     }
-    if (hasInsecurePicGoSecretTransport(this.settings.picgoServerUrl, this.settings.picgoServerSecret)) {
-      new Notice("PicGo 正向非回环 HTTP 地址发送 Secret，传输未加密。建议将 Server 地址改为 HTTPS 或本机回环地址。", 10000);
-    }
+    const fingerprint = publishSettingsFingerprint(this.settings);
     const urls = await uploadWithPicGo(
       uploads.map((upload) => upload.localPath),
       {
         serverUrl: this.settings.picgoServerUrl,
         secret: this.settings.picgoServerSecret,
+        confirmInsecureTransport: origin => confirmPicGoTransport(this.app, origin),
       },
       async (request) => {
+        if (fingerprint !== publishSettingsFingerprint(this.settings)) throw new Error("发布设置已变化，请重新确认发布");
         const response = await withTimeout(requestUrl({
           url: request.url,
           method: "POST",

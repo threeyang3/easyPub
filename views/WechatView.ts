@@ -25,6 +25,7 @@ class CoverPicker extends FuzzySuggestModal<TFile> {
 }
 
 export class WechatView extends ItemView {
+  private allowRemoteImages = () => this.plugin.settings.wechat.allowRemoteImages !== false;
   private file: TFile | null = null;
   private snapshot = "";
   private snapshotPath = "";
@@ -196,7 +197,7 @@ export class WechatView extends ItemView {
     };
     const component = new Component(); component.load();
     let prepared: WechatPreparedDocument;
-    try { prepared = await renderWechatDocument(this.app, parsed.content, filePath, component); }
+    try { prepared = await renderWechatDocument(this.app, parsed.content, filePath, component, this.allowRemoteImages); }
     finally { component.unload(); }
     if (article.digest === undefined) article.digest = digestFromWechatHtml(prepared.html);
     try { validateWechatArticle(article); } catch (error) { prepared.issues.push((error as Error).message); }
@@ -206,7 +207,7 @@ export class WechatView extends ItemView {
       const source = article.cover ?? prepared.images[0]?.source;
       if (source) {
         article.cover = source;
-        try { cover = await loadWechatImage(this.app, source, filePath, "cover"); }
+        try { cover = await loadWechatImage(this.app, source, filePath, "cover", this.allowRemoteImages); }
         catch (error) { prepared.issues.push(`封面：${(error as Error).message}`); }
       }
       if (version !== this.version || this.closed || file.path !== filePath || await this.app.vault.read(file) !== snapshot) {
@@ -300,7 +301,7 @@ export class WechatView extends ItemView {
     return this.plugin.relativeWechatAttachment(this.file!.path, path);
   }
   private async selectCover(source: string) {
-    const cover = await loadWechatImage(this.app, source, this.file!.path, "cover");
+    const cover = await loadWechatImage(this.app, source, this.file!.path, "cover", this.allowRemoteImages);
     if (this.closed) { releaseWechatImages([cover]); return; }
     if (this.cover) releaseWechatImages([this.cover]);
     this.cover = cover; this.article.cover = source;
@@ -379,16 +380,16 @@ export class WechatView extends ItemView {
     if (this.plugin.wechatSyncInProgress) throw new Error("已有公众号同步任务正在进行");
     if (JSON.stringify(readWechatArticleSettings(parseFrontMatter(this.snapshot).data.wechat)) !== JSON.stringify(this.article)) await this.saveArticle();
     const file = this.file, snapshot = this.snapshot, filePath = this.snapshotPath, version = this.version;
-    const settings = JSON.stringify([this.plugin.settings.wechat.appId, this.plugin.settings.wechat.encryptedSecret, this.plugin.settings.wechat.defaultAuthor]);
+    const settings = JSON.stringify([this.plugin.settings.wechat.appId, this.plugin.settings.wechat.encryptedSecret, this.plugin.settings.wechat.defaultAuthor, this.allowRemoteImages()]);
     const credentialRevision = this.plugin.wechatCredentialRevision;
     const data = parseFrontMatter(snapshot).data;
     const article = { ...this.article };
     const assertFresh = async () => {
       if (this.closed || this.version !== version || this.file !== file || file.path !== filePath || await this.app.vault.read(file) !== snapshot) throw new Error("本地成稿或预览已变化，请刷新后重新同步");
-      if (settings !== JSON.stringify([this.plugin.settings.wechat.appId, this.plugin.settings.wechat.encryptedSecret, this.plugin.settings.wechat.defaultAuthor]) || credentialRevision !== this.plugin.wechatCredentialRevision) throw new Error("公众号配置已变化，请刷新后重试");
+      if (settings !== JSON.stringify([this.plugin.settings.wechat.appId, this.plugin.settings.wechat.encryptedSecret, this.plugin.settings.wechat.defaultAuthor, this.allowRemoteImages()]) || credentialRevision !== this.plugin.wechatCredentialRevision) throw new Error("公众号配置已变化，请刷新后重试");
       for (const image of [...this.prepared!.images, this.cover!]) {
         if (!image.localPath) continue;
-        const raw = await readWechatImage(this.app, image.source, filePath);
+        const raw = await readWechatImage(this.app, image.source, filePath, undefined, this.allowRemoteImages);
         if (wechatHash(raw.bytes) !== image.originalHash) throw new Error(`图片内容已变化，请刷新：${image.source}`);
       }
     };
@@ -401,7 +402,7 @@ export class WechatView extends ItemView {
       // Revalidate original attachment bytes, including cached and remote images.
       this.message("正在核对图片内容…");
       for (const image of [...this.prepared.images, this.cover]) {
-        const raw = await readWechatImage(this.app, image.source, filePath);
+        const raw = await readWechatImage(this.app, image.source, filePath, undefined, this.allowRemoteImages);
         if (wechatHash(raw.bytes) !== image.originalHash) throw new Error(`图片内容已变化，请刷新：${image.source}`);
       }
       const result = await new WechatSync(api, this.plugin.settings.wechat, () => this.plugin.saveSettings()).sync({

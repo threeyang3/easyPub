@@ -10,6 +10,11 @@ export async function run(app: App) {
   const assert = (condition: unknown, name: string) => { if (!condition) throw new Error(name); checks.push(name); };
   const component = new Component(); component.load();
   try {
+    const localOnly = await renderWechatDocument(app, '<img src="https://example.com/no-request.png">', '', component, () => false);
+    assert(localOnly.issues.some(issue => issue.includes('原始 HTML')) && localOnly.images.length === 0, 'local-only raw HTML blocked before host rendering');
+    let permissionChecks = 0;
+    const switched = await renderWechatDocument(app, '<img src="https://example.com/no-request.png">', '', component, () => permissionChecks++ === 0);
+    assert(switched.issues.some(issue => issue.includes('原始 HTML')), 'permission change during preparation blocks raw HTML');
     const markdown = '# 标题\n\n段落 **加粗**\n\n- 一级\n  - 二级\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n```ts\n    const x = 1;\n' + 'long'.repeat(100) + '\n```\n\n[[不存在的内部链接|可读名称]]';
     const doc = await renderWechatDocument(app, markdown, "", component);
     const html = new DOMParser().parseFromString(doc.html, 'text/html');

@@ -9,9 +9,12 @@ import { wechatHash } from "./wechatState";
 // image material (not the 64 KB temporary thumbnail endpoint).
 export const WECHAT_BODY_IMAGE_LIMIT = 1024 * 1024;
 export const WECHAT_COVER_IMAGE_LIMIT = 10 * 1024 * 1024;
-export async function readWechatImage(app: App, source: string, filePath: string, download = downloadWechatImage): Promise<{ bytes: Uint8Array; localPath?: string }> {
+export async function readWechatImage(app: App, source: string, filePath: string, download = downloadWechatImage, allowRemote = () => true): Promise<{ bytes: Uint8Array; localPath?: string }> {
   if (/^https?:\/\//i.test(source)) {
-    return { bytes: await download(source) };
+    if (!allowRemote()) throw new Error("当前仅允许 Vault 附件，请将网络图片保存到 Vault 并替换引用");
+    const bytes = await download(source);
+    if (!allowRemote()) throw new Error("网络图片权限已关闭，请刷新预览并使用 Vault 附件");
+    return { bytes };
   }
   if (/^[a-z][a-z\d+.-]*:/i.test(source)) throw new Error("仅支持 Vault 附件和 HTTP(S) 图片");
   const file = resolveVaultImage(app, source, filePath);
@@ -124,8 +127,8 @@ export async function processWechatImage(source: string, input: Uint8Array, purp
     previewUrl: URL.createObjectURL(new Blob([bytes.slice().buffer as ArrayBuffer], { type: mime })) };
 }
 
-export async function loadWechatImage(app: App, source: string, filePath: string, purpose: "body" | "cover"): Promise<WechatImage> {
-  const raw = await readWechatImage(app, source, filePath);
+export async function loadWechatImage(app: App, source: string, filePath: string, purpose: "body" | "cover", allowRemote = () => true): Promise<WechatImage> {
+  const raw = await readWechatImage(app, source, filePath, undefined, allowRemote);
   return processWechatImage(source, raw.bytes, purpose, raw.localPath);
 }
 export function releaseWechatImages(images: WechatImage[]): void {

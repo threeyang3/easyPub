@@ -1,6 +1,7 @@
 export interface PicGoUploadOptions {
   serverUrl: string;
   secret?: string;
+  confirmInsecureTransport?: (origin: string) => Promise<boolean>;
 }
 
 export interface PicGoRequest {
@@ -35,6 +36,10 @@ export async function uploadWithPicGo(
     "Content-Type": "application/json",
   };
   const secret = options.secret?.trim();
+  if (hasInsecurePicGoSecretTransport(uploadUrl, secret)) {
+    const allowed = await options.confirmInsecureTransport?.(new URL(uploadUrl).origin);
+    if (allowed !== true) throw new Error('已取消 PicGo 未加密上传；请改用 HTTPS 或本机回环地址');
+  }
   if (secret) {
     headers.Authorization = `Bearer ${secret}`;
   }

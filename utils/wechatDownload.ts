@@ -13,9 +13,14 @@ export function validateImageDownloadUrl(source: string): URL {
     if (!host.startsWith('[')) throw new Error('不允许下载本机或内网地址图片，请改用 Vault 附件');
   }
   if (host.startsWith('[')) {
-    // Permit ordinary global unicast only; excludes loopback, ULA, link-local,
-    // mapped IPv4, translation and transition prefixes.
-    if (!/^\[[23][0-9a-f]{3}:/.test(host) || /^\[(2001:|2002:)/.test(host)) throw new Error('不允许下载特殊 IPv6 地址图片');
+    // URL has already validated and canonicalized IPv6. Check numeric prefixes,
+    // not the entire 2001::/16 (which contains ordinary public allocations).
+    const [first, second = '0'] = host.slice(1, -1).split(':');
+    const a = parseInt(first || '0', 16), b = parseInt(second || '0', 16);
+    // Policy: ordinary 2000::/3 only; exclude IETF protocol assignments /23,
+    // documentation prefixes and 6to4. This is a URL filter, not DNS protection.
+    if ((a & 0xe000) !== 0x2000 || a === 0x2001 && (b < 0x200 || b === 0xdb8)
+      || a === 0x2002 || a === 0x3fff && b < 0x1000) throw new Error('不允许下载特殊 IPv6 地址图片');
   } else if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
     const [a, b] = host.split('.').map(Number);
     if (a === 0 || a === 10 || a === 127 || a >= 224 || a === 169 && b === 254
@@ -81,13 +86,15 @@ export function downloadWechatImage(source: string, requester: ImageRequester = 
           const length = Number(response.headers['content-length']);
           if (response.statusCode !== 200) { finish(new Error(`下载失败 HTTP ${response.statusCode}`)); return; }
           if (length > limit) { finish(new Error('原图超过 20 MB，请先缩小或替换')); return; }
+          // Register completion before data starts flowing, especially through
+          // Obsidian's remote bridge where a cached response can finish at once.
+          response.on('end', () => { if (current()) finish(); });
           response.on('data', (chunk: Uint8Array) => {
             if (!current()) return;
             if (chunk.length > limit - size) { finish(new Error('原图超过 20 MB，请先缩小或替换')); return; }
             size += chunk.length;
             chunks.push(new Uint8Array(chunk));
           });
-          response.on('end', () => { if (current()) finish(); });
         });
         request.end();
       } catch (error) { finish(error as Error); }

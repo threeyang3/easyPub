@@ -37,6 +37,24 @@ export async function runReliabilityTests() {
     assert.throws(() => validateImageDownloadUrl(address));
   }
   assert.equal(validateImageDownloadUrl('https://example.com/a').hostname, 'example.com');
+  for (const ip of ['2001:4860:4860::8888', '2001:200::1', '2606:4700::1111', '3fff:1000::1']) {
+    assert.doesNotThrow(() => validateImageDownloadUrl(`https://[${ip}]/image.png`));
+  }
+  for (const ip of ['2001::1', '2001:1ff::1', '2001:db8::1', '2002::1', '3fff:fff::1', 'fc00::1', 'fe80::1', '::ffff:10.0.0.1']) {
+    assert.throws(() => validateImageDownloadUrl(`https://[${ip}]/image.png`));
+  }
+  let transportRequests = 0;
+  const transport = async () => { transportRequests++; return { status: 200, json: { success: true, result: ['https://images.example/a.png'] } }; };
+  const insecure = { serverUrl: 'http://remote.example/upload?private=value', secret: 'test-secret' };
+  await assert.rejects(uploadWithPicGo(['image.png'], insecure, transport), /已取消/);
+  await assert.rejects(uploadWithPicGo(['image.png'], { ...insecure, confirmInsecureTransport: async () => false }, transport), /已取消/);
+  assert.equal(transportRequests, 0);
+  await uploadWithPicGo(['image.png'], { ...insecure, confirmInsecureTransport: async origin => {
+    assert.equal(origin, 'http://remote.example'); return true;
+  } }, transport);
+  assert.equal(transportRequests, 1);
+  await assert.rejects(uploadWithPicGo(['image.png'], insecure, transport), /已取消/);
+  assert.equal(transportRequests, 1); // Consent is never remembered across uploads.
   const downloadScenario = async (scenario: string) => {
     let aborted = 0, requests = 0;
     const run = downloadWechatImage('https://example.com/image', () => {
@@ -48,6 +66,16 @@ export async function runReliabilityTests() {
         if (scenario === 'private redirect') { req.emit('redirect', 302, 'GET', 'http://127.0.0.1/image'); return; }
         if (scenario === 'loop') { req.emit('redirect', 302, 'GET', 'https://example.com/loop'); return; }
         const response = Object.assign(new EventEmitter(), { statusCode: 200, headers: scenario === 'header' ? { 'content-length': '100' } : {} });
+        if (scenario === 'instant') {
+          const on = response.on;
+          response.on = function(event, listener) {
+            on.call(this, event, listener);
+            if (event === 'data') { this.emit('data', new Uint8Array([1, 2, 3, 4])); this.emit('end'); }
+            return this;
+          };
+          req.emit('response', response);
+          return;
+        }
         req.emit('response', response);
         response.emit('data', new Uint8Array([1, 2]));
         response.emit('data', new Uint8Array(scenario === 'stream' ? [3, 4, 5] : [3, 4]));
@@ -55,12 +83,12 @@ export async function runReliabilityTests() {
       });
       return req;
     }, 4, 10);
-    if (scenario === 'success') assert.deepEqual(await run, new Uint8Array([1, 2, 3, 4]));
+    if (scenario === 'success' || scenario === 'instant') assert.deepEqual(await run, new Uint8Array([1, 2, 3, 4]));
     else { await assert.rejects(run); assert.ok(aborted > 0); }
     if (scenario === 'private redirect') assert.equal(requests, 1);
     if (scenario === 'loop') assert.equal(requests, 6);
   };
-  for (const scenario of ['success', 'header', 'stream', 'timeout', 'private redirect', 'loop']) await downloadScenario(scenario);
+  for (const scenario of ['success', 'instant', 'header', 'stream', 'timeout', 'private redirect', 'loop']) await downloadScenario(scenario);
   for (const url of ['http://localhost:36677', 'http://127.0.0.2:36677', 'http://[::1]:36677', 'https://remote.example/upload']) {
     assert.equal(hasInsecurePicGoSecretTransport(url, 'secret'), false);
   }

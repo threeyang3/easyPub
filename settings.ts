@@ -81,6 +81,11 @@ export class EasyPubSettingTab extends PluginSettingTab {
         this.plugin.settings.wechat.defaultAuthor = value;
         await this.plugin.saveSettings();
       }));
+    new Setting(containerEl).setName("公众号网络图片")
+      .setDesc("不可信稿件建议选用仅 Vault 附件；禁止正文和封面下载 HTTP(S) 图片。切换后请刷新预览，已发出的下载可能仍在完成。不会影响 PicGo 或其他平台。")
+      .addDropdown(dropdown => dropdown.addOption("allow", "允许网络图片（兼容现有代理）").addOption("local", "仅使用 Vault 附件")
+        .setValue(this.plugin.settings.wechat.allowRemoteImages === false ? "local" : "allow")
+        .onChange(async value => { this.plugin.settings.wechat.allowRemoteImages = value !== "local"; await this.plugin.saveSettings(); }));
     const connection = new Setting(containerEl).setName("公众号连接检查")
       .setDesc("检查令牌、素材读取和草稿读取；不会上传图片或创建草稿。需配置出口 IP 白名单。")
       .addButton(button => button.setButtonText("检查连接").onClick(async () => {
@@ -110,7 +115,7 @@ export class EasyPubSettingTab extends PluginSettingTab {
     if (this.plugin.settings.imageHandling === "picgo") {
       new Setting(containerEl)
         .setName("PicGo Server 地址")
-        .setDesc("默认 http://127.0.0.1:36677/upload。远程 Server 配合 Secret 时请使用 HTTPS；非回环 HTTP 会明文传输密钥。")
+        .setDesc("默认 http://127.0.0.1:36677/upload。远程 Server 配合 Secret 时请使用 HTTPS；非回环 HTTP 会明文传输密钥，每次上传需单独确认。")
         .addText((text) =>
           text
             .setPlaceholder("http://127.0.0.1:36677/upload")

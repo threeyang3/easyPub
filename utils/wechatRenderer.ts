@@ -1,4 +1,5 @@
 import { App, Component, MarkdownRenderer } from "obsidian";
+import { fromMarkdown } from 'mdast-util-from-markdown';
 import { WechatImage, WechatPreparedDocument } from "../types";
 import { escapeHtml, prepareWechatMarkdown } from "./wechatMarkdown";
 import { loadWechatImage, releaseWechatImages } from "./wechatImages";
@@ -87,18 +88,29 @@ export function digestFromWechatHtml(html: string): string {
   return Array.from(text.replace(/\s+/g, " ").trim()).slice(0, 100).join("");
 }
 
-export async function renderWechatDocument(app: App, body: string, filePath: string, component: Component): Promise<WechatPreparedDocument> {
+export async function renderWechatDocument(app: App, body: string, filePath: string, component: Component, allowRemote = () => true): Promise<WechatPreparedDocument> {
   const images: WechatImage[] = [];
   const bySource = new Map<string, WechatImage>();
   try {
+    // Do not hand raw HTML to the host in local-only mode: <img>, CSS URLs and
+    // media embeds could otherwise bypass the controlled image downloader.
+    const hasHtml = (node: { type: string; children?: any[] }): boolean => node.type === 'html' || Boolean(node.children?.some(hasHtml));
+    const rawHtml = hasHtml(fromMarkdown(body));
+    const rawHtmlIssue = '仅 Vault 附件模式不渲染原始 HTML，请转换为 Markdown 后刷新';
+    if (!allowRemote() && rawHtml) {
+      return { html: '<section></section>', images: [], imageReferences: [], issues: [rawHtmlIssue] };
+    }
     const prepared = await prepareWechatMarkdown(body, async source => {
       let image = bySource.get(source);
       if (!image) {
-        image = await loadWechatImage(app, source, filePath, "body");
+        image = await loadWechatImage(app, source, filePath, "body", allowRemote);
         bySource.set(source, image); images.push(image);
       }
       return image.previewUrl;
     });
+    if (!allowRemote() && (prepared.issues.length || rawHtml)) {
+      return { html: '<section></section>', images, issues: [...prepared.issues, ...(rawHtml ? [rawHtmlIssue] : [])], imageReferences: prepared.imageReferences };
+    }
     const container = document.createElement("section");
     await MarkdownRenderer.render(app, prepared.markdown, container, filePath, component);
     const issues = [...prepared.issues, ...normalizeWechatHtml(container, images)];

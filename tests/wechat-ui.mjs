@@ -267,6 +267,13 @@ try {
   assert.equal(await page.getByRole('button', { name:'信息、配图与封面', exact:true }).evaluate(el => el === document.activeElement), true);
   await page.evaluate(() => document.body.classList.remove('theme-dark'));
   await page.screenshot({ path: screenshot.replace(/\.png$/, "-cover.png"), fullPage: true });
+  await page.evaluate(async () => {
+    window.fixture.localOnly(true);
+    window.fixture.modify('![blocked](https://example.com/blocked.png)');
+    await window.fixture.view.refresh(true);
+  });
+  assert.match(await page.locator('#workbench').innerText(), /仅允许 Vault/);
+  assert.equal(await page.getByRole('button', { name: '同步草稿箱', exact: true }).isDisabled(), true);
   await page.evaluate(() => window.fixture.close());
   assert.equal(await page.locator(".epw-header").count(), 0);
   assert.deepEqual(errors, []);

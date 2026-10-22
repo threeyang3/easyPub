@@ -19,7 +19,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   picgoServerSecret: "",
   picgoEncryptedSecret: "",
   picgoImageCache: {},
-  wechat: { appId: "", encryptedSecret: "", defaultAuthor: "", assets: {}, drafts: {} },
+  wechat: { appId: "", encryptedSecret: "", defaultAuthor: "", allowRemoteImages: true, assets: {}, drafts: {} },
 };
 
 export interface PicGoImageCacheEntry {
@@ -169,6 +169,7 @@ export interface WechatDraftState {
   uncertain?: boolean;
 }
 export interface WechatSettings {
+  allowRemoteImages?: boolean;
   appId: string;
   encryptedSecret: string;
   defaultAuthor: string;

@@ -12,7 +12,7 @@ export function normalizeWechatSettings(input: unknown): WechatSettings {
   const value = object(input);
   const result: WechatSettings = {
     appId: text(value.appId).trim(), encryptedSecret: text(value.encryptedSecret),
-    defaultAuthor: text(value.defaultAuthor), assets: {}, drafts: {},
+    defaultAuthor: text(value.defaultAuthor), allowRemoteImages: value.allowRemoteImages !== false, assets: {}, drafts: {},
   };
   for (const [key, item] of Object.entries(object(value.assets))) {
     const entry = object(item);

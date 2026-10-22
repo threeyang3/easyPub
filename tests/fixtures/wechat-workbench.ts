@@ -71,7 +71,10 @@ globals.fixture = { view,
   },
   networkImage: async (status: number) => {
     globals.fixtureRequest = async () => ({ status, arrayBuffer: raw });
-    try { const result = await readWechatImage(app, 'https://example.com/image.png', file.path); return { size:result.bytes.length }; }
+    try { const result = await readWechatImage(app, 'https://example.com/image.png', file.path, async () => {
+      if (status !== 200) throw new Error(`下载失败 HTTP ${status}`);
+      return new Uint8Array(raw);
+    }); return { size:result.bytes.length }; }
     catch (error) { return { error:(error as Error).message }; }
   },
   compare: () => wechatChoice(app, '微信后台内容与上次同步不同', '原始内容供核对', [{ label:'另建草稿', value:'new' }], [

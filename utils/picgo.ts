@@ -98,3 +98,12 @@ export function getPicGoHeartbeatUrl(serverUrl: string): string {
   uploadUrl.hash = "";
   return uploadUrl.toString();
 }
+
+export function hasInsecurePicGoSecretTransport(serverUrl: string, secret?: string): boolean {
+  if (!secret?.trim()) return false;
+  const url = new URL(normalizePicGoUploadUrl(serverUrl));
+  const host = url.hostname.toLowerCase();
+  const loopback = host === "localhost" || host === "localhost." || host === "[::1]"
+    || /^127\.(?:\d{1,3}\.){2}\d{1,3}$/.test(host);
+  return url.protocol === "http:" && !loopback;
+}

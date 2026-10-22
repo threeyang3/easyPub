@@ -110,7 +110,7 @@ export class EasyPubSettingTab extends PluginSettingTab {
     if (this.plugin.settings.imageHandling === "picgo") {
       new Setting(containerEl)
         .setName("PicGo Server 地址")
-        .setDesc("PicGo 默认地址为 http://127.0.0.1:36677/upload")
+        .setDesc("默认 http://127.0.0.1:36677/upload。远程 Server 配合 Secret 时请使用 HTTPS；非回环 HTTP 会明文传输密钥。")
         .addText((text) =>
           text
             .setPlaceholder("http://127.0.0.1:36677/upload")
@@ -149,11 +149,11 @@ export class EasyPubSettingTab extends PluginSettingTab {
         }));
 
       new Setting(containerEl)
-        .setName("连接检查")
-        .setDesc("确认 PicGo 已启动并开启 Server")
+        .setName("服务可达性检查")
+        .setDesc("仅检查心跳接口，不验证 Secret、上传权限或图床配置，也不会上传图片")
         .addButton((button) =>
           button
-            .setButtonText("测试连接")
+            .setButtonText("检测服务可达性")
             .onClick(async () => {
               await this.plugin.testPicGoConnection();
             })

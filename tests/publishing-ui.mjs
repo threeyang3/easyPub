@@ -86,6 +86,9 @@ try {
   await page.getByText('坏元数据', { exact: true }).waitFor();
   assert.equal(await page.locator('li').innerText(), '<img src=x onerror="window.injected=true">');
   assert.equal(await page.locator('li img').count(), 0);
+  await page.getByRole('combobox').selectOption('wechat');
+  assert.equal(await page.locator('li').count(), 0);
+  assert.match(await page.getByRole('status').innerText(), /请重新检查/);
   await button('开始检查').click();
   await page.evaluate(() => window.modal.close());
   assert.equal(await page.evaluate(() => window.pending[10].args[1]()), true);

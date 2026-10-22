@@ -1,4 +1,5 @@
-import { App, requestUrl } from "obsidian";
+import { App } from "obsidian";
+import { downloadWechatImage } from "./wechatDownload";
 import { WechatImage } from "../types";
 import { withTimeout } from "./async";
 import { resolveVaultImage } from "./wechatMarkdown";
@@ -8,13 +9,9 @@ import { wechatHash } from "./wechatState";
 // image material (not the 64 KB temporary thumbnail endpoint).
 export const WECHAT_BODY_IMAGE_LIMIT = 1024 * 1024;
 export const WECHAT_COVER_IMAGE_LIMIT = 10 * 1024 * 1024;
-export async function readWechatImage(app: App, source: string, filePath: string): Promise<{ bytes: Uint8Array; localPath?: string }> {
+export async function readWechatImage(app: App, source: string, filePath: string, download = downloadWechatImage): Promise<{ bytes: Uint8Array; localPath?: string }> {
   if (/^https?:\/\//i.test(source)) {
-    const response = await withTimeout(requestUrl({ url: source, method: "GET", throw: false }), 15000, "下载图片超时");
-    if (response.status !== 200) throw new Error(`下载失败 HTTP ${response.status}`);
-    const bytes = new Uint8Array(response.arrayBuffer);
-    if (bytes.length > 20 * 1024 * 1024) throw new Error("原图超过 20 MB，请先缩小或替换");
-    return { bytes };
+    return { bytes: await download(source) };
   }
   if (/^[a-z][a-z\d+.-]*:/i.test(source)) throw new Error("仅支持 Vault 附件和 HTTP(S) 图片");
   const file = resolveVaultImage(app, source, filePath);

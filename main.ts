@@ -34,7 +34,8 @@ import {
 } from "./utils/platforms";
 import { generateHexoUrl, getHexoRootPath } from "./utils/linkUtils";
 import { prepareImageEmbeds, PreparedImageContent } from "./utils/imageEmbeds";
-import { getPicGoHeartbeatUrl, uploadWithPicGo } from "./utils/picgo";
+import { getPicGoHeartbeatUrl, uploadWithPicGo, hasInsecurePicGoSecretTransport } from "./utils/picgo";
+import { isDeepStrictEqual } from "util";
 import { assertPublishUnchanged, completeControlRoomMetadata } from "./utils/publishSafety";
 import { writeImmutableAsset, writePublishedFile } from "./utils/publishFiles";
 import { withTimeout } from "./utils/async";
@@ -324,7 +325,7 @@ export default class EasyPub extends Plugin {
       }), 10000, "PicGo 连接检查超时，请确认 Server 已启动");
       const data = response.json as { success?: boolean; result?: string };
       if (response.status === 200 && data?.success === true) {
-        new Notice("PicGo Server 连接成功");
+        new Notice("PicGo 服务可达；未验证上传认证和图床配置。实际上传时继续检查。");
         return;
       }
       throw new Error(`HTTP ${response.status}`);
@@ -742,6 +743,13 @@ export default class EasyPub extends Plugin {
     if (comparableBody(current.content) !== comparableBody(snapshot.content)) throw new Error("源稿正文已变化，目标可能仍是确认时的版本");
     const expected = mergeSourceFrontMatter(snapshot.data, diff.pub_id,
       formatChildReference(diff.platform, diff.targetPath), getObsoleteChildReferences(diff.platform, diff.targetPath));
+    const ordinaryFields = (data: FrontMatterData) => {
+      const { pub_id, source_file, 子文件, ...fields } = data;
+      return fields;
+    };
+    if (!isDeepStrictEqual(ordinaryFields(current.data), ordinaryFields(expected))) {
+      throw new Error("源稿元数据已变化，目标可能仍是确认时的版本");
+    }
     if (current.data.source_file || getFrontMatterString(current.data, "pub_id") !== diff.pub_id
       || JSON.stringify(normalizeChildReferences(current.data.子文件)) !== JSON.stringify(normalizeChildReferences(expected.子文件))) {
       throw new Error("源稿关联未完成或已变化");
@@ -1213,6 +1221,9 @@ export default class EasyPub extends Plugin {
 
     if (this.settings.picgoEncryptedSecret && !this.settings.picgoServerSecret) {
       throw new Error("无法解密已保存的 PicGo Secret，请在设置中重新填写；若已关闭 Server 认证，请明确清空原密钥。");
+    }
+    if (hasInsecurePicGoSecretTransport(this.settings.picgoServerUrl, this.settings.picgoServerSecret)) {
+      new Notice("PicGo 正向非回环 HTTP 地址发送 Secret，传输未加密。建议将 Server 地址改为 HTTPS 或本机回环地址。", 10000);
     }
     const urls = await uploadWithPicGo(
       uploads.map((upload) => upload.localPath),

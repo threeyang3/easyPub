@@ -14,7 +14,7 @@ const chrome = process.env.EASYPUB_CHROME_PATH ?? (bundledChromium ? undefined :
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
 ].find(existsSync));
 if ((!bundledChromium && !chrome) || (chrome && !existsSync(chrome))) throw new Error("Install the matching Playwright Chromium or set EASYPUB_CHROME_PATH to an installed browser.");
-const bundle = await build({ entryPoints: ["tests/fixtures/wechat-workbench.ts"], bundle: true, platform: "browser", format: "esm", write: false,
+const bundle = await build({ entryPoints: ["tests/fixtures/wechat-workbench.ts"], bundle: true, platform: "browser", format: "esm", write: false, external: ['electron'],
   plugins: [{ name: "browser-fixtures", setup(build) {
     build.onResolve({ filter: /^obsidian$/ }, () => ({ path: path.resolve("tests/fixtures/wechat-obsidian.ts") }));
     build.onResolve({ filter: /^crypto$/ }, () => ({ path: "crypto", namespace: "fixture" }));

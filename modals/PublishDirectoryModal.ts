@@ -14,7 +14,11 @@ export class PublishDirectoryModal extends Modal {
     let platform = PLATFORMS[0];
     const selection = new Setting(el).setName("平台").addDropdown(control => {
       for (const item of PLATFORMS) control.addOption(item.id, item.name);
-      control.setValue(platform.id).onChange(id => { platform = PLATFORMS.find(item => item.id === id)!; });
+      control.setValue(platform.id).onChange(id => {
+        platform = PLATFORMS.find(item => item.id === id)!;
+        results.empty();
+        status.setText(`已切换到${platform.name}，请重新检查。`);
+      });
     });
     const status = el.createDiv({ attr: { role: "status", "aria-live": "polite" } });
     const results = el.createDiv();

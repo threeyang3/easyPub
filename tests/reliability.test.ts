@@ -14,7 +14,9 @@ import { buildHexo, getHexoNodeExecutable, validateHexoDeployment } from "../uti
 import { assertPublishIdentity, PublishIdentityIndex } from "../utils/publishIdentity";
 import { inspectPublishDocuments } from "../utils/publishDiagnostics";
 import { restorePicGoSecret, serializePicGoSettings } from "../utils/picgoSecret";
-import { uploadWithPicGo } from "../utils/picgo";
+import { uploadWithPicGo, hasInsecurePicGoSecretTransport } from "../utils/picgo";
+import { downloadWechatImage, validateImageDownloadUrl, ImageRequest } from "../utils/wechatDownload";
+import { EventEmitter } from "events";
 
 async function expectReportedFailure(action: () => Promise<unknown>) {
   const error = console.error;
@@ -31,6 +33,41 @@ async function expectReportedFailure(action: () => Promise<unknown>) {
 }
 
 export async function runReliabilityTests() {
+  for (const address of ['http://127.1/a', 'http://0x7f000001/a', 'http://10.0.0.1/a', 'http://[::1]/a', 'http://[::ffff:127.0.0.1]/a', 'http://localhost/a', 'http://host.local/a', 'https://user:pass@example.com/a', 'file:///a']) {
+    assert.throws(() => validateImageDownloadUrl(address));
+  }
+  assert.equal(validateImageDownloadUrl('https://example.com/a').hostname, 'example.com');
+  const downloadScenario = async (scenario: string) => {
+    let aborted = 0, requests = 0;
+    const run = downloadWechatImage('https://example.com/image', () => {
+      const req = new EventEmitter() as EventEmitter & ImageRequest;
+      requests++;
+      req.abort = () => { aborted++; req.emit('error', new Error('abort')); };
+      req.end = () => queueMicrotask(() => {
+        if (scenario === 'timeout') return;
+        if (scenario === 'private redirect') { req.emit('redirect', 302, 'GET', 'http://127.0.0.1/image'); return; }
+        if (scenario === 'loop') { req.emit('redirect', 302, 'GET', 'https://example.com/loop'); return; }
+        const response = Object.assign(new EventEmitter(), { statusCode: 200, headers: scenario === 'header' ? { 'content-length': '100' } : {} });
+        req.emit('response', response);
+        response.emit('data', new Uint8Array([1, 2]));
+        response.emit('data', new Uint8Array(scenario === 'stream' ? [3, 4, 5] : [3, 4]));
+        response.emit('end');
+      });
+      return req;
+    }, 4, 10);
+    if (scenario === 'success') assert.deepEqual(await run, new Uint8Array([1, 2, 3, 4]));
+    else { await assert.rejects(run); assert.ok(aborted > 0); }
+    if (scenario === 'private redirect') assert.equal(requests, 1);
+    if (scenario === 'loop') assert.equal(requests, 6);
+  };
+  for (const scenario of ['success', 'header', 'stream', 'timeout', 'private redirect', 'loop']) await downloadScenario(scenario);
+  for (const url of ['http://localhost:36677', 'http://127.0.0.2:36677', 'http://[::1]:36677', 'https://remote.example/upload']) {
+    assert.equal(hasInsecurePicGoSecretTransport(url, 'secret'), false);
+  }
+  for (const url of ['http://remote.example/upload', 'http://192.168.1.2/upload', 'http://localhost.example/upload']) {
+    assert.equal(hasInsecurePicGoSecretTransport(url, 'secret'), true);
+    assert.equal(hasInsecurePicGoSecretTransport(url, ''), false);
+  }
   const legacyPicGo = normalizeSettings({ picgoServerSecret: "legacy-secret", picgoImageCache: { image: { hash: "a".repeat(64), url: "https://old.example/image.png" } } });
   const encryptedPicGo = serializePicGoSettings(legacyPicGo, value => `encrypted:${value.length}`);
   assert.equal(encryptedPicGo.picgoServerSecret, "");
@@ -383,6 +420,19 @@ export async function runReliabilityTests() {
     assert.equal(deployed, false);
     assert.equal(await readFile(target, 'utf8'), diff.sourceContent);
     assert.equal(parseFrontMatter(sourceText).content, 'Edited during association\n');
+    for (const fields of [{ title: 'changed' }, { tags: ['Robotics'] }, { custom: { nested: [1, 2] } }]) {
+      await writeFile(target, original);
+      sourceText = 'Source';
+      plugin.updateSourceFile = async () => {
+        sourceText = stringifyFrontMatter('Source', { ...fields, pub_id: diff.pub_id, 子文件: [formatChildReference(platform, target)] });
+      };
+      await assert.rejects(plugin.copyAndOpenForEdit(racingDiff, source), /完成后核对未通过.*源稿元数据已变化/);
+      assert.equal(deployed, false);
+      assert.equal(await readFile(target, 'utf8'), diff.sourceContent);
+    }
+    const semanticSnapshot = '---\ntitle: Same\ncustom: {a: 1, b: 2}\ndate: 2026-10-22\n---\nSource';
+    sourceText = stringifyFrontMatter('Source', { ...parseFrontMatter(semanticSnapshot).data, custom: { b: 2, a: 1 }, pub_id: diff.pub_id, 子文件: [formatChildReference(platform, target)] });
+    await plugin.verifyCompletedPublish({ ...racingDiff, sourceSnapshot: semanticSnapshot }, source);
     sourceText = stringifyFrontMatter('Source', { pub_id: 'other-id' });
     await assert.rejects(plugin.verifyCompletedPublish(racingDiff, source), /源稿关联/);
     sourceText = stringifyFrontMatter('Source', { pub_id: diff.pub_id, 子文件: [formatChildReference(platform, target)] });

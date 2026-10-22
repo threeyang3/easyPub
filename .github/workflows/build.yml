@@ -19,3 +19,22 @@ jobs:
       - run: npm run build
       - name: Verify generated files are committed
         run: git diff --exit-code -- main.js release/
+
+  wechat-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Install the browser matching the locked Playwright version
+        run: node node_modules/playwright-core/cli.js install --with-deps chromium
+      - name: Test WeChat preview, crop and CSS isolation
+        run: npm run test:wechat-ui
+        env:
+          EASYPUB_USE_BUNDLED_CHROMIUM: "1"
+      - name: Test publishing diagnostics and backup browser
+        run: npm run test:publishing-ui

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile, readdir } from "node:fs/promis
 import os from "node:os";
 import fsPromises from "node:fs/promises";
 import { execFileSync } from "node:child_process";
-import { inspectPublishBackups } from "../utils/publishBackups";
+import { inspectPublishBackups, listPublishBackups, readPublishBackup } from "../utils/publishBackups";
 import path from "node:path";
 import { mergePublishedFrontMatter, mergeSourceFrontMatter } from "../utils/frontMatter";
 import { generateHexoUrl, getHexoRootPath } from "../utils/linkUtils";
@@ -61,6 +61,34 @@ async function run() {
     assert.equal((await inspectPublishBackups(backupRepo)).git, 'tracked');
     assert.equal(await readFile(backup, 'utf8'), 'private draft');
     assert.equal(await readFile(path.join(backupRepo, '.gitignore'), 'utf8'), '.easy-pub-backups/\n');
+    const backupText = '---\ntitle: Saved article\npub_id: legacy-id\nsource_file: "[[notes/old|alias]]"\n---\nOriginal body';
+    const backupName = createHash('sha256').update(backupText).digest('hex') + '.bak';
+    await writeFile(path.join(backupFolder, backupName), backupText);
+    await writeFile(path.join(backupFolder, `${backupName}.incomplete.tmp`), 'partial');
+    const listed = await listPublishBackups(backupRepo);
+    assert.equal(listed.length, 2);
+    assert.ok(listed.every(entry => entry.name.endsWith('.bak')));
+    const preview = await readPublishBackup(backupRepo, backupName);
+    assert.equal(preview.content, backupText);
+    assert.equal(preview.hashMatches, true);
+    assert.equal(preview.title, 'Saved article');
+    assert.equal(preview.source, '[[notes/old|alias]]');
+    assert.equal(preview.pubId, 'legacy-id');
+    assert.equal((await readPublishBackup(backupRepo, 'a'.repeat(64) + '.bak')).hashMatches, false);
+    await assert.rejects(readPublishBackup(backupRepo, '../outside.md'), /无效/);
+    await assert.rejects(readPublishBackup(backupRepo, '0'.repeat(64) + '.bak'), /ENOENT/);
+    const malformed = '---\ntitle: [broken\n---\nRecovery body';
+    const malformedName = createHash('sha256').update(malformed).digest('hex') + '.bak';
+    await writeFile(path.join(backupFolder, malformedName), malformed);
+    const damagedPreview = await readPublishBackup(backupRepo, malformedName);
+    assert.equal(damagedPreview.metadataValid, false);
+    assert.equal(damagedPreview.content, malformed);
+    assert.equal(damagedPreview.hashMatches, true);
+    const largeName = 'b'.repeat(64) + '.bak';
+    await writeFile(path.join(backupFolder, largeName), Buffer.alloc(2 * 1024 * 1024 + 1));
+    await assert.rejects(readPublishBackup(backupRepo, largeName), /超过 2 MiB/);
+    assert.equal(await readFile(path.join(backupFolder, backupName), 'utf8'), backupText);
+    assert.equal(await readFile(backup, 'utf8'), 'private draft');
   } finally { await rm(backupRepo, { recursive: true, force: true }); }
   try {
     const bytes = Buffer.from('fixture image bytes');
@@ -182,6 +210,10 @@ async function run() {
     assert.equal(await plugin.findArticleByPubId(platform, 'draft-id', { title: 'Draft' }), target);
     const brokenTargets = [path.join(integrationRoot, 'source/_posts/broken-one.md'), path.join(integrationRoot, 'source/_drafts/broken-two.md')];
     for (const broken of brokenTargets) await writeFile(broken, '---\npub_id: [broken\n---\nuntouched');
+    const directoryReport = await plugin.inspectPublishDirectory(platform);
+    assert.equal(directoryReport.checked, 3);
+    assert.deepEqual(directoryReport.issues.flatMap(issue => issue.paths).sort(), [...brokenTargets].sort());
+    assert.equal(await readFile(target, 'utf8'), original);
     await assert.rejects(plugin.findArticleByPubId(platform, 'draft-id', { title: 'Draft' }), error => {
       assert.match(String(error), /不能排除 pub_id 冲突/);
       for (const broken of brokenTargets) assert.ok(String(error).includes(broken));

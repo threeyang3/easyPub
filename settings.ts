@@ -1,5 +1,6 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type EasyPub from "./main";
+import { PublishBackupsModal } from "./modals/PublishBackupsModal";
 import { backupGitMessage, inspectPublishBackups } from "./utils/publishBackups";
 
 export class EasyPubSettingTab extends PluginSettingTab {
@@ -45,6 +46,7 @@ export class EasyPubSettingTab extends PluginSettingTab {
 
     const backups = new Setting(containerEl).setName("发布历史备份")
       .setDesc("覆盖 Hexo 稿件前保留全文备份，可能包含未公开内容。不会自动清理。")
+      .addButton(button => button.setButtonText("查看备份").onClick(() => new PublishBackupsModal(this.app, this.plugin.settings.hexoRepoPath).open()))
       .addButton(button => button.setButtonText("检查备份").onClick(async () => {
         const repository = this.plugin.settings.hexoRepoPath;
         button.setDisabled(true);
@@ -91,7 +93,7 @@ export class EasyPubSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("图片").setHeading();
     new Setting(containerEl)
       .setName("本地图片处理")
-      .setDesc("Hexo、知乎、小红书的图片设置；微信公众号使用独立的微信素材上传流程")
+      .setDesc("PicGo 为可选功能。平台默认模式无需安装或启动 PicGo，也不会检查其连接。微信公众号始终使用独立上传流程。")
       .addDropdown((dropdown) =>
         dropdown
           .addOption("local", "平台默认")
@@ -99,6 +101,7 @@ export class EasyPubSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.imageHandling)
           .onChange(async (value) => {
             this.plugin.settings.imageHandling = value === "picgo" ? "picgo" : "local";
+            await this.plugin.initializePicGoCredentials();
             await this.plugin.saveSettings();
             this.display();
           })
@@ -118,9 +121,9 @@ export class EasyPubSettingTab extends PluginSettingTab {
             })
         );
 
-      new Setting(containerEl)
+      const secretSetting = new Setting(containerEl)
         .setName("PicGo Server Secret")
-        .setDesc("可选；仅在 PicGo Server 启用了认证时填写")
+        .setDesc("可选；使用系统加密保存，加密不可用时仅本次会话有效。" + (this.plugin.settings.picgoEncryptedSecret && !this.plugin.settings.picgoServerSecret ? "已保存的密钥无法解密，请重新填写。" : this.plugin.settings.picgoServerSecret && !this.plugin.settings.picgoEncryptedSecret ? "当前密钥仅在本次会话保留。" : "") + "修改将替换原密钥。")
         .addText((text) => {
           text.inputEl.type = "password";
           text
@@ -128,9 +131,22 @@ export class EasyPubSettingTab extends PluginSettingTab {
             .setValue(this.plugin.settings.picgoServerSecret)
             .onChange(async (value) => {
               this.plugin.settings.picgoServerSecret = value;
-              await this.plugin.saveSettings();
+              this.plugin.settings.picgoEncryptedSecret = "";
+              try {
+                await this.plugin.saveSettings();
+                secretSetting.setDesc(this.plugin.settings.picgoServerSecret
+                  ? this.plugin.settings.picgoEncryptedSecret ? "密钥已使用系统加密保存。修改或清除将替换原密钥。" : "系统加密不可用：密钥仅本次会话有效，重启后需重新填写。"
+                  : "未设置密钥；仅在 PicGo Server 启用了认证时填写。");
+              }
+              catch { new Notice("PicGo 密钥保存失败，请重新填写并保存。", 8000); }
             });
-        });
+        })
+        .addButton(button => button.setButtonText("清除密钥").onClick(async () => {
+          this.plugin.settings.picgoServerSecret = "";
+          this.plugin.settings.picgoEncryptedSecret = "";
+          try { await this.plugin.saveSettings(); this.display(); }
+          catch { new Notice("清除密钥保存失败，请重试。", 8000); }
+        }));
 
       new Setting(containerEl)
         .setName("连接检查")

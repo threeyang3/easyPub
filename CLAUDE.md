@@ -87,11 +87,12 @@ For compatible Blog Control Room repositories:
 - Compatible Control Room repositories receive required title/categories/tags and a unique four-digit hex `abbrlink`; plaintext `password` is rejected.
 - Write target Markdown atomically. On failure, restore existing content only if it is still the version this operation wrote. Once a target has been written, retain new assets even if recovery succeeds; before target write, clean assets only if no post or draft references them.
 - Preserve source attachments, note embeds, and examples inside fenced or inline code.
+- PicGo is opt-in: `isPicGoEnabled` excludes WeChat. Disabled publishing bypasses the upload resolver completely; dormant PicGo settings do not affect publish fingerprints. Disabled startup does not restore/migrate credentials or check connectivity. Retain settings/cache for re-enabling; serialization still strips legacy plaintext on ordinary saves.
 - PicGo uploads occur only after publish confirmation.
 - Cache PicGo URLs by attachment path and content hash.
 - Revalidate cached PicGo attachments too; use distinct replacement tokens for different paths with identical image contents.
 - Do not read image-host credentials from PicGo configuration.
-- Optional PicGo Server Secret is stored in local Obsidian plugin data and sent as a Bearer token.
+- Optional PicGo Server Secret is system-encrypted (or session-only), sent as a Bearer token. `utils/picgoSecret.ts` migrates legacy plaintext on load and strips plaintext on every save. Preserve unreadable ciphertext on unrelated saves; block new uploads until the user replaces or explicitly clears it. Settings writes are queued in order. Ciphertext is excluded from publish fingerprints; effective plaintext changes are not. Old image caches and Markdown remain unchanged.
 
 ## Development
 
@@ -103,7 +104,8 @@ For compatible Blog Control Room repositories:
 - Account, purpose and processed hash scope material caches. Recheck cached cover existence and local originals; uploads are deferred until sync.
 - AppSecret is system-encrypted or session-only; tokens are memory-only. Never log network errors containing credentials.
 - Persist uncertain write state BEFORE creating/updating a remote draft. Explicit rejection clears it; transport ambiguity/readback failure retains it for manual recovery. Remote conflict defaults to cancel and is rechecked after uploads.
-- `npm run test:wechat-ui` uses installed Chromium and Obsidian API fixtures; it does not substitute for real Obsidian/account acceptance. See docs/wechat.md for verification limits.
+- `npm run test:wechat-ui` uses installed Chromium and Obsidian API fixtures; CI installs Chromium with the locked `playwright-core` CLI and sets `EASYPUB_USE_BUNDLED_CHROMIUM=1`. The browser job must pass alongside the build job. It does not substitute for real Obsidian/account acceptance. See docs/wechat.md for verification limits.
+- `npm run test:publishing-ui` tests the real directory-check and backup modals with deferred filesystem fixtures: pagination, retries, stale responses, close cancellation and readonly text. It uses the matching Playwright Chromium by default (`node node_modules/playwright-core/cli.js install chromium`), or `EASYPUB_CHROME_PATH`, and also runs in the browser CI job.
 - `npm run test:wechat-native` uses a running Obsidian CLI and an in-memory temporary plugin to check native rendering, image decoding and system encryption, without Vault writes or WeChat requests. See docs/wechat-acceptance.md for outstanding account and minimum-version checks.
 
 ```bash

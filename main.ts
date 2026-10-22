@@ -16,6 +16,8 @@ import {
 import { buildHexo, deployHexo, validateHexoBlog } from "./utils/hexoCommands";
 import { DiffModal } from "./modals/DiffModal";
 import { BatchPubIdModal } from "./modals/BatchPubIdModal";
+import { PublishDirectoryModal } from "./modals/PublishDirectoryModal";
+import { inspectPublishDocuments } from "./utils/publishDiagnostics";
 import { fillMissingPubIds, externalPubIdDocuments, needsPubId, PubIdBatchResult } from "./utils/batchPubIds";
 import {
   getPublishPath,
@@ -38,9 +40,10 @@ import { writeImmutableAsset, writePublishedFile } from "./utils/publishFiles";
 import { withTimeout } from "./utils/async";
 import { assertPublishIdentity, PublishIdentityIndex } from "./utils/publishIdentity";
 import { backupGitMessage, inspectPublishBackups } from "./utils/publishBackups";
-import { normalizeSettings, publishSettingsFingerprint } from "./utils/settings";
+import { isPicGoEnabled, normalizeSettings, publishSettingsFingerprint } from "./utils/settings";
 import { WechatApi } from "./utils/wechatApi";
 import { decryptWechatSecret, encryptWechatSecret } from "./utils/wechatSecret";
+import { restorePicGoSecret, serializePicGoSettings } from "./utils/picgoSecret";
 import { rebaseWechatImages } from "./utils/wechatMarkdown";
 import { relativeVaultAttachment } from "./utils/platforms";
 import { WECHAT_VIEW, WechatView, isWechatDraft } from "./views/WechatView";
@@ -77,6 +80,7 @@ export default class EasyPub extends Plugin {
   wechatSyncInProgress = false;
   wechatCredentialRevision = 0;
   private wechatSessionSecret = "";
+  private settingsSaveQueue?: Promise<void>;
   private wechatApi?: WechatApi;
   private wechatApiIdentity = "";
 
@@ -140,6 +144,28 @@ export default class EasyPub extends Plugin {
       name: "批量补齐文件夹中的 pub_id",
       callback: () => this.showBatchPubIdModal(),
     });
+    this.addCommand({ id: "check-publish-directory", name: "检查发布目录（只读）", callback: () => {
+      new PublishDirectoryModal(this.app, (platform, cancelled) => this.inspectPublishDirectory(platform, cancelled)).open();
+    } });
+  }
+
+  async inspectPublishDirectory(platform: Platform, cancelled: () => boolean = () => false) {
+    const settings = { ...this.settings };
+    if (platform.isExternal) await validateHexoBlog(settings.hexoRepoPath);
+    const roots = [getPublishPath(platform, settings)];
+    if (platform.id === "hexo") roots.push(path.join(settings.hexoRepoPath, "source", "_drafts"));
+    const files = new Set<string>();
+    for (const root of roots) {
+      if (cancelled()) throw new Error("检查已取消");
+      if (platform.isExternal) {
+        if (await this.publishDirectoryExists(platform, root)) {
+          for (const file of await this.listPublishFiles(platform, root)) if (file.endsWith(".md")) files.add(file);
+        }
+      } else {
+        for (const file of this.app.vault.getMarkdownFiles()) if (file.path.startsWith(`${root}/`)) files.add(file.path);
+      }
+    }
+    return inspectPublishDocuments([...files].sort().map(file => ({ path: file, read: () => this.readPublishFile(platform, file) })), cancelled);
   }
 
   showBatchPubIdModal() {
@@ -177,7 +203,7 @@ export default class EasyPub extends Plugin {
     } finally { this.pubIdBatchInProgress = false; }
   }
 
-  onunload() { this.wechatSessionSecret = ""; this.wechatApi = undefined; this.identityIndex?.clear(); }
+  onunload() { this.wechatSessionSecret = ""; this.settings.picgoServerSecret = ""; this.wechatApi = undefined; this.identityIndex?.clear(); }
 
   relativeWechatAttachment(draftPath: string, attachmentPath: string): string {
     return relativeVaultAttachment(draftPath, attachmentPath);
@@ -263,13 +289,33 @@ export default class EasyPub extends Plugin {
       console.warn("EasyPub could not load settings", error);
       new Notice("EasyPub 设置读取失败，已使用默认值。请检查插件 data.json 或重新配置发布路径。", 10000);
     }
+    if (isPicGoEnabled(this.settings)) await this.initializePicGoCredentials();
+  }
+
+  async initializePicGoCredentials(): Promise<void> {
+    if (!isPicGoEnabled(this.settings)) return;
+    const legacySecret = this.settings.picgoServerSecret && !this.settings.picgoEncryptedSecret;
+    if (legacySecret) this.settings.picgoEncryptedSecret = "";
+    restorePicGoSecret(this.settings);
+    if (legacySecret) {
+      try { await this.saveSettings(); }
+      catch { new Notice("PicGo 旧密钥已载入，但安全迁移保存失败；磁盘上的旧配置可能仍含明文，请重试保存。", 10000); }
+      if (!this.settings.picgoEncryptedSecret) new Notice("系统加密不可用，PicGo 密钥仅在本次会话保留，重启后需要重新填写。", 10000);
+    }
   }
 
   async saveSettings() {
-    await this.saveData(this.settings);
+    const secret = this.settings.picgoServerSecret;
+    const saved = serializePicGoSettings(this.settings);
+    const snapshot = JSON.parse(JSON.stringify(saved));
+    const write = (this.settingsSaveQueue ?? Promise.resolve()).catch(() => {}).then(() => this.saveData(snapshot));
+    this.settingsSaveQueue = write;
+    await write;
+    if (this.settings.picgoServerSecret === secret) this.settings.picgoEncryptedSecret = saved.picgoEncryptedSecret;
   }
 
   async testPicGoConnection(): Promise<void> {
+    if (!isPicGoEnabled(this.settings)) return;
     try {
       const response = await withTimeout(requestUrl({
         url: getPicGoHeartbeatUrl(this.settings.picgoServerUrl),
@@ -340,7 +386,7 @@ export default class EasyPub extends Plugin {
     }
 
     const content = await this.app.vault.read(activeFile);
-    const settingsFingerprint = publishSettingsFingerprint(this.settings);
+    const settingsFingerprint = publishSettingsFingerprint(this.settings, platform.id);
     const sourceParsed = parseFrontMatter(content);
     if (platform.id === "wechat" && isWechatDraft(activeFile, content, this)) {
       if (updateWechatFromSource) throw new Error("请打开源文章后执行更新，不会把本地成稿再次当作源文章");
@@ -385,7 +431,7 @@ export default class EasyPub extends Plugin {
     }
     const preparedContent: PreparedPublishContent = platform.id === "wechat"
       ? { content: await rebaseWechatImages(this.app, sourceParsed.content, activeFile.path, targetPath), assets: [], picgoUploads: [] }
-      : this.settings.imageHandling === "picgo"
+      : isPicGoEnabled(this.settings, platform.id)
       ? await this.preparePicGoContent(activeFile, sourceParsed.content)
       : platform.id === "hexo"
         ? await this.prepareHexoContent(activeFile, sourceParsed.content, pubId)
@@ -589,10 +635,13 @@ export default class EasyPub extends Plugin {
       throw new Error("目标文件刚刚被创建，请重新发布以生成新的安全文件名");
     }
     assertPublishUnchanged(diff.targetContent, previousTargetContent);
-    const picgoResult = await this.resolvePicGoUploads(
+    if (!isPicGoEnabled(this.settings, platform.id) && diff.picgoUploads?.length) {
+      throw new Error("PicGo 已停用，请重新生成发布预览以使用平台默认图片处理。");
+    }
+    const picgoResult = isPicGoEnabled(this.settings, platform.id) ? await this.resolvePicGoUploads(
       diff.sourceContent,
       diff.picgoUploads ?? []
-    );
+    ) : { content: diff.sourceContent, cacheUpdates: {} };
     const finalContent = picgoResult.content;
     const createdAssets: string[] = [];
     let targetWritten = false;
@@ -661,6 +710,13 @@ export default class EasyPub extends Plugin {
       }
     }
 
+    // The source association has already been written. A mismatch here must not
+    // enter rollback or deploy an article that is no longer confirmed.
+    try {
+      await this.verifyCompletedPublish(diff, sourceFile, finalContent);
+    } catch (error) {
+      throw new Error(`发布稿及当前源稿已保留，但完成后核对未通过，未执行自动部署。${this.getErrorMessage(error)}。源稿：${sourceFile.path}；目标：${diff.targetPath}。请核对两份稿件后重新发布。`);
+    }
     new Notice(diff.isNew ? `已生成${platform.name}发布稿` : `已更新${platform.name}发布稿`);
 
     if (platform.id === "hexo" && this.settings.autoDeploy) {
@@ -676,6 +732,28 @@ export default class EasyPub extends Plugin {
     }
   }
 
+  async verifyCompletedPublish(diff: ArticleDiff, sourceFile: TFile, expectedTarget?: string): Promise<void> {
+    if (diff.sourceSnapshot === undefined) return;
+    if (sourceFile.path !== diff.sourcePath) throw new Error("源稿路径已变化");
+    const current = parseFrontMatter(await this.app.vault.read(sourceFile));
+    const snapshot = parseFrontMatter(diff.sourceSnapshot);
+    // Front-matter serializers can normalize CRLF and add a terminal newline.
+    const comparableBody = (body: string) => body.replace(/\r\n/g, "\n").replace(/\n$/, "");
+    if (comparableBody(current.content) !== comparableBody(snapshot.content)) throw new Error("源稿正文已变化，目标可能仍是确认时的版本");
+    const expected = mergeSourceFrontMatter(snapshot.data, diff.pub_id,
+      formatChildReference(diff.platform, diff.targetPath), getObsoleteChildReferences(diff.platform, diff.targetPath));
+    if (current.data.source_file || getFrontMatterString(current.data, "pub_id") !== diff.pub_id
+      || JSON.stringify(normalizeChildReferences(current.data.子文件)) !== JSON.stringify(normalizeChildReferences(expected.子文件))) {
+      throw new Error("源稿关联未完成或已变化");
+    }
+    if (diff.settingsFingerprint !== undefined && diff.settingsFingerprint !== publishSettingsFingerprint(this.settings, diff.platform.id)) {
+      throw new Error("发布设置已变化");
+    }
+    if (expectedTarget !== undefined && await this.readPublishFile(diff.platform, diff.targetPath) !== expectedTarget) {
+      throw new Error("目标稿在完成后核对前已变化");
+    }
+  }
+
   private async validatePublishSource(diff: ArticleDiff, sourceFile: TFile): Promise<void> {
     const adapter = this.app.vault.adapter;
     if (isSourcePublishTarget(diff.platform, sourceFile.path, diff.targetPath,
@@ -683,7 +761,7 @@ export default class EasyPub extends Plugin {
       throw new Error("当前文件就是目标发布稿，请先打开源文章再发布");
     }
     if (diff.settingsFingerprint !== undefined
-      && diff.settingsFingerprint !== publishSettingsFingerprint(this.settings)) {
+      && diff.settingsFingerprint !== publishSettingsFingerprint(this.settings, diff.platform.id)) {
       throw new Error("发布设置已变化，请重新发布并确认新的差异");
     }
     if (diff.sourceSnapshot !== undefined && (sourceFile.path !== diff.sourcePath
@@ -1133,6 +1211,9 @@ export default class EasyPub extends Plugin {
       return { content, cacheUpdates: {} };
     }
 
+    if (this.settings.picgoEncryptedSecret && !this.settings.picgoServerSecret) {
+      throw new Error("无法解密已保存的 PicGo Secret，请在设置中重新填写；若已关闭 Server 认证，请明确清空原密钥。");
+    }
     const urls = await uploadWithPicGo(
       uploads.map((upload) => upload.localPath),
       {

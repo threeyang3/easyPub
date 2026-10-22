@@ -14,6 +14,7 @@ export function normalizeSettings(value: unknown): PluginSettings {
     imageHandling: saved.imageHandling === "picgo" ? "picgo" : "local",
     picgoServerUrl: text("picgoServerUrl") || DEFAULT_SETTINGS.picgoServerUrl,
     picgoServerSecret: text("picgoServerSecret"),
+    picgoEncryptedSecret: text("picgoEncryptedSecret"),
     picgoImageCache: {},
     wechat: normalizeWechatSettings(saved.wechat),
   };
@@ -32,7 +33,15 @@ export function normalizeSettings(value: unknown): PluginSettings {
   return settings;
 }
 
-export function publishSettingsFingerprint(settings: PluginSettings): string {
-  const { picgoImageCache, wechat, ...configuration } = settings;
-  return createHash("sha256").update(JSON.stringify(configuration)).digest("hex");
+export function isPicGoEnabled(settings: PluginSettings, platformId?: string): boolean {
+  return settings.imageHandling === "picgo" && platformId !== "wechat";
+}
+
+export function publishSettingsFingerprint(settings: PluginSettings, platformId?: string): string {
+  const { picgoImageCache, picgoEncryptedSecret, picgoServerUrl, picgoServerSecret, imageHandling, wechat, ...configuration } = settings;
+  const enabled = isPicGoEnabled(settings, platformId);
+  return createHash("sha256").update(JSON.stringify({ ...configuration,
+    imageHandling: enabled ? "picgo" : "local",
+    ...(enabled ? { picgoServerUrl, picgoServerSecret } : {}),
+  })).digest("hex");
 }

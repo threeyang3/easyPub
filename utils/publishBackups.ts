@@ -1,9 +1,67 @@
 import fs from "fs/promises";
+import path from "path";
+import { createHash } from "crypto";
+import { getFrontMatterString, parseFrontMatter } from "./frontMatter";
+import type { PublishBackupEntry, PublishBackupPreview } from "../types";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { getPublishBackupDirectory } from "./platforms";
 
 const exec = promisify(execFile);
+const backupName = /^[a-f0-9]{64}\.bak$/;
+
+export async function listPublishBackups(blogPath: string): Promise<PublishBackupEntry[]> {
+  const directory = getPublishBackupDirectory(blogPath);
+  let entries;
+  try { entries = await fs.readdir(directory, { withFileTypes: true }); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  const result: PublishBackupEntry[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !backupName.test(entry.name)) continue;
+    const filePath = path.join(directory, entry.name);
+    try {
+      const stat = await fs.lstat(filePath);
+      if (stat.isFile()) result.push({ name: entry.name, path: filePath, bytes: stat.size, savedAt: stat.mtimeMs });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  return result.sort((a, b) => b.savedAt - a.savedAt || a.name.localeCompare(b.name));
+}
+
+export async function readPublishBackup(blogPath: string, name: string): Promise<PublishBackupPreview> {
+  if (!backupName.test(name)) throw new Error("无效的备份文件名");
+  const filePath = path.join(getPublishBackupDirectory(blogPath), name);
+  if (!(await fs.lstat(filePath)).isFile()) throw new Error("备份不是普通文件");
+  const handle = await fs.open(filePath, "r");
+  // Bound reads even if an external editor grows the file while it is open.
+  const limit = 2 * 1024 * 1024;
+  const buffer = Buffer.alloc(limit + 1);
+  let length = 0;
+  try {
+    while (length < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length);
+      if (!bytesRead) break;
+      length += bytesRead;
+    }
+  } finally { await handle.close(); }
+  if (length > limit) throw new Error("备份超过 2 MiB，请按列表中的完整路径在外部编辑器查看");
+  const bytes = buffer.subarray(0, length);
+  const result: PublishBackupPreview = {
+    content: bytes.toString("utf8"), hashMatches: createHash("sha256").update(bytes).digest("hex") === name.slice(0, -4), metadataValid: false,
+  };
+  try {
+    const { data } = parseFrontMatter(result.content, true);
+    result.metadataValid = true;
+    result.title = getFrontMatterString(data, "title");
+    result.source = getFrontMatterString(data, "source_file");
+    result.pubId = getFrontMatterString(data, "pub_id");
+  } catch { /* Preserve raw text for manual recovery; never guess broken metadata. */ }
+  return result;
+}
 export interface BackupStatus {
   directory: string;
   count: number;

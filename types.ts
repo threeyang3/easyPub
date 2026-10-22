@@ -5,6 +5,7 @@ export interface PluginSettings {
   imageHandling: "local" | "picgo";
   picgoServerUrl: string;
   picgoServerSecret: string;
+  picgoEncryptedSecret: string;
   picgoImageCache: Record<string, PicGoImageCacheEntry>;
   wechat: WechatSettings;
 }
@@ -16,6 +17,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   imageHandling: "local",
   picgoServerUrl: "http://127.0.0.1:36677/upload",
   picgoServerSecret: "",
+  picgoEncryptedSecret: "",
   picgoImageCache: {},
   wechat: { appId: "", encryptedSecret: "", defaultAuthor: "", assets: {}, drafts: {} },
 };
@@ -38,6 +40,21 @@ export interface Platform {
 }
 
 export type FrontMatterData = Record<string, unknown>;
+
+export interface PublishBackupEntry { name: string; path: string; bytes: number; savedAt: number }
+export interface PublishBackupPreview {
+  content: string;
+  hashMatches: boolean;
+  title?: string;
+  source?: string;
+  pubId?: string;
+  metadataValid: boolean;
+}
+
+export interface PublishDirectoryReport {
+  checked: number;
+  issues: Array<{ kind: "invalid" | "unreadable" | "duplicate" | "missing-id"; paths: string[]; message: string }>;
+}
 
 export interface ParsedFrontMatter<T extends FrontMatterData = FrontMatterData> {
   data: T;

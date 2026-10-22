@@ -6,13 +6,14 @@ import path from "node:path";
 import os from "node:os";
 import assert from "node:assert/strict";
 
-const chrome = process.env.EASYPUB_CHROME_PATH ?? [
+const bundledChromium = process.env.EASYPUB_USE_BUNDLED_CHROMIUM === "1";
+const chrome = process.env.EASYPUB_CHROME_PATH ?? (bundledChromium ? undefined : [
   "C:/Program Files/Google/Chrome/Application/chrome.exe",
   "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
   "/usr/bin/google-chrome", "/usr/bin/chromium",
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-].find(existsSync);
-if (!chrome) throw new Error("Set EASYPUB_CHROME_PATH to an installed Chromium browser to run UI tests.");
+].find(existsSync));
+if ((!bundledChromium && !chrome) || (chrome && !existsSync(chrome))) throw new Error("Install the matching Playwright Chromium or set EASYPUB_CHROME_PATH to an installed browser.");
 const bundle = await build({ entryPoints: ["tests/fixtures/wechat-workbench.ts"], bundle: true, platform: "browser", format: "esm", write: false,
   plugins: [{ name: "browser-fixtures", setup(build) {
     build.onResolve({ filter: /^obsidian$/ }, () => ({ path: path.resolve("tests/fixtures/wechat-obsidian.ts") }));

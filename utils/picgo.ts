@@ -13,6 +13,14 @@ export type PicGoRequester = (
   request: PicGoRequest
 ) => Promise<{ status: number; json: unknown }>;
 
+export function redactPicGoError(message: string, secret?: string): string {
+  let safe = message;
+  if (secret?.trim()) {
+    for (const value of [secret, secret.trim(), encodeURIComponent(secret.trim())]) safe = safe.split(value).join("[已隐藏]");
+  }
+  return safe.replace(/Bearer\s+[^\s"',;]+/gi, "Bearer [已隐藏]");
+}
+
 export async function uploadWithPicGo(
   filePaths: string[],
   options: PicGoUploadOptions,
@@ -40,7 +48,7 @@ export async function uploadWithPicGo(
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`无法连接 PicGo Server：${message}`);
+    throw new Error(`无法连接 PicGo Server：${redactPicGoError(message, secret)}`);
   }
 
   const data = response.json as {
@@ -53,7 +61,7 @@ export async function uploadWithPicGo(
     || response.status >= 300
     || data?.success !== true
   ) {
-    const detail = data?.message || `HTTP ${response.status}`;
+    const detail = typeof data?.message === "string" ? redactPicGoError(data.message, secret) : `HTTP ${response.status}`;
     throw new Error(`PicGo 上传失败：${detail}`);
   }
   if (

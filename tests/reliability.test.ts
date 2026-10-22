@@ -8,10 +8,13 @@ import EasyPub from "../main";
 import { ArticleDiff, DEFAULT_SETTINGS, PLATFORMS } from "../types";
 import { normalizeSettings, publishSettingsFingerprint } from "../utils/settings";
 import { withTimeout } from "../utils/async";
-import { isSourcePublishTarget } from "../utils/platforms";
+import { isSourcePublishTarget, formatChildReference } from "../utils/platforms";
 import { parseFrontMatter, parseYamlDocument, stringifyFrontMatter } from "../utils/frontMatter";
 import { buildHexo, getHexoNodeExecutable, validateHexoDeployment } from "../utils/hexoCommands";
 import { assertPublishIdentity, PublishIdentityIndex } from "../utils/publishIdentity";
+import { inspectPublishDocuments } from "../utils/publishDiagnostics";
+import { restorePicGoSecret, serializePicGoSettings } from "../utils/picgoSecret";
+import { uploadWithPicGo } from "../utils/picgo";
 
 async function expectReportedFailure(action: () => Promise<unknown>) {
   const error = console.error;
@@ -28,6 +31,91 @@ async function expectReportedFailure(action: () => Promise<unknown>) {
 }
 
 export async function runReliabilityTests() {
+  const legacyPicGo = normalizeSettings({ picgoServerSecret: "legacy-secret", picgoImageCache: { image: { hash: "a".repeat(64), url: "https://old.example/image.png" } } });
+  const encryptedPicGo = serializePicGoSettings(legacyPicGo, value => `encrypted:${value.length}`);
+  assert.equal(encryptedPicGo.picgoServerSecret, "");
+  assert.equal(JSON.stringify(encryptedPicGo).includes("legacy-secret"), false);
+  assert.deepEqual(encryptedPicGo.picgoImageCache, legacyPicGo.picgoImageCache);
+  assert.equal(legacyPicGo.picgoServerSecret, "legacy-secret");
+  assert.equal(serializePicGoSettings({ ...legacyPicGo, picgoEncryptedSecret: "existing" }, () => { throw new Error("Disabled saved credentials must not use encryption"); }).picgoEncryptedSecret, "existing");
+  const restoredPicGo = normalizeSettings(encryptedPicGo);
+  restorePicGoSecret(restoredPicGo, () => "legacy-secret");
+  assert.equal(restoredPicGo.picgoServerSecret, "legacy-secret");
+  assert.equal(publishSettingsFingerprint(restoredPicGo), publishSettingsFingerprint(legacyPicGo));
+  assert.equal(serializePicGoSettings(legacyPicGo, () => "").picgoEncryptedSecret, "");
+  const unavailablePicGo = normalizeSettings(encryptedPicGo);
+  restorePicGoSecret(unavailablePicGo, () => "");
+  assert.equal(serializePicGoSettings(unavailablePicGo, () => "").picgoEncryptedSecret, encryptedPicGo.picgoEncryptedSecret);
+  unavailablePicGo.picgoEncryptedSecret = "";
+  assert.equal(serializePicGoSettings(unavailablePicGo).picgoEncryptedSecret, "");
+  const migratingPicGo = Object.create(EasyPub.prototype) as EasyPub;
+  migratingPicGo.loadData = async () => ({ imageHandling: "picgo", picgoServerSecret: "legacy-secret" });
+  let storedPicGo: any;
+  migratingPicGo.saveData = async data => { storedPicGo = data; };
+  await migratingPicGo.loadSettings();
+  assert.equal(migratingPicGo.settings.picgoServerSecret, "legacy-secret");
+  assert.equal(storedPicGo.picgoServerSecret, "");
+  const writes: any[] = [];
+  let finishFirst!: () => void;
+  const firstWrite = new Promise<void>(resolve => { finishFirst = resolve; });
+  migratingPicGo.saveData = async data => { writes.push(data); if (writes.length === 1) await firstWrite; };
+  migratingPicGo.settings.picgoServerUrl = "http://localhost:36677/upload";
+  const savingFirst = migratingPicGo.saveSettings();
+  migratingPicGo.settings.picgoServerUrl = "http://localhost:36678/upload";
+  const savingSecond = migratingPicGo.saveSettings();
+  finishFirst();
+  await Promise.all([savingFirst, savingSecond]);
+  assert.deepEqual(writes.map(value => value.picgoServerUrl), ["http://localhost:36677/upload", "http://localhost:36678/upload"]);
+  assert.ok(writes.every(value => value.picgoServerSecret === ""));
+  migratingPicGo.saveData = async () => { throw new Error("disk full"); };
+  await assert.rejects(migratingPicGo.saveSettings(), /disk full/);
+  migratingPicGo.saveData = async data => { storedPicGo = data; };
+  await migratingPicGo.saveSettings();
+  migratingPicGo.settings.picgoServerSecret = "";
+  migratingPicGo.settings.picgoEncryptedSecret = "unreadable";
+  await assert.rejects((migratingPicGo as any).resolvePicGoUploads("text", [{ absolutePath: "image.png" }]), /无法解密/);
+  for (const failRequest of [false, true]) {
+    await assert.rejects(uploadWithPicGo(["file.png"], { serverUrl: "http://127.0.0.1:36677", secret: "sensitive-key" }, async () => {
+      if (failRequest) throw new Error("Authorization: Bearer sensitive-key");
+      return { status: 401, json: { message: "rejected sensitive-key" } };
+    }), error => error instanceof Error && !error.message.includes("sensitive-key") && error.message.includes("已隐藏"));
+  }
+  const diagnosticContents = new Map([
+    ['good.md', '---\npub_id: old-id\ncustom: keep\n---\nbody'],
+    ['copy.md', '---\npub_id: old-id\n---\ncopy'],
+    ['legacy.md', 'old document without metadata'],
+    ['broken.md', '---\ntitle: [broken\n---\nbody'],
+  ]);
+  const beforeDiagnostics = [...diagnosticContents];
+  const diagnosticDocuments = [...diagnosticContents].map(([path, text]) => ({ path, read: async () => text }));
+  const diagnosticReport = await inspectPublishDocuments([
+    ...diagnosticDocuments, diagnosticDocuments[0],
+    { path: 'unreadable.md', read: async () => { throw new Error('denied'); } },
+  ]);
+  assert.equal(diagnosticReport.checked, 5);
+  assert.deepEqual(diagnosticReport.issues.map(issue => issue.kind).sort(), ['duplicate', 'invalid', 'missing-id', 'unreadable']);
+  assert.deepEqual(diagnosticReport.issues.find(issue => issue.kind === 'duplicate')?.paths, ['good.md', 'copy.md']);
+  assert.deepEqual([...diagnosticContents], beforeDiagnostics);
+  let diagnosticsCancelled = false;
+  let diagnosticReads = 0;
+  await assert.rejects(inspectPublishDocuments([
+    { path: 'one.md', read: async () => { diagnosticReads++; diagnosticsCancelled = true; return 'body'; } },
+    { path: 'two.md', read: async () => { diagnosticReads++; return 'body'; } },
+  ], () => diagnosticsCancelled), /已取消/);
+  assert.equal(diagnosticReads, 1);
+  const diagnosticPlugin = Object.create(EasyPub.prototype) as EasyPub;
+  diagnosticPlugin.settings = { ...DEFAULT_SETTINGS };
+  const platformFiles = ['发布/知乎/文章/a.md', '发布/知乎/想法/b.md', '发布/微信公众号/c.md', '发布/知乎副本/d.md'];
+  diagnosticPlugin.app = { vault: { getMarkdownFiles: () => platformFiles.map(path => ({ path })) } } as any;
+  const diagnosticPaths: string[] = [];
+  diagnosticPlugin.readPublishFile = async (_platform, path) => {
+    diagnosticPaths.push(path);
+    return '---\npub_id: shared-id\n---\nunchanged';
+  };
+  const scopedReport = await diagnosticPlugin.inspectPublishDirectory(PLATFORMS.find(platform => platform.id === 'zhihu')!);
+  assert.deepEqual(diagnosticPaths, platformFiles.slice(0, 2).sort());
+  assert.equal(scopedReport.checked, 2);
+  assert.equal(scopedReport.issues.length, 1);
   const identityIndex = new PublishIdentityIndex();
   const indexedFiles = Array.from({ length: 200 }, (_, i) => Object.assign(new TFile(), {
     path: `notes/${i}.md`, stat: { mtime: 1, size: 100 },
@@ -166,6 +254,19 @@ export async function runReliabilityTests() {
     picgoServerSecret: [], picgoImageCache: { stale: null, broken: { url: 42 } },
   });
   assert.deepEqual(normalized, DEFAULT_SETTINGS);
+  const disabledPicGo = normalizeSettings({ imageHandling: "local", picgoServerUrl: "invalid address", picgoEncryptedSecret: "unreadable" });
+  assert.equal(publishSettingsFingerprint(disabledPicGo), publishSettingsFingerprint(normalized));
+  assert.equal(publishSettingsFingerprint({ ...disabledPicGo, picgoServerSecret: "changed" }), publishSettingsFingerprint(normalized));
+  assert.notEqual(publishSettingsFingerprint({ ...disabledPicGo, imageHandling: "picgo" }), publishSettingsFingerprint(normalized));
+  assert.equal(publishSettingsFingerprint({ ...disabledPicGo, imageHandling: "picgo" }, "wechat"), publishSettingsFingerprint(normalized, "wechat"));
+  assert.notEqual(publishSettingsFingerprint({ ...disabledPicGo, imageHandling: "picgo", picgoServerSecret: "one" }), publishSettingsFingerprint({ ...disabledPicGo, imageHandling: "picgo", picgoServerSecret: "two" }));
+  const inactivePlugin = Object.create(EasyPub.prototype) as EasyPub;
+  inactivePlugin.loadData = async () => disabledPicGo;
+  inactivePlugin.saveData = async () => { throw new Error("Inactive PicGo must not migrate settings on startup"); };
+  inactivePlugin.initializePicGoCredentials = async () => { throw new Error("Inactive PicGo must not access credentials"); };
+  await inactivePlugin.loadSettings();
+  await inactivePlugin.testPicGoConnection(); // Network fixture throws if contacted.
+  assert.equal(inactivePlugin.settings.picgoEncryptedSecret, "unreadable");
   assert.deepEqual(normalizeSettings(null), DEFAULT_SETTINGS);
   const oldCache = { image: { hash: "a".repeat(64), url: "https://example.com/image.png" } };
   assert.deepEqual(normalizeSettings({ picgoImageCache: oldCache }).picgoImageCache, oldCache);
@@ -246,6 +347,8 @@ export async function runReliabilityTests() {
     let completeUpload!: (value: { content: string; cacheUpdates: {} }) => void;
     const pending = new Promise<{ content: string; cacheUpdates: {} }>(resolve => { completeUpload = resolve; });
     const internals = plugin as any;
+    plugin.settings.imageHandling = "picgo";
+    diff.settingsFingerprint = publishSettingsFingerprint(plugin.settings);
     internals.resolvePicGoUploads = () => withTimeout(pending, 5, "upload timeout");
     internals.performPublish = () => plugin.copyAndOpenForEdit(diff, source);
     await expectReportedFailure(() => plugin.preparePublish(platform));
@@ -253,11 +356,43 @@ export async function runReliabilityTests() {
     completeUpload({ content: "late result", cacheUpdates: {} });
     await new Promise(resolve => setTimeout(resolve, 10));
     assert.equal(await readFile(target, "utf8"), original);
-    internals.resolvePicGoUploads = async () => ({ content: diff.sourceContent, cacheUpdates: {} });
+    plugin.settings.imageHandling = "local";
+    diff.settingsFingerprint = publishSettingsFingerprint(plugin.settings);
+    plugin.settings.picgoServerUrl = "invalid";
+    plugin.settings.picgoEncryptedSecret = "unreadable";
+    internals.resolvePicGoUploads = async () => { throw new Error("Local publishing must bypass PicGo entirely"); };
+    plugin.updateSourceFile = async () => {
+      sourceText = stringifyFrontMatter('Source', { pub_id: diff.pub_id, 子文件: [formatChildReference(platform, target)] });
+    };
     // Failure to open the editor must not invalidate a completed publication.
     plugin.openPublishedFile = async () => { throw new Error("editor unavailable"); };
     await expectReportedFailure(() => plugin.copyAndOpenForEdit(diff, source));
     assert.equal(await readFile(target, "utf8"), diff.sourceContent);
+
+    // A body edit during association must preserve both versions and block deployment.
+    await writeFile(target, original);
+    sourceText = 'Source';
+    plugin.settings.autoDeploy = true;
+    const racingDiff = { ...diff, settingsFingerprint: publishSettingsFingerprint(plugin.settings) };
+    let deployed = false;
+    plugin.deployToHexo = async () => { deployed = true; };
+    plugin.updateSourceFile = async () => {
+      sourceText = stringifyFrontMatter('Edited during association', { pub_id: diff.pub_id, 子文件: [formatChildReference(platform, target)] });
+    };
+    await assert.rejects(plugin.copyAndOpenForEdit(racingDiff, source), /完成后核对未通过.*源稿正文已变化/);
+    assert.equal(deployed, false);
+    assert.equal(await readFile(target, 'utf8'), diff.sourceContent);
+    assert.equal(parseFrontMatter(sourceText).content, 'Edited during association\n');
+    sourceText = stringifyFrontMatter('Source', { pub_id: 'other-id' });
+    await assert.rejects(plugin.verifyCompletedPublish(racingDiff, source), /源稿关联/);
+    sourceText = stringifyFrontMatter('Source', { pub_id: diff.pub_id, 子文件: [formatChildReference(platform, target)] });
+    await plugin.verifyCompletedPublish(racingDiff, source, diff.sourceContent);
+    await writeFile(target, 'edited target');
+    await assert.rejects(plugin.verifyCompletedPublish(racingDiff, source, diff.sourceContent), /目标稿.*变化/);
+    assert.equal(await readFile(target, 'utf8'), 'edited target');
+    source.path = 'renamed-source.md';
+    await assert.rejects(plugin.verifyCompletedPublish(racingDiff, source), /源稿路径/);
+    source.path = diff.sourcePath;
 
     // Invalid persisted JSON must not prevent plugin commands from being registered.
     const recovering = Object.create(EasyPub.prototype) as EasyPub;

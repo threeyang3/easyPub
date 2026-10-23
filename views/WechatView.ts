@@ -26,6 +26,7 @@ class CoverPicker extends FuzzySuggestModal<TFile> {
 
 export class WechatView extends ItemView {
   private allowRemoteImages = () => this.plugin.settings.wechat.allowRemoteImages !== false;
+  private imagePolicyRevision = 0;
   private file: TFile | null = null;
   private snapshot = "";
   private snapshotPath = "";
@@ -152,6 +153,17 @@ export class WechatView extends ItemView {
     if (this.timer) clearTimeout(this.timer);
     if (!this.paused && !this.dirty && !this.busy) this.scheduleRefresh();
   }
+  invalidateImagePolicy() {
+    if (this.closed) return;
+    this.imagePolicyRevision++; this.version++; this.stale = true;
+    this.rerenderRequested = false; this.manualRefreshRequested = false;
+    if (this.timer) { clearTimeout(this.timer); this.timer = undefined; }
+    this.disposePrepared();
+    this.preview.empty();
+    this.renderInspector();
+    this.updateSyncState();
+    this.message('图片读取策略已变化 · 预览待更新，请刷新后再同步');
+  }
   private scheduleRefresh() {
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
@@ -183,6 +195,7 @@ export class WechatView extends ItemView {
     const keepDirty = this.dirty;
     const pendingArticle = keepDirty ? structuredClone(this.article) : undefined;
     const version = ++this.version;
+    const imagePolicyRevision = this.imagePolicyRevision;
     this.rerenderRequested = false;
     this.stale = true; this.updateSyncState(); this.message("正在检查排版与图片…");
     const file = this.file, filePath = file.path;
@@ -211,7 +224,7 @@ export class WechatView extends ItemView {
         catch (error) { prepared.issues.push(`封面：${(error as Error).message}`); }
       }
       if (version !== this.version || this.closed || file.path !== filePath || await this.app.vault.read(file) !== snapshot) {
-        this.rerenderRequested = !this.closed;
+        this.rerenderRequested = !this.closed && imagePolicyRevision === this.imagePolicyRevision;
         releaseWechatImages(prepared.images); if (cover) releaseWechatImages([cover]); return;
       }
       const scroll = this.preview.scrollTop;
@@ -301,8 +314,9 @@ export class WechatView extends ItemView {
     return this.plugin.relativeWechatAttachment(this.file!.path, path);
   }
   private async selectCover(source: string) {
+    const version = this.version;
     const cover = await loadWechatImage(this.app, source, this.file!.path, "cover", this.allowRemoteImages);
-    if (this.closed) { releaseWechatImages([cover]); return; }
+    if (this.closed || version !== this.version) { releaseWechatImages([cover]); return; }
     if (this.cover) releaseWechatImages([this.cover]);
     this.cover = cover; this.article.cover = source;
     this.article.cropWide = centeredCrop(cover.width, cover.height, 2.35);

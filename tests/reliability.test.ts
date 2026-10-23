@@ -9,8 +9,9 @@ import { ArticleDiff, DEFAULT_SETTINGS, PLATFORMS } from "../types";
 import { normalizeSettings, publishSettingsFingerprint } from "../utils/settings";
 import { withTimeout } from "../utils/async";
 import { isSourcePublishTarget, formatChildReference } from "../utils/platforms";
-import { parseFrontMatter, parseYamlDocument, stringifyFrontMatter } from "../utils/frontMatter";
+import { generatePubId, parseFrontMatter, parseYamlDocument, stringifyFrontMatter } from "../utils/frontMatter";
 import { buildHexo, getHexoNodeExecutable, validateHexoDeployment } from "../utils/hexoCommands";
+import { desktopCommandEnvironment } from "../utils/desktopEnvironment";
 import { assertPublishIdentity, PublishIdentityIndex } from "../utils/publishIdentity";
 import { inspectPublishDocuments } from "../utils/publishDiagnostics";
 import { restorePicGoSecret, serializePicGoSettings } from "../utils/picgoSecret";
@@ -33,6 +34,10 @@ async function expectReportedFailure(action: () => Promise<unknown>) {
 }
 
 export async function runReliabilityTests() {
+  const originalRandom = Math.random;
+  Math.random = () => { throw new Error('pub_id must use cryptographic randomness'); };
+  try { assert.match(generatePubId(), /^[a-f0-9]{16}$/); }
+  finally { Math.random = originalRandom; }
   for (const address of ['http://127.1/a', 'http://0x7f000001/a', 'http://10.0.0.1/a', 'http://[::1]/a', 'http://[::ffff:127.0.0.1]/a', 'http://localhost/a', 'http://host.local/a', 'https://user:pass@example.com/a', 'file:///a']) {
     assert.throws(() => validateImageDownloadUrl(address));
   }
@@ -314,6 +319,17 @@ export async function runReliabilityTests() {
   assert.equal(isSourcePublishTarget(zhihu, "文章/a.md", "发布/知乎/文章/a.md"), false);
   assert.equal(getHexoNodeExecutable("43.0.0"), process.platform === "win32" ? "node.exe" : "node");
   assert.equal(getHexoNodeExecutable(""), process.execPath);
+  const macEnvironment = { PATH: "/Users/test/.nvm/versions/node/v20/bin:/usr/bin", CUSTOM: "keep" };
+  const macCommands = desktopCommandEnvironment(macEnvironment, "darwin");
+  assert.equal(macCommands.PATH?.split(":")[0], "/Users/test/.nvm/versions/node/v20/bin");
+  assert.ok(macCommands.PATH?.includes("/opt/homebrew/bin"));
+  assert.ok(macCommands.PATH?.includes("/usr/local/bin"));
+  assert.equal(macCommands.CUSTOM, "keep");
+  assert.equal(macEnvironment.PATH, "/Users/test/.nvm/versions/node/v20/bin:/usr/bin");
+  assert.equal(desktopCommandEnvironment(macCommands, "darwin").PATH, macCommands.PATH);
+  assert.ok(!desktopCommandEnvironment({}, "darwin").PATH?.split(":").includes(""));
+  assert.deepEqual(desktopCommandEnvironment({ Path: "C:\\node", CUSTOM: "keep" }, "win32"), { Path: "C:\\node", CUSTOM: "keep" });
+  assert.deepEqual(desktopCommandEnvironment(macEnvironment, "linux"), macEnvironment);
   const normalized = normalizeSettings({
     hexoRepoPath: 42, publishBasePath: "  ", autoDeploy: "false", imageHandling: null,
     picgoServerSecret: [], picgoImageCache: { stale: null, broken: { url: 42 } },
@@ -367,6 +383,17 @@ export async function runReliabilityTests() {
     await writeFile(config, "deploy: [unterminated");
     await assert.rejects(buildHexo(root), /格式错误/);
     await assert.rejects(readFile(path.join(root, "commands.log")), /ENOENT/);
+
+    // Exercise real child processes and repository-local resolution on every CI OS.
+    // Spaces and Unicode must remain single arguments; no shell or global Hexo.
+    const portableBlog = path.join(root, "博客 with spaces");
+    const localHexo = path.join(portableBlog, "node_modules", "hexo");
+    await mkdir(path.join(localHexo, "bin"), { recursive: true });
+    await writeFile(path.join(portableBlog, "_config.yml"), "title: Portable\n");
+    await writeFile(path.join(localHexo, "package.json"), JSON.stringify({ name: "hexo", bin: { hexo: "bin/hexo.js" } }));
+    await writeFile(path.join(localHexo, "bin", "hexo.js"), "require('fs').appendFileSync('commands.log', JSON.stringify(process.argv.slice(2)) + '\\n');");
+    await buildHexo(portableBlog);
+    assert.equal(await readFile(path.join(portableBlog, "commands.log"), "utf8"), '["clean"]\n["generate","--bail"]\n');
 
     const plugin = Object.create(EasyPub.prototype) as EasyPub;
     plugin.settings = normalizeSettings({ hexoRepoPath: root });

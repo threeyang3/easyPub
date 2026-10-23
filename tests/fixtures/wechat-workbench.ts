@@ -54,7 +54,7 @@ const plugin: any = { app, settings: normalizeSettings(null), wechatSyncInProgre
 const view = new WechatView({ app, contentEl: document.querySelector("#workbench") } as any, plugin);
 await view.onOpen(); await view.bind(file);
 globals.fixture = { view,
-  localOnly: (value: boolean) => { plugin.settings.wechat.allowRemoteImages = !value; },
+  localOnly: (value: boolean) => { plugin.settings.wechat.allowRemoteImages = !value; view.invalidateImagePolicy(); },
   setup: () => {
     const config = { ...plugin, settings: normalizeSettings(null), hasWechatCredentials: () => Boolean(config.settings.wechat.appId),
       saveWechatConfiguration: async (id: string, secret: string, author: string) => {

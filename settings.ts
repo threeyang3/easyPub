@@ -21,7 +21,7 @@ export class EasyPubSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("Hexo").setHeading();
     new Setting(containerEl)
       .setName("Hexo 仓库路径")
-      .setDesc("Hexo 博客根目录的绝对路径，例如 E:\\Blog 或 /home/user/blog")
+      .setDesc("Hexo 博客根目录的绝对路径，例如 E:\\Blog 或 /Users/你的用户名/blog；换电脑后需按本机位置重新设置")
       .addText((text) =>
         text
           .setPlaceholder("/path/to/blog")
@@ -85,7 +85,10 @@ export class EasyPubSettingTab extends PluginSettingTab {
       .setDesc("不可信稿件建议选用仅 Vault 附件；禁止正文和封面下载 HTTP(S) 图片。切换后请刷新预览，已发出的下载可能仍在完成。不会影响 PicGo 或其他平台。")
       .addDropdown(dropdown => dropdown.addOption("allow", "允许网络图片（兼容现有代理）").addOption("local", "仅使用 Vault 附件")
         .setValue(this.plugin.settings.wechat.allowRemoteImages === false ? "local" : "allow")
-        .onChange(async value => { this.plugin.settings.wechat.allowRemoteImages = value !== "local"; await this.plugin.saveSettings(); }));
+        .onChange(async value => {
+          try { await this.plugin.setWechatRemoteImages(value !== "local"); }
+          catch { new Notice("图片策略已在本次会话生效，但保存失败；请检查配置文件写入权限。", 8000); }
+        }));
     const connection = new Setting(containerEl).setName("公众号连接检查")
       .setDesc("检查令牌、素材读取和草稿读取；不会上传图片或创建草稿。需配置出口 IP 白名单。")
       .addButton(button => button.setButtonText("检查连接").onClick(async () => {

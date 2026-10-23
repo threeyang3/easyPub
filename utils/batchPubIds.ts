@@ -1,7 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
-import { randomBytes } from "crypto";
-import { parseFrontMatter, stringifyFrontMatter } from "./frontMatter";
+import { generatePubId, parseFrontMatter, stringifyFrontMatter } from "./frontMatter";
 import { writePublishedFile } from "./publishFiles";
 
 export function needsPubId(value: unknown): boolean {
@@ -38,7 +37,7 @@ export async function fillMissingPubIds(documents: PubIdDocument[]): Promise<Pub
   for (const { document, content } of candidates) {
     try {
       let id: string;
-      do { id = randomBytes(8).toString("hex"); } while (reserved.has(id));
+      do { id = generatePubId(); } while (reserved.has(id));
       reserved.add(id);
       if (await document.assign(id, content)) result.added++;
       else result.skipped++;

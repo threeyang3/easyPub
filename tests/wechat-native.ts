@@ -1,7 +1,7 @@
 // Run inside Obsidian through the CLI; no vault files or account data are changed.
 import { App, Component } from "obsidian";
 import { renderWechatDocument } from "../utils/wechatRenderer";
-import { processWechatImage, releaseWechatImages } from "../utils/wechatImages";
+import { loadWechatImage, processWechatImage, releaseWechatImages } from "../utils/wechatImages";
 import { encryptWechatSecret, decryptWechatSecret } from "../utils/wechatSecret";
 import { changedSpan, wechatReadableHtml } from "../utils/wechatComparison";
 
@@ -30,6 +30,23 @@ export async function run(app: App) {
     canvas.getContext('2d')!.fillRect(0, 0, 40, 20);
     const blob = await new Promise<Blob>(resolve => canvas.toBlob(b => resolve(b!), 'image/jpeg'));
     const jpeg = new Uint8Array(await blob.arrayBuffer());
+    for (const purpose of ['body', 'cover'] as const) {
+      let allowed = true;
+      const created: string[] = [], revoked: string[] = [];
+      const create = URL.createObjectURL, revoke = URL.revokeObjectURL;
+      URL.createObjectURL = value => {
+        const url = create.call(URL, value); created.push(url);
+        allowed = false; // Download has finished; native decoding is beginning.
+        return url;
+      };
+      URL.revokeObjectURL = url => { revoked.push(url); revoke.call(URL, url); };
+      try {
+        let rejected = false;
+        try { await loadWechatImage(app, 'https://example.com/test.jpg', '', purpose, () => allowed, async () => jpeg); }
+        catch (error) { rejected = (error as Error).message.includes('处理结果已丢弃'); }
+        assert(rejected && created.length >= 2 && created.every(url => revoked.includes(url)), `native ${purpose} decode permission race releases all URLs`);
+      } finally { URL.createObjectURL = create; URL.revokeObjectURL = revoke; }
+    }
     // EXIF IFD0 orientation=6 rotates 40x20 to 20x40.
     const exif = new Uint8Array([255,225,0,34,69,120,105,102,0,0,73,73,42,0,8,0,0,0,1,0,18,1,3,0,1,0,0,0,6,0,0,0,0,0,0,0]);
     const oriented = new Uint8Array(jpeg.length + exif.length); oriented.set(jpeg.slice(0,2)); oriented.set(exif,2); oriented.set(jpeg.slice(2),2+exif.length);

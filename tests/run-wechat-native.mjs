@@ -11,7 +11,8 @@ try {
   const entry = process.argv.includes('--download') ? 'tests/wechat-download-native.ts' : 'tests/wechat-native.ts';
   const result = await build({ entryPoints: [entry], bundle: true, platform: 'node', format: 'cjs', external: ['obsidian','electron','@electron/remote'], write: false });
   const file = path.join(temp, 'native.cjs');
-  await writeFile(file, result.outputFiles[0].text + '\nconst runAcceptance=module.exports.run; module.exports=class extends require("obsidian").Plugin { async onload(){this.result=await runAcceptance(this.app);} };');
+  const options = { imageUrl: process.env.EASYPUB_TEST_IMAGE_URL?.trim() || undefined };
+  await writeFile(file, result.outputFiles[0].text + '\nconst runAcceptance=module.exports.run; module.exports=class extends require("obsidian").Plugin { async onload(){this.result=await runAcceptance(this.app,' + JSON.stringify(options) + ');} };');
   const id = `easypub-acceptance-${Date.now()}`;
   const code = `(async()=>{
     const id=${JSON.stringify(id)}, manager=app.plugins, adapter=app.vault.adapter;

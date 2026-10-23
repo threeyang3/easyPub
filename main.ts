@@ -316,6 +316,15 @@ export default class EasyPub extends Plugin {
     if (this.settings.picgoServerSecret === secret) this.settings.picgoEncryptedSecret = saved.picgoEncryptedSecret;
   }
 
+  async setWechatRemoteImages(allowed: boolean): Promise<void> {
+    if ((this.settings.wechat.allowRemoteImages !== false) === allowed) return;
+    this.settings.wechat.allowRemoteImages = allowed;
+    for (const leaf of this.app.workspace.getLeavesOfType(WECHAT_VIEW)) {
+      if (leaf.view instanceof WechatView) leaf.view.invalidateImagePolicy();
+    }
+    await this.saveSettings();
+  }
+
   async testPicGoConnection(): Promise<void> {
     if (!isPicGoEnabled(this.settings)) return;
     try {
@@ -1028,6 +1037,10 @@ export default class EasyPub extends Plugin {
         }
       }
 
+      if (process.platform !== "win32") {
+        new Notice("请先在博客目录的终端运行 npm run gui，并保持终端开启，再点击打开管理后台。当前系统不会执行 Windows 的 ManageBlog.bat，也不会绕过后台直接部署。", 15000);
+        return;
+      }
       const launchError = await electron.shell.openPath(integration.launcherPath);
       if (launchError) throw new Error(launchError);
       new Notice("正在启动博客管理后台，浏览器将自动打开");

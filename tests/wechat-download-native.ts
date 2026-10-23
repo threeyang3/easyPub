@@ -2,8 +2,8 @@ import { downloadWechatImage } from '../utils/wechatDownload';
 import { createServer } from 'http';
 
 // Explicit opt-in integration check: public image GETs only, no notes/accounts.
-export async function run() {
-  const source = 'https://www.baidu.com/img/flexible/logo/pc/result.png';
+export async function run(_app: unknown, options: { imageUrl?: string } = {}) {
+  const source = options.imageUrl || 'https://www.baidu.com/img/flexible/logo/pc/result.png';
   const checks: string[] = [];
   const bytes = await downloadWechatImage(source);
   if (bytes[0] !== 137 || bytes[1] !== 80 || bytes[2] !== 78 || bytes[3] !== 71) throw new Error('Expected public PNG');
@@ -38,5 +38,5 @@ export async function run() {
       checks.push('native stalled response aborted and server disconnected');
     }
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
-  return { checks, vaultWrites: 0, wechatRequests: 0 };
+  return { checks, environment: { platform: process.platform, electron: process.versions.electron, node: process.versions.node }, vaultWrites: 0, wechatRequests: 0 };
 }

@@ -4,6 +4,7 @@ import { createHash } from "crypto";
 import { getFrontMatterString, parseFrontMatter } from "./frontMatter";
 import type { PublishBackupEntry, PublishBackupPreview } from "../types";
 import { execFile } from "child_process";
+import { desktopCommandEnvironment } from "./desktopEnvironment";
 import { promisify } from "util";
 import { getPublishBackupDirectory } from "./platforms";
 
@@ -84,7 +85,7 @@ export async function inspectPublishBackups(blogPath: string): Promise<BackupSta
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
-  const options = { cwd: blogPath, timeout: 5000, maxBuffer: 1024 * 1024, windowsHide: true };
+  const options = { cwd: blogPath, env: desktopCommandEnvironment(), timeout: 5000, maxBuffer: 1024 * 1024, windowsHide: true };
   try {
     const tracked = await exec("git", ["ls-files", "-z", "--", ".easy-pub-backups"], options);
     if (tracked.stdout.length) { result.git = "tracked"; return result; }

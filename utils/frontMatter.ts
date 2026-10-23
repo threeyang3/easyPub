@@ -44,7 +44,7 @@ export function parseYamlDocument(content: string): FrontMatterData {
 }
 
 export function generatePubId(): string {
-  return Math.random().toString(36).substring(2, 10);
+  return randomBytes(8).toString("hex");
 }
 
 export function getFrontMatterString(

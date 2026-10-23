@@ -268,7 +268,17 @@ try {
   await page.evaluate(() => document.body.classList.remove('theme-dark'));
   await page.screenshot({ path: screenshot.replace(/\.png$/, "-cover.png"), fullPage: true });
   await page.evaluate(async () => {
+    window.fixture.setDelay(75);
+    const pending = window.fixture.view.refresh(true);
+    await new Promise(resolve => setTimeout(resolve, 10));
     window.fixture.localOnly(true);
+    await pending;
+    window.fixture.setDelay(0);
+  });
+  assert.equal(await page.getByRole('button', { name: '同步草稿箱', exact: true }).isDisabled(), true);
+  assert.equal(await page.locator('.epw-paper').innerText(), '');
+  assert.match(await page.locator('#workbench').innerText(), /图片读取策略已变化/);
+  await page.evaluate(async () => {
     window.fixture.modify('![blocked](https://example.com/blocked.png)');
     await window.fixture.view.refresh(true);
   });

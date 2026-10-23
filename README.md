@@ -95,4 +95,4 @@ npm run dev    # 监听源码变化
 
 ## 许可证
 
-MIT
+[MIT](LICENSE)

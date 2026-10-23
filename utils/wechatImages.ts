@@ -127,9 +127,14 @@ export async function processWechatImage(source: string, input: Uint8Array, purp
     previewUrl: URL.createObjectURL(new Blob([bytes.slice().buffer as ArrayBuffer], { type: mime })) };
 }
 
-export async function loadWechatImage(app: App, source: string, filePath: string, purpose: "body" | "cover", allowRemote = () => true): Promise<WechatImage> {
-  const raw = await readWechatImage(app, source, filePath, undefined, allowRemote);
-  return processWechatImage(source, raw.bytes, purpose, raw.localPath);
+export async function loadWechatImage(app: App, source: string, filePath: string, purpose: "body" | "cover", allowRemote = () => true, download = downloadWechatImage): Promise<WechatImage> {
+  const raw = await readWechatImage(app, source, filePath, download, allowRemote);
+  const image = await processWechatImage(source, raw.bytes, purpose, raw.localPath);
+  if (!raw.localPath && !allowRemote()) {
+    releaseWechatImages([image]);
+    throw new Error("网络图片权限已关闭，处理结果已丢弃，请刷新预览");
+  }
+  return image;
 }
 export function releaseWechatImages(images: WechatImage[]): void {
   images.forEach(image => URL.revokeObjectURL(image.previewUrl));

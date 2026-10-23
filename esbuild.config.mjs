@@ -48,7 +48,7 @@ if (prod) {
     mkdirSync(releaseDir);
   }
 
-  const files = ["main.js", "manifest.json", "styles.css"];
+  const files = ["main.js", "manifest.json", "styles.css", "LICENSE"];
   for (const file of files) {
     if (existsSync(file)) {
       copyFileSync(file, `${releaseDir}/${file}`);

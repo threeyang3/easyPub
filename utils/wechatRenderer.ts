@@ -108,11 +108,17 @@ export async function renderWechatDocument(app: App, body: string, filePath: str
       }
       return image.previewUrl;
     });
+    if (!allowRemote() && images.some(image => !image.localPath)) {
+      throw new Error('网络图片权限已变化，本轮预览已丢弃，请刷新');
+    }
     if (!allowRemote() && (prepared.issues.length || rawHtml)) {
       return { html: '<section></section>', images, issues: [...prepared.issues, ...(rawHtml ? [rawHtmlIssue] : [])], imageReferences: prepared.imageReferences };
     }
     const container = document.createElement("section");
     await MarkdownRenderer.render(app, prepared.markdown, container, filePath, component);
+    if (!allowRemote() && (rawHtml || images.some(image => !image.localPath))) {
+      throw new Error('网络图片权限已变化，本轮预览已丢弃，请刷新');
+    }
     const issues = [...prepared.issues, ...normalizeWechatHtml(container, images)];
     container.setAttribute("style", WECHAT_TEMPLATE.section);
     return { html: container.outerHTML, images, issues: [...new Set(issues)], imageReferences: prepared.imageReferences };

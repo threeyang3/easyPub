@@ -50,7 +50,7 @@
 
 支持 Vault 图片嵌入、Markdown 图片（含引用式图片）和 HTTP(S) 网络图片。图片路径相对于本地成稿解析。图片列表显示转换后的尺寸、格式和大小；找不到图片、网络下载失败或解码失败时阻止同步。
 
-设置 → EasyPub → 公众号网络图片，可选择“仅使用 Vault 附件”。该模式在正文、封面和同步复核时拒绝 HTTP(S) 图片，提示先保存到 Vault 并修改引用；也不将原始 HTML 交给宿主渲染。旧设置默认允许网络图片，以保留代理和既有稿件行为。切换后请刷新预览：已发出的下载可能继续完成，但结果不会被后续处理采纳。这是 EasyPub 图片读取策略，不是 Obsidian 第三方渲染插件的执行或网络沙箱。
+设置 → EasyPub → 公众号网络图片，可选择“仅使用 Vault 附件”。该模式在正文、封面和同步复核时拒绝 HTTP(S) 图片，提示先保存到 Vault 并修改引用；也不将原始 HTML 交给宿主渲染。旧设置默认允许网络图片，以保留代理和既有稿件行为。切换时立即清空已打开的旧预览、释放图片资源并禁用同步，请手动刷新：已发出的下载或解码可能继续完成，但过期结果会被丢弃并释放资源，不能覆盖新策略下的预览。这是 EasyPub 图片读取策略，不是 Obsidian 第三方渲染插件的执行或网络沙箱。
 
 图片清单按正文引用顺序展示，重复引用分别列出，处理与上传仍复用结果。失败项保留路径及原因，并自动展开清单。点击“定位正文第 N 行”可打开绑定的本地稿并跳到引用位置；行号从正文开始计算，跳转时自动计入顶部元数据。稿件已变化时须先刷新预览再定位，避免跳到旧位置。
 
@@ -65,6 +65,7 @@
 - 拒绝带账号密码的 URL、localhost、本地 `.local` 名称及明显的私网/特殊 IP 地址；内网图片请改用 Vault 附件。此处是 URL 层检查，尚不覆盖域名解析到内网和 DNS 重绑定，不能作为完整 SSRF 防护。
 - 流式接口沿用 Chromium 网络栈；实际代理行为仍需宿主验收。宿主未提供该接口时提示使用 Vault 附件，不退回无大小控制的下载。接口参考：[Electron ClientRequest](https://www.electronjs.org/docs/latest/api/client-request)。
 - 2026-10-22 已在本机 Sandbox 当前代理环境验证公开 PNG 下载、大小超限与慢响应超时；使用 `npm run test:wechat-download-native` 可复验。这不代表全部代理模式或历史 Obsidian 版本均已验收。
+- 原生下载验收可设置 `EASYPUB_TEST_IMAGE_URL` 指向另一张公开 PNG，`EASYPUB_TEST_VAULT` 指定测试 Vault（默认 Sandbox）。例如 PowerShell：`$env:EASYPUB_TEST_IMAGE_URL = 'https://example.com/test.png'`，再运行 `npm run test:wechat-download-native`。地址仍须通过生产下载策略；测试不接受私网 URL。输出记录操作系统、Electron 和 Node 版本，便于记录不同环境的验收结果。
 - IPv6 URL 由标准 URL 解析器验证和规范化，再按数值前缀判断。允许普通 `2000::/3` 地址，排除 IETF 协议分配 `2001::/23`、文档前缀 `2001:db8::/32`、`3fff::/20` 和 6to4 `2002::/16`；不再整体拒绝 `2001::/16`。这是保守的图片下载策略，特殊用途前缀即使部分可路由也不开放。前缀依据：[IANA IPv6 特殊用途地址表](https://www.iana.org/assignments/iana-ipv6-special-registry)。
 
 ## 4. 封面

@@ -10,7 +10,7 @@ EasyPub 可以发现并打开 Hexo 仓库提供的本地 Blog Control Room。该
 - 命令 `Open Hexo management console`。
 - “设置 → EasyPub → 博客管理后台”。
 
-后台未运行时，EasyPub 启动仓库根目录的 `ManageBlog.bat`；已有有效会话时，直接在默认浏览器中打开。
+后台未运行时，Windows 下 EasyPub 启动仓库根目录的 `ManageBlog.bat`；macOS/Linux 下提示先在博客目录的终端运行 `npm run gui`，再点击打开。已有有效会话时，直接在默认浏览器中打开。非 Windows 系统不会尝试执行 `.bat`，也不会回退为直接部署。参见 [macOS 使用与迁移](macos.md)。
 
 如果看不到入口，请按 [README 安装说明](../README.md#安装)重新复制同一次构建生成的三个插件文件，并重载 EasyPub。
 

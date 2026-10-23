@@ -10,7 +10,7 @@ EasyPub 可以发现并打开 Hexo 仓库提供的本地 Blog Control Room。该
 - 命令 `Open Hexo management console`。
 - “设置 → EasyPub → 博客管理后台”。
 
-后台未运行时，Windows 下 EasyPub 启动仓库根目录的 `ManageBlog.bat`；macOS/Linux 下提示先在博客目录的终端运行 `npm run gui`，再点击打开。已有有效会话时，直接在默认浏览器中打开。非 Windows 系统不会尝试执行 `.bat`，也不会回退为直接部署。参见 [macOS 使用与迁移](macos.md)。
+后台未运行时，Windows 下 EasyPub 启动仓库根目录的 `ManageBlog.bat`；macOS 自动运行固定服务 `node admin/server.js --no-open --port=0`（与 `npm run gui` 使用同一入口），验证就绪后打开；Linux 仍提示终端运行 `npm run gui`。已有有效会话时直接在默认浏览器中打开。非 Windows 系统不执行 `.bat`，不回退为直接部署。参见 [macOS 使用与迁移](macos.md)。
 
 如果看不到入口，请按 [README 安装说明](../README.md#安装)重新复制同一次构建生成的三个插件文件，并重载 EasyPub。
 
@@ -23,7 +23,7 @@ EasyPub 可以发现并打开 Hexo 仓库提供的本地 Blog Control Room。该
 - 存在 `admin/server.js`。
 - `package.json` 中 `scripts.gui` 精确等于 `node admin/server.js`。
 
-`ManageBlog.bat` 仅用于 Windows 自动启动，不参与部署保护的判定。服务与 GUI 命令匹配时，即使没有 `.bat`，也必须进入管理后台流程。没有启动器时先在终端运行 `npm run gui`。
+`ManageBlog.bat` 仅用于 Windows 自动启动，不参与部署保护的判定。服务与 GUI 命令匹配时，即使没有 `.bat`，也必须进入管理后台流程。macOS 自动启动不依赖此启动器。
 
 发现后台文件或固定 GUI 命令但配置不完整时停止部署；配置损坏或读取失败也停止，不回退为直接部署。没有后台特征且配置可正常读取的普通 Hexo 仓库保持原有部署流程。
 
@@ -64,7 +64,9 @@ EasyPub 复用会话前会验证：
 3. URL 根路径、唯一的 `token` 参数和 48 位小写十六进制令牌。
 4. 带令牌请求 `/api/status`，且响应状态为 HTTP 200。
 
-状态探测最多等待 5 秒；超时或会话失效时，Windows 且存在启动器才尝试启动，否则提示终端启动，避免一直等待后台响应。
+已有会话的状态探测最多等待 5 秒。macOS 会话失效时自动启动固定服务，使用空闲端口，仅接受属于本次进程且状态验证成功的新会话；启动约 15 秒仍未就绪则停止本次进程并提示终端排查。连续点击不会重复启动。Windows 仍使用已有启动器，Linux 提示终端启动。
+
+首次使用仍需在博客目录运行 `npm ci` 安装依赖。Mac 自动启动不弹出终端、不执行 shell 配置、不自动安装依赖；服务在后台独立运行，不会因关闭浏览器或退出 Obsidian 自动停止。此功能不注册开机启动，也不会调用发布接口。
 
 相对地址、外部主机、额外查询参数、重复令牌和失效会话都会被拒绝。会话文件是本机临时凭证，不应提交到 Git 或复制到公开位置。
 

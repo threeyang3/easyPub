@@ -79,7 +79,7 @@ For compatible Blog Control Room repositories:
 - Protected discovery requires an absolute path, `admin/server.js`, and exact `scripts.gui`. `ManageBlog.bat` is optional and only controls Windows startup. Partial markers, unreadable files, or malformed package JSON stop deployment rather than falling back to direct Hexo deployment.
 - Reused sessions must be loopback HTTP URLs with one valid token and a successful `/api/status` probe.
 - Deploy commands and `autoDeploy` open the protected management flow instead of calling Hexo deploy.
-- Only Windows opens `ManageBlog.bat`. Other systems reuse a verified session or instruct the user to run `npm run gui` in the repository; never fall back to direct deployment.
+- Only Windows opens `ManageBlog.bat`. macOS launches the validated fixed `node admin/server.js --no-open --port=0`, waits for a session belonging to that child and a successful status probe, and stops the new child on failure. Launches are coalesced by real repository path. Linux still instructs the user to run `npm run gui`; never fall back to direct deployment.
 
 ## Image Invariants
 

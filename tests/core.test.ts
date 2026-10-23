@@ -24,6 +24,7 @@ import { getHexoAssetTargetPath } from "../utils/platforms";
 import { runReliabilityTests } from "./reliability.test";
 import { runBatchPubIdTests } from "./batchPubIds.test";
 import { runWechatTests } from "./wechat.test";
+import { runControlRoomLauncherTests } from "./controlRoomLauncher.test";
 import {
   getPicGoHeartbeatUrl,
   normalizePicGoUploadUrl,
@@ -37,6 +38,7 @@ import {
 } from "../utils/controlRoom";
 
 async function run() {
+  await runControlRoomLauncherTests();
   await runBatchPubIdTests();
   await runReliabilityTests();
   await runWechatTests();

@@ -26,9 +26,9 @@ EasyPub 为桌面插件，最低 Obsidian 版本为 1.4.4。Windows 与 macOS �
 
 ## Blog Control Room
 
-部署保护根据 `admin/server.js` 和精确的 `gui: node admin/server.js` 判断，不依赖 `ManageBlog.bat`。缺少启动器不会降级为直接部署；后台文件或配置不完整时停止部署。macOS 不执行 Windows 启动器。先在博客目录运行 `npm run gui` 并保持终端开启，再点击 EasyPub 的“打开管理后台”；插件验证本机会话和状态接口后打开浏览器。
+部署保护根据 `admin/server.js` 和精确的 `gui: node admin/server.js` 判断，不依赖 `ManageBlog.bat`。缺少启动器不会降级为直接部署；后台文件或配置不完整时停止部署。首次先在博客目录运行 `npm ci` 安装依赖，此后直接点击 EasyPub 的“打开管理后台”。已有会话验证通过就复用；未启动时自动运行固定的 `node admin/server.js --no-open --port=0`，验证会话和状态接口后打开浏览器，无需终端窗口。
 
-后台未运行时会给出上述操作提示，不会自动回退到 Hexo 直接部署。博客后台自身是否支持 macOS，需要在该博客仓库独立验证。
+启动失败或超时会提示在终端运行 `npm run gui` 排查，不会回退到 Hexo 直接部署。服务独立在后台运行，关闭浏览器或退出 Obsidian 不会自动停止，也不会注册开机启动。
 
 ## 公众号与 PicGo
 
@@ -42,7 +42,7 @@ EasyPub 为桌面插件，最低 Obsidian 版本为 1.4.4。Windows 与 macOS �
 
 1. 旧 `pub_id` 稿件被识别为更新，保留平台专有字段、图片和草稿状态。
 2. 含中文、空格的目录中执行本地构建；之后再验证实际部署凭据。
-3. Control Room 未启动时提示手动启动，启动后正确复用会话。
+3. Control Room 未启动时自动启动，连续点击不重复启动，启动后正确复用会话，失败时有明确提示。
 4. 公众号预览、封面裁剪、权限切换，以及系统凭据保存和重启恢复。
 5. 公网图片下载、大小限制和超时断开；最后验证真实微信草稿创建与更新。
 

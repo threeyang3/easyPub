@@ -1,6 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { createHash } from "crypto";
+import { startControlRoom } from "./utils/controlRoomLauncher";
 import { App, FileSystemAdapter, Modal, Notice, Plugin, Setting, TFile, TFolder, normalizePath, requestUrl } from "obsidian";
 import { EasyPubSettingTab } from "./settings";
 import { PluginSettings, ArticleMeta, ArticleDiff, Platform, PLATFORMS, FrontMatterData, PublishAsset, PicGoImageCacheEntry, PicGoPendingUpload } from "./types";
@@ -78,6 +79,7 @@ export default class EasyPub extends Plugin {
   private publishInProgress = false;
   private publishConfirmationOpen = false;
   private deployInProgress = false;
+  private controlRoomOpening = false;
   private pubIdBatchInProgress = false;
   wechatSyncInProgress = false;
   wechatCredentialRevision = 0;
@@ -1004,13 +1006,19 @@ export default class EasyPub extends Plugin {
   }
 
   async openHexoControlRoom(): Promise<void> {
+    if (this.controlRoomOpening) {
+      new Notice("博客管理后台正在打开，请稍候");
+      return;
+    }
     if (!this.settings.hexoRepoPath) {
       new Notice("请先在设置中填写 Hexo 仓库路径");
       return;
     }
 
+    this.controlRoomOpening = true;
     try {
-      const integration = await requireControlRoomIntegration(this.settings.hexoRepoPath);
+      const blogPath = this.settings.hexoRepoPath;
+      const integration = await requireControlRoomIntegration(blogPath);
       const electron = require("electron") as {
         shell?: {
           openExternal(url: string): Promise<void>;
@@ -1037,6 +1045,16 @@ export default class EasyPub extends Plugin {
         }
       }
 
+      if (process.platform === "darwin") {
+        new Notice("正在启动博客管理后台...");
+        const started = await startControlRoom(blogPath, async candidate => {
+          const response = await requestUrl({ url: getControlRoomStatusUrl(candidate), method: "GET", throw: false });
+          return response.status === 200;
+        });
+        await electron.shell.openExternal(started.url);
+        new Notice("已启动并打开博客管理后台");
+        return;
+      }
       if (process.platform !== "win32" || !integration.launcherPath) {
         new Notice("请先在博客目录的终端运行 npm run gui，并保持终端开启，再点击打开管理后台。当前系统不会执行 Windows 的 ManageBlog.bat，也不会绕过后台直接部署。", 15000);
         return;
@@ -1047,6 +1065,8 @@ export default class EasyPub extends Plugin {
     } catch (error) {
       console.error("EasyPub could not open Blog Control Room", error);
       new Notice(`无法打开博客管理后台：${this.getErrorMessage(error)}`);
+    } finally {
+      this.controlRoomOpening = false;
     }
   }
 

@@ -191,6 +191,10 @@ async function run() {
   assert.equal(completeControlRoomMetadata(completed, "Title", new Set()).abbrlink, completed.abbrlink);
   assert.throws(() => completeControlRoomMetadata(completed, "Title", new Set([String(completed.abbrlink)])), /重复/);
   assert.throws(() => completeControlRoomMetadata({ password: "fixture" }, "Title", new Set()), /password_secret/);
+  for (const password_secret of ["", "plaintext", "BLOG_ENCRYPTION_lower", null]) {
+    assert.throws(() => completeControlRoomMetadata({ password_secret }, "Title", new Set()), /password_secret/);
+  }
+  assert.equal(completeControlRoomMetadata({ password_secret: "BLOG_ENCRYPTION_ARTICLE_1" }, "Title", new Set()).password_secret, "BLOG_ENCRYPTION_ARTICLE_1");
   const integrationRoot = await mkdtemp(path.join(os.tmpdir(), 'easy-pub-integration-'));
   try {
     const plugin = Object.create(EasyPubPlugin.prototype) as EasyPubPlugin;
@@ -334,6 +338,17 @@ async function run() {
   assert.equal(merged.source_file, "[[文章/来源]]");
   assert.equal("子文件" in merged, false);
   assert.equal("publish_url" in merged, false);
+
+  // hexo-blog's editor owns these fields unless the source explicitly sets them.
+  for (const top_img of [false, "/picture/top.png", "https://example.com/top.png"]) {
+    const existingData = { top_img, cover: "/picture/cover.png", description: "后台摘要", workflow: "pending", password_secret: "BLOG_ENCRYPTION_POST" };
+    const options = { existingData, pubId: "legacy-id", sourceFileLink: "[[旧稿]]", timestamp: "2026-10-23" };
+    const updated = mergePublishedFrontMatter({ ...options, sourceData: { title: "修改正文" } });
+    for (const [key, value] of Object.entries(existingData)) assert.equal(updated[key], value);
+    const overridden = mergePublishedFrontMatter({ ...options, sourceData: { top_img: false, cover: "/picture/source.png" } });
+    assert.equal(overridden.top_img, false);
+    assert.equal(overridden.cover, "/picture/source.png");
+  }
 
   const source = mergeSourceFrontMatter(
     {
@@ -582,7 +597,7 @@ async function run() {
       path.join(blogDirectory, "package.json"),
       JSON.stringify({ scripts: { gui: "node unsafe-server.js" } })
     );
-    assert.equal(await findControlRoomIntegration(blogDirectory), null);
+    await assert.rejects(findControlRoomIntegration(blogDirectory), /不完整.*Control Room|不完整的 Blog Control Room/);
 
     await writeFile(
       path.join(blogDirectory, "package.json"),

@@ -7,7 +7,7 @@ const CONTROL_ROOM_SCRIPT = "node admin/server.js";
 const TOKEN_PATTERN = /^[a-f0-9]{48}$/;
 
 export interface ControlRoomIntegration {
-  launcherPath: string;
+  launcherPath?: string;
   sessionPath: string;
 }
 
@@ -23,8 +23,9 @@ export interface ControlRoomSession {
 async function isFile(filePath: string): Promise<boolean> {
   try {
     return (await fs.stat(filePath)).isFile();
-  } catch {
-    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw new Error("无法检查管理后台文件，已停止部署；请检查仓库读取权限");
   }
 }
 
@@ -39,21 +40,27 @@ export async function findControlRoomIntegration(
   const launcherPath = path.join(root, WINDOWS_LAUNCHER);
   const serverPath = path.join(root, "admin", "server.js");
 
-  if (!(await isFile(packagePath)) || !(await isFile(launcherPath)) || !(await isFile(serverPath))) {
-    return null;
+  const hasLauncher = await isFile(launcherPath);
+  const hasServer = await isFile(serverPath);
+  let gui: unknown;
+  if (await isFile(packagePath)) {
+    try {
+      const packageJson = JSON.parse(await fs.readFile(packagePath, "utf8"));
+      if (!packageJson || typeof packageJson !== "object" || Array.isArray(packageJson)) throw new Error();
+      gui = packageJson.scripts?.gui;
+    } catch {
+      throw new Error("无法读取博客 package.json，无法确认部署保护；已停止部署，请修复配置或读取权限");
+    }
   }
-
-  try {
-    const packageJson = JSON.parse(await fs.readFile(packagePath, "utf8")) as {
-      scripts?: Record<string, unknown>;
-    };
-    if (packageJson.scripts?.gui !== CONTROL_ROOM_SCRIPT) return null;
-  } catch {
+  if (!hasServer || gui !== CONTROL_ROOM_SCRIPT) {
+    if (hasServer || hasLauncher || gui === CONTROL_ROOM_SCRIPT) {
+      throw new Error("检测到不完整的 Blog Control Room：需要 admin/server.js 和 gui: node admin/server.js；已停止部署，不会回退到直接部署");
+    }
     return null;
   }
 
   return {
-    launcherPath,
+    launcherPath: hasLauncher ? launcherPath : undefined,
     sessionPath: path.join(root, SESSION_FILE),
   };
 }

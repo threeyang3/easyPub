@@ -12,6 +12,7 @@ import { isSourcePublishTarget, formatChildReference } from "../utils/platforms"
 import { generatePubId, parseFrontMatter, parseYamlDocument, stringifyFrontMatter } from "../utils/frontMatter";
 import { buildHexo, getHexoNodeExecutable, validateHexoDeployment } from "../utils/hexoCommands";
 import { desktopCommandEnvironment } from "../utils/desktopEnvironment";
+import { findControlRoomIntegration } from "../utils/controlRoom";
 import { assertPublishIdentity, PublishIdentityIndex } from "../utils/publishIdentity";
 import { inspectPublishDocuments } from "../utils/publishDiagnostics";
 import { restorePicGoSecret, serializePicGoSettings } from "../utils/picgoSecret";
@@ -394,6 +395,35 @@ export async function runReliabilityTests() {
     await writeFile(path.join(localHexo, "bin", "hexo.js"), "require('fs').appendFileSync('commands.log', JSON.stringify(process.argv.slice(2)) + '\\n');");
     await buildHexo(portableBlog);
     assert.equal(await readFile(path.join(portableBlog, "commands.log"), "utf8"), '["clean"]\n["generate","--bail"]\n');
+    await writeFile(path.join(portableBlog, "_config.yml"), "deploy: {type: git}\n");
+    const protectedPlugin = Object.create(EasyPub.prototype) as EasyPub;
+    protectedPlugin.settings = normalizeSettings({ hexoRepoPath: portableBlog });
+    Object.assign(protectedPlugin, { refreshActiveHexoPublishUrl: async () => {} });
+    let openedControlRoom = 0;
+    protectedPlugin.openHexoControlRoom = async () => { openedControlRoom++; };
+    // Ordinary repositories still deploy. The same fixture becomes protected without a .bat.
+    await protectedPlugin.deployToHexo();
+    const commandLog = await readFile(path.join(portableBlog, "commands.log"), "utf8");
+    assert.ok(commandLog.endsWith('["deploy"]\n'));
+    await mkdir(path.join(portableBlog, "admin"));
+    const serverPath = path.join(portableBlog, "admin", "server.js");
+    const packagePath = path.join(portableBlog, "package.json");
+    await writeFile(serverPath, "// fixture");
+    await writeFile(packagePath, JSON.stringify({ scripts: { gui: "node admin/server.js" } }));
+    assert.equal((await findControlRoomIntegration(portableBlog))?.launcherPath, undefined);
+    assert.ok(await findControlRoomIntegration(portableBlog));
+    await protectedPlugin.deployToHexo();
+    assert.equal(openedControlRoom, 1);
+    assert.equal(await readFile(path.join(portableBlog, "commands.log"), "utf8"), commandLog);
+    for (const content of ['{broken', JSON.stringify({ scripts: { gui: "node other.js" } })]) {
+      await writeFile(packagePath, content);
+      await expectReportedFailure(() => protectedPlugin.deployToHexo());
+      assert.equal(await readFile(path.join(portableBlog, "commands.log"), "utf8"), commandLog);
+    }
+    await writeFile(packagePath, JSON.stringify({ scripts: { gui: "node admin/server.js" } }));
+    await rm(serverPath);
+    await expectReportedFailure(() => protectedPlugin.deployToHexo());
+    assert.equal(await readFile(path.join(portableBlog, "commands.log"), "utf8"), commandLog);
 
     const plugin = Object.create(EasyPub.prototype) as EasyPub;
     plugin.settings = normalizeSettings({ hexoRepoPath: root });

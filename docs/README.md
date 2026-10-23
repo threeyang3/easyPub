@@ -10,6 +10,7 @@
 4. [Blog Control Room 接入](control-room.md)（可选）：Hexo 仓库提供兼容管理后台时阅读。
 5. [微信公众号工作台](wechat.md)：本地成稿、配图、封面、预览与微信草稿箱同步。
 6. [macOS 使用与迁移](macos.md)：Node/Git 环境、跨设备路径、凭据与实机验收。
+7. [hexo-blog 兼容性核对](hexo-blog-compatibility.md)：后台协议、顶部图、素材同步和部署边界。
 
 ## 开发者入口
 

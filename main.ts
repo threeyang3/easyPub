@@ -1037,7 +1037,7 @@ export default class EasyPub extends Plugin {
         }
       }
 
-      if (process.platform !== "win32") {
+      if (process.platform !== "win32" || !integration.launcherPath) {
         new Notice("请先在博客目录的终端运行 npm run gui，并保持终端开启，再点击打开管理后台。当前系统不会执行 Windows 的 ManageBlog.bat，也不会绕过后台直接部署。", 15000);
         return;
       }

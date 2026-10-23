@@ -11,6 +11,9 @@ export function completeControlRoomMetadata(data: FrontMatterData, title: string
   if (Object.prototype.hasOwnProperty.call(data, "password")) {
     throw new Error("此博客禁止明文 password，请改用 password_secret");
   }
+  if (data.password_secret !== undefined && !/^BLOG_ENCRYPTION_[A-Z0-9_]+$/.test(String(data.password_secret))) {
+    throw new Error("password_secret 必须是 BLOG_ENCRYPTION_ 开头的密钥引用，仅包含大写字母、数字或下划线；请在博客后台配置实际密码");
+  }
   const result: FrontMatterData = { ...data, title: data.title || title };
   if (result.categories === undefined || result.categories === "") result.categories = [];
   if (result.tags === undefined || result.tags === "") result.tags = [];

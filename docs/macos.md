@@ -20,11 +20,13 @@ EasyPub 为桌面插件，最低 Obsidian 版本为 1.4.4。Windows 与 macOS �
 /Applications/Obsidian.app/Contents/MacOS/Obsidian
 ```
 
+本机 hexo-blog（核对基线 `e9151b1`）目前要求 Node 22.x 或 24.x，默认 24.18.0。EasyPub 自身的 CI Node 版本不是博客的运行要求；请以博客 `package.json` 的 `engines.node` 为准。PATH 中已有的其他 Node 版本不会被插件自动替换。
+
 插件不会自动加载 nvm，也不会设置 Git 身份、SSH 密钥或部署凭据。请先在 Mac 终端验证博客本身能正常构建。插件部署使用非交互 Git 认证。
 
 ## Blog Control Room
 
-兼容仓库的发现条件和部署保护保持不变，包括仓库保留 `ManageBlog.bat`。macOS 不执行这个 Windows 启动器。先在博客目录运行 `npm run gui` 并保持终端开启，再点击 EasyPub 的“打开管理后台”；插件验证本机会话和状态接口后打开浏览器。
+部署保护根据 `admin/server.js` 和精确的 `gui: node admin/server.js` 判断，不依赖 `ManageBlog.bat`。缺少启动器不会降级为直接部署；后台文件或配置不完整时停止部署。macOS 不执行 Windows 启动器。先在博客目录运行 `npm run gui` 并保持终端开启，再点击 EasyPub 的“打开管理后台”；插件验证本机会话和状态接口后打开浏览器。
 
 后台未运行时会给出上述操作提示，不会自动回退到 Hexo 直接部署。博客后台自身是否支持 macOS，需要在该博客仓库独立验证。
 

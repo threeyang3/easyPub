@@ -77,7 +77,7 @@ export async function runHexoCommand(
       stdout?: string;
     };
     if (commandError.code === "ENOENT") {
-      throw new Error("找不到 Node.js，请安装 Node.js 并确认 Obsidian 的 PATH 中包含 node，然后重启 Obsidian。macOS 支持 /opt/homebrew/bin 和 /usr/local/bin；使用 nvm 等版本管理器时，请从已激活 Node 的终端启动 Obsidian。");
+      throw new Error("找不到 Node.js，请安装 Node.js 并确认 Obsidian 的 PATH 中包含 node，然后重启 Obsidian。macOS 支持 /opt/homebrew/bin、/usr/local/bin 和 ~/.local/bin；使用 nvm 等版本管理器时，请从已激活 Node 的终端启动 Obsidian。");
     }
     if (commandError.killed || commandError.code === "ETIMEDOUT") {
       throw new Error(`Hexo ${command} 超过 10 分钟，已停止执行`);

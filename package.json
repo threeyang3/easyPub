@@ -10,6 +10,7 @@
     "test:wechat-ui": "node tests/wechat-ui.mjs",
     "test:publishing-ui": "node tests/publishing-ui.mjs",
     "test:wechat-native": "node tests/run-wechat-native.mjs",
+    "test:hexo-native": "node tests/run-wechat-native.mjs --hexo",
     "test:wechat-download-native": "node tests/run-wechat-native.mjs --download",
     "build": "tsc -noEmit && node esbuild.config.mjs production",
     "version": "node version-bump.mjs && git add manifest.json versions.json"

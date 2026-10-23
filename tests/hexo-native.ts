@@ -1,0 +1,94 @@
+import { App, requestUrl } from 'obsidian';
+import fs from 'fs/promises';
+import path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import EasyPub from '../main';
+import { DiffModal } from '../modals/DiffModal';
+import { DEFAULT_SETTINGS, PLATFORMS } from '../types';
+import { parseFrontMatter, stringifyFrontMatter } from '../utils/frontMatter';
+import { desktopCommandEnvironment } from '../utils/desktopEnvironment';
+import { withTimeout } from '../utils/async';
+import { buildHexo } from '../utils/hexoCommands';
+import { findControlRoomIntegration, readControlRoomSession, getControlRoomStatusUrl } from '../utils/controlRoom';
+
+// Explicit opt-in: Sandbox plus a disposable blog with this marker. Never deploys.
+export async function run(app: App, options: { blogPath?: string }) {
+  const blog = options.blogPath;
+  if (app.vault.getName() !== 'Sandbox' || !blog || !path.isAbsolute(blog)) throw new Error('Requires Sandbox and absolute disposable blog path');
+  await fs.access(path.join(blog, '.easypub-test-copy'));
+  const checks: string[] = [];
+  const assert = (value: unknown, label: string) => { if (!value) throw new Error(label); checks.push(label); (window as any).easyPubAcceptanceChecks = [...checks]; };
+  const id = `easypub-mac-${Date.now()}`;
+  const folder = `EasyPub Mac 验收 ${id}`;
+  const title = `Mac 中文 空格 ${id}`;
+  const post = path.join(blog, 'source/_posts', `${title}.md`);
+  const draft = path.join(blog, 'source/_drafts', `${title}.md`);
+  const leaf = app.workspace.getLeaf('tab');
+  const plugin = new EasyPub(app, { id, name: id, version: '0.0.0', minAppVersion: '1.4.4', author: 'test', description: 'native acceptance' });
+  plugin.settings = structuredClone(DEFAULT_SETTINGS);
+  plugin.settings.hexoRepoPath = blog;
+  plugin.settings.autoDeploy = false;
+  plugin.openPublishedFile = async () => {};
+  let confirmation: DiffModal | undefined;
+  const openModal = DiffModal.prototype.open;
+  DiffModal.prototype.open = function () { confirmation = this; return openModal.call(this); };
+  try {
+    const node = await promisify(execFile)('node', ['--version'], { env: desktopCommandEnvironment() });
+    assert(/^v(22|24)\./.test(node.stdout), 'Finder-launched Obsidian resolves supported external Node');
+    assert(await findControlRoomIntegration(blog), 'real hexo-blog protected integration detected');
+    await app.vault.createFolder(folder);
+    const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aC1sAAAAASUVORK5CYII='), c => c.charCodeAt(0));
+    await app.vault.createBinary(`${folder}/测试 图.png`, png.buffer);
+    const source = await app.vault.create(`${folder}/源稿.md`, stringifyFrontMatter(`第一版\n\n![[${folder}/测试 图.png]]\n\n\`![[${folder}/测试 图.png]]\`\n`, { title, pub_id: id, categories: ['验收'], tags: ['Mac'] }));
+    await withTimeout(leaf.openFile(source), 10000, 'Initial test note open timed out');
+    const hexo = PLATFORMS.find(p => p.id === 'hexo')!;
+    await (plugin as any).performPublish(hexo);
+    const initial = parseFrontMatter(await fs.readFile(post, 'utf8'));
+    assert(/^[a-f0-9]{4}$/.test(String(initial.data.abbrlink)), 'new post gets Control Room abbrlink');
+    assert(initial.content.includes(`/picture/easy-pub/${id}/`) && initial.content.includes('`![['), 'image copied with hash while inline code is preserved');
+    const sourceData = parseFrontMatter(await app.vault.read(source)).data;
+    assert(!sourceData.source_file && !sourceData.publish_url && JSON.stringify(sourceData['子文件']).includes(post), 'source metadata contains external child path without published-only fields');
+    await fs.mkdir(path.dirname(draft), { recursive: true });
+    await fs.rename(post, draft);
+    await fs.writeFile(draft, stringifyFrontMatter(initial.content, { ...initial.data, cover: '/custom.png', top_img: false, workflow: 'pending' }));
+    await withTimeout(app.vault.modify(source, (await app.vault.read(source)).replace('第一版', '第二版')), 10000, 'Test source modify timed out');
+    assert(app.workspace.getActiveFile() === source, 'test source remains active after metadata update');
+    await withTimeout((plugin as any).performPublish(hexo), 15000, 'Update preparation timed out');
+    for (let n = 0; n < 100 && !confirmation?.contentEl.querySelector('button'); n++) await new Promise(r => setTimeout(r, 25));
+    const modal = confirmation?.contentEl;
+    assert(modal?.textContent?.includes(draft), 'native confirmation locates moved draft by pub_id');
+    const confirm = Array.from(modal!.querySelectorAll('button')).find(b => b.textContent === '确认更新稿件');
+    assert(confirm, 'native update confirmation button rendered');
+    confirm!.click();
+    for (let n = 0; n < 200 && (plugin as any).publishInProgress; n++) await new Promise(r => setTimeout(r, 25));
+    const updated = parseFrontMatter(await fs.readFile(draft, 'utf8'));
+    assert(updated.content.includes('第二版') && updated.data.cover === '/custom.png' && updated.data.top_img === false && updated.data.workflow === 'pending', 'draft update preserves platform metadata and pending state');
+    assert(Buffer.from(await app.vault.readBinary(app.vault.getFileByPath(`${folder}/测试 图.png`)!)).equals(Buffer.from(png)), 'source attachment unchanged');
+    const integration = (await findControlRoomIntegration(blog))!;
+    const session = await readControlRoomSession(integration.sessionPath);
+    assert(session, 'real Control Room session accepted');
+    const status = await withTimeout(requestUrl({ url: getControlRoomStatusUrl(session!), throw: false }), 5000, 'Control Room status timed out');
+    assert(status.status === 200, 'Obsidian native request verifies Control Room status');
+    const listUrl = new URL('/api/posts', session!.url); listUrl.searchParams.set('token', session!.token);
+    const posts = await withTimeout(requestUrl({ url: listUrl.toString() }), 5000, 'Control Room posts timed out');
+    assert(JSON.stringify(posts.json).includes(title), 'Control Room lists EasyPub draft');
+    const mediaUrl = new URL('/api/media', session!.url); mediaUrl.searchParams.set('token', session!.token);
+    const media = await withTimeout(requestUrl({ url: mediaUrl.toString() }), 5000, 'Control Room media timed out');
+    assert(JSON.stringify(media.json).includes(id), 'Control Room lists EasyPub image');
+    // Move only this test article to posts so the real generator includes it.
+    await fs.rename(draft, post);
+    await buildHexo(blog);
+    const html = await fs.readFile(path.join(blog, 'public/posts', String(initial.data.abbrlink), 'index.html'), 'utf8');
+    assert(html.includes('第二版') && html.includes(`/picture/easy-pub/${id}/`), 'real Hexo build renders published content and image URL');
+    return { checks, environment: { platform: process.platform, electron: process.versions.electron }, deployments: 0 };
+  } finally {
+    confirmation?.close();
+    DiffModal.prototype.open = openModal;
+    leaf.detach();
+    const created = app.vault.getAbstractFileByPath(folder);
+    if (created) await app.vault.delete(created, true);
+    await fs.rm(post, { force: true }); await fs.rm(draft, { force: true });
+    await fs.rm(path.join(blog, 'source/picture/easy-pub', id), { recursive: true, force: true });
+  }
+}

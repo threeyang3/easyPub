@@ -325,6 +325,10 @@ export async function runReliabilityTests() {
   assert.equal(macCommands.PATH?.split(":")[0], "/Users/test/.nvm/versions/node/v20/bin");
   assert.ok(macCommands.PATH?.includes("/opt/homebrew/bin"));
   assert.ok(macCommands.PATH?.includes("/usr/local/bin"));
+  assert.ok(macCommands.PATH?.split(":").includes(path.join(os.homedir(), ".local", "bin")));
+  const finderEnvironment = desktopCommandEnvironment({ PATH: "/usr/bin:/bin:/usr/sbin:/sbin" }, "darwin");
+  assert.ok(finderEnvironment.PATH?.split(":").includes(path.join(os.homedir(), ".local", "bin")));
+  assert.ok(finderEnvironment.PATH?.startsWith("/usr/bin:/bin:/usr/sbin:/sbin:"));
   assert.equal(macCommands.CUSTOM, "keep");
   assert.equal(macEnvironment.PATH, "/Users/test/.nvm/versions/node/v20/bin:/usr/bin");
   assert.equal(desktopCommandEnvironment(macCommands, "darwin").PATH, macCommands.PATH);

@@ -6,6 +6,7 @@ import { Buffer } from "buffer/";
 import { parseFrontMatter, stringifyFrontMatter } from "../../utils/frontMatter";
 import { wechatChoice } from "../../modals/WechatChoiceModal";
 import { WechatSetupModal } from "../../modals/WechatSetupModal";
+import { clearWechatLayoutCache } from "../../utils/wechatAiPlanner";
 
 async function start() {
 const globals = globalThis as any;
@@ -47,6 +48,8 @@ const app: any = {
   workspace: { getLeaf: () => ({ openFile: async (file: TFile, options: unknown) => { globals.fixtureOpened = { path: file.path, options }; } }) },
 };
 const plugin: any = { app, settings: normalizeSettings(null), wechatSyncInProgress: false, wechatCredentialRevision: 0,
+  getWechatAiConfiguration: () => ({settings: {endpoint: 'https://ai.example/v1/chat/completions', model: 'test-model', encryptedKey: '', jsonMode: true}, key: 'test-ai-key'}),
+  openWechatAiSettings: () => {},
   hasWechatCredentials: () => true, openWechatSetup: () => {},
   relativeWechatAttachment: () => "../../assets/cover.png", openWechatBackend: async () => {}, saveSettings: async () => {},
   getWechatApi: () => ({ listDrafts: async () => [{ media_id: "recovered", content: { news_item: [{ title: "恢复测试草稿" }] } }],
@@ -54,6 +57,13 @@ const plugin: any = { app, settings: normalizeSettings(null), wechatSyncInProgre
 const view = new WechatView({ app, contentEl: document.querySelector("#workbench") } as any, plugin);
 await view.onOpen(); await view.bind(file);
 globals.fixture = { view,
+  clearAiCache: () => clearWechatLayoutCache(),
+  ai: () => {
+    globals.fixtureAiRequests = [];
+    globals.fixtureRequest = (request: any) => { globals.fixtureAiRequests.push(request); return new Promise(resolve => {
+      globals.fixtureAiResolve = (content: unknown) => resolve({status: 200, arrayBuffer: new TextEncoder().encode(JSON.stringify({choices: [{finish_reason: 'stop', message: {content: typeof content === 'string' ? content : JSON.stringify(content)}}]})).buffer});
+    }); };
+  },
   localOnly: (value: boolean) => { plugin.settings.wechat.allowRemoteImages = !value; view.invalidateImagePolicy(); },
   setup: () => {
     const config = { ...plugin, settings: normalizeSettings(null), hasWechatCredentials: () => Boolean(config.settings.wechat.appId),

@@ -2,11 +2,19 @@ import { ItemView, WorkspaceLeaf } from "obsidian";
 
 export const HEXO_PREVIEW_VIEW = "easy-pub-hexo-preview";
 
-export function validateHexoPreviewUrl(value: unknown): string {
+export function hexoPreviewPath(abbrlink: string): string {
+  if (!/^[\p{L}\p{N}][\p{L}\p{N}\p{M}_.-]{0,127}$/u.test(abbrlink)) throw new Error("文章缺少有效的单段 abbrlink");
+  return `/posts/${encodeURIComponent(abbrlink)}/`;
+}
+
+export function validateHexoPreviewUrl(value: unknown, expectedAbbrlink?: string): string {
   if (typeof value !== "string") throw new Error("后台返回的预览地址无效");
   const url = new URL(value);
-  if (url.origin !== "http://127.0.0.1:5001" || !/^\/posts\/[a-f0-9]{4}\/$/i.test(url.pathname)
-    || url.username || url.password || url.search || url.hash) throw new Error("后台返回了不受信任的预览地址");
+  const match = /^\/posts\/([^/]+)\/$/.exec(url.pathname);
+  const validPath = match ? hexoPreviewPath(decodeURIComponent(match[1])) : "";
+  if (url.origin !== "http://127.0.0.1:5001" || !validPath || url.pathname !== validPath
+    || url.username || url.password || url.search || url.hash || url.href !== value
+    || expectedAbbrlink !== undefined && url.pathname !== hexoPreviewPath(expectedAbbrlink)) throw new Error("后台返回了不受信任的预览地址");
   return url.href;
 }
 
@@ -16,8 +24,8 @@ export class HexoPreviewView extends ItemView {
   getDisplayText() { return "Hexo 发布预览"; }
   getIcon() { return "eye"; }
 
-  showArticle(value: unknown, title: string) {
-    const articleUrl = validateHexoPreviewUrl(value);
+  showArticle(value: unknown, title: string, expectedAbbrlink?: string) {
+    const articleUrl = validateHexoPreviewUrl(value, expectedAbbrlink);
     const container = this.contentEl;
     container.empty(); container.addClass("easy-pub-hexo-preview");
     container.createEl("h3", { text: title });

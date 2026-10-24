@@ -2,7 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import { createHash } from "crypto";
 import { startControlRoom } from "./utils/controlRoomLauncher";
-import { HEXO_PREVIEW_VIEW, HexoPreviewView } from "./views/HexoPreviewView";
+import { HEXO_PREVIEW_VIEW, HexoPreviewView, hexoPreviewPath } from "./views/HexoPreviewView";
 import type { ControlRoomSession } from "./utils/controlRoom";
 import { App, FileSystemAdapter, Modal, Notice, Plugin, Setting, TFile, TFolder, normalizePath, requestUrl } from "obsidian";
 import { EasyPubSettingTab } from "./settings";
@@ -54,6 +54,9 @@ import { rebaseWechatImages } from "./utils/wechatMarkdown";
 import { relativeVaultAttachment } from "./utils/platforms";
 import { WECHAT_VIEW, WechatView, isWechatDraft } from "./views/WechatView";
 import { WechatSetupModal } from "./modals/WechatSetupModal";
+import { WechatAiSettingsModal } from "./modals/WechatAiSettingsModal";
+import { normalizeAiSettings, validateAiEndpoint } from "./utils/wechatAiProvider";
+import { clearWechatLayoutCache } from "./utils/wechatAiPlanner";
 import {
   findControlRoomIntegration,
   getControlRoomStatusUrl,
@@ -87,7 +90,11 @@ export default class EasyPub extends Plugin {
   wechatSyncInProgress = false;
   wechatCredentialRevision = 0;
   private wechatSessionSecret = "";
+  private wechatAiSessionKey = "";
+  private wechatAiSessionEndpoint = "";
+  private wechatAiConfigPending = false;
   private settingsSaveQueue?: Promise<void>;
+  settingsRecoveryRequired = false;
   private wechatApi?: WechatApi;
   private wechatApiIdentity = "";
 
@@ -212,13 +219,56 @@ export default class EasyPub extends Plugin {
     } finally { this.pubIdBatchInProgress = false; }
   }
 
-  onunload() { this.wechatSessionSecret = ""; this.settings.picgoServerSecret = ""; this.wechatApi = undefined; this.identityIndex?.clear(); }
+  onunload() { clearWechatLayoutCache(); this.wechatAiSessionKey = ""; this.wechatSessionSecret = ""; this.settings.picgoServerSecret = ""; this.wechatApi = undefined; this.identityIndex?.clear(); }
+
+  openWechatAiSettings(finished?: () => void) { new WechatAiSettingsModal(this, finished).open(); }
+
+  getWechatAiConfiguration() {
+    const settings = normalizeAiSettings(this.settings.wechatAi);
+    const session = this.wechatAiSessionEndpoint === settings.endpoint ? this.wechatAiSessionKey : "";
+    const key = session || decryptWechatSecret(settings.encryptedKey);
+    if (settings.encryptedKey && !key) throw new Error("AI 密钥无法在本机解密，请重新填写；原密文仍保留");
+    return { settings, key };
+  }
+
+  async saveWechatAiConfiguration(endpoint: string, model: string, key: string, jsonMode: boolean): Promise<boolean> {
+    this.assertSettingsWritable();
+    if (this.wechatAiConfigPending) throw new Error("AI 服务配置正在保存，请稍候");
+    endpoint = validateAiEndpoint(endpoint);
+    if (!model || model.length > 200 || /[\r\n]/.test(model) || /[\r\n]/.test(key)) throw new Error("模型或密钥格式无效");
+    const previous = this.settings.wechatAi, session = this.wechatAiSessionKey, sessionEndpoint = this.wechatAiSessionEndpoint;
+    const sameEndpoint = previous?.endpoint === endpoint;
+    const effectiveKey = key || (sameEndpoint ? this.getWechatAiConfiguration().key : "");
+    this.settings.wechatAi = {endpoint, model, jsonMode,
+      encryptedKey: key ? encryptWechatSecret(key) : sameEndpoint ? previous!.encryptedKey : ""};
+    this.wechatAiSessionKey = effectiveKey;
+    this.wechatAiSessionEndpoint = endpoint;
+    this.wechatAiConfigPending = true;
+    try { await this.saveSettings(); }
+    catch (error) { this.settings.wechatAi = previous; this.wechatAiSessionKey = session; this.wechatAiSessionEndpoint = sessionEndpoint; throw error; }
+    finally { this.wechatAiConfigPending = false; }
+    return Boolean(this.settings.wechatAi.encryptedKey);
+  }
+
+  async clearWechatAiKey() {
+    this.assertSettingsWritable();
+    if (this.wechatAiConfigPending) throw new Error("AI 服务配置正在保存，请稍候");
+    const previous = this.settings.wechatAi, session = this.wechatAiSessionKey;
+    this.wechatAiSessionKey = "";
+    this.settings.wechatAi = {...normalizeAiSettings(previous), encryptedKey: ""};
+    this.wechatAiConfigPending = true;
+    try { await this.saveSettings(); }
+    catch (error) { this.settings.wechatAi = previous; this.wechatAiSessionKey = session; throw error; }
+    finally { this.wechatAiConfigPending = false; }
+    clearWechatLayoutCache();
+  }
 
   relativeWechatAttachment(draftPath: string, attachmentPath: string): string {
     return relativeVaultAttachment(draftPath, attachmentPath);
   }
 
   async setWechatSecret(secret: string): Promise<boolean> {
+    this.assertSettingsWritable();
     this.wechatSessionSecret = secret;
     this.settings.wechat.encryptedSecret = encryptWechatSecret(secret);
     this.wechatCredentialRevision++;
@@ -234,6 +284,7 @@ export default class EasyPub extends Plugin {
   openWechatSetup(finished?: () => void): void { new WechatSetupModal(this, finished).open(); }
 
   async saveWechatConfiguration(appId: string, secret: string, author: string): Promise<boolean> {
+    this.assertSettingsWritable();
     if (this.wechatSyncInProgress) throw new Error("请等待当前公众号同步任务完成后再修改账号");
     if (!appId || /\s/.test(appId)) throw new Error("请填写有效的 AppID，不应包含空格");
     if (!secret && (appId !== this.settings.wechat.appId || !this.hasWechatCredentials())) throw new Error("请填写此账号的 AppSecret");
@@ -248,6 +299,7 @@ export default class EasyPub extends Plugin {
   }
 
   async setWechatAppId(appId: string): Promise<void> {
+    this.assertSettingsWritable();
     if (appId === this.settings.wechat.appId) return;
     this.settings.wechat.appId = appId;
     this.settings.wechat.encryptedSecret = "";
@@ -292,11 +344,15 @@ export default class EasyPub extends Plugin {
 
   async loadSettings() {
     try {
-      this.settings = normalizeSettings(await this.loadData());
-    } catch (error) {
+      const data = await this.loadData();
+      if (data !== null && data !== undefined && (typeof data !== "object" || Array.isArray(data))) throw new Error("Invalid settings document");
+      this.settings = normalizeSettings(data);
+      this.settingsRecoveryRequired = false;
+    } catch {
+      this.settingsRecoveryRequired = true;
       this.settings = normalizeSettings(null);
-      console.warn("EasyPub could not load settings", error);
-      new Notice("EasyPub 设置读取失败，已使用默认值。请检查插件 data.json 或重新配置发布路径。", 10000);
+      console.warn("EasyPub settings could not be read; saving is locked");
+      new Notice("EasyPub 设置读取失败，已禁止保存以保护原配置。请在插件设置中重新读取，或备份后明确重置。", 10000);
     }
     if (isPicGoEnabled(this.settings)) await this.initializePicGoCredentials();
   }
@@ -314,16 +370,46 @@ export default class EasyPub extends Plugin {
   }
 
   async saveSettings() {
+    this.assertSettingsWritable();
     const secret = this.settings.picgoServerSecret;
     const saved = serializePicGoSettings(this.settings);
     const snapshot = JSON.parse(JSON.stringify(saved));
-    const write = (this.settingsSaveQueue ?? Promise.resolve()).catch(() => {}).then(() => this.saveData(snapshot));
+    const write = (this.settingsSaveQueue ?? Promise.resolve()).catch(() => {}).then(() => {
+      this.assertSettingsWritable();
+      return this.saveData(snapshot);
+    });
     this.settingsSaveQueue = write;
     await write;
     if (this.settings.picgoServerSecret === secret) this.settings.picgoEncryptedSecret = saved.picgoEncryptedSecret;
   }
 
+  assertSettingsWritable() {
+    if (this.settingsRecoveryRequired) throw new Error("配置读取失败，已禁止保存；请在 EasyPub 设置中重新读取或备份后重置");
+  }
+
+  async backupAndResetSettings(): Promise<string> {
+    if (!this.settingsRecoveryRequired) throw new Error("当前配置无需重置");
+    if (this.wechatSyncInProgress || this.publishInProgress || this.publishConfirmationOpen) throw new Error("请先等待发布任务完成");
+    await this.settingsSaveQueue?.catch(() => {});
+    const adapter = this.app.vault.adapter;
+    if (!this.manifest.dir) throw new Error("无法定位原配置，未重置");
+    const file = `${this.manifest.dir}/data.json`;
+    const original = await adapter.read(file);
+    const backup = `${file}.recovery-${Date.now()}.bak`;
+    if (await adapter.exists(backup)) throw new Error("备份路径已存在，请重试");
+    await adapter.write(backup, original);
+    if (await adapter.read(backup) !== original || await adapter.read(file) !== original) throw new Error("备份校验失败或原配置发生变化，未重置");
+    const previous = this.settings;
+    this.settings = normalizeSettings(null);
+    this.settingsRecoveryRequired = false;
+    try { await this.saveSettings(); }
+    catch (error) { this.settings = previous; this.settingsRecoveryRequired = true; throw error; }
+    this.wechatAiSessionKey = ""; this.wechatSessionSecret = ""; this.wechatApi = undefined;
+    return backup;
+  }
+
   async setWechatRemoteImages(allowed: boolean): Promise<void> {
+    this.assertSettingsWritable();
     if ((this.settings.wechat.allowRemoteImages !== false) === allowed) return;
     this.settings.wechat.allowRemoteImages = allowed;
     for (const leaf of this.app.workspace.getLeavesOfType(WECHAT_VIEW)) {
@@ -384,6 +470,7 @@ export default class EasyPub extends Plugin {
   }
 
   private async performPublish(platform: Platform, updateWechatFromSource = false) {
+    this.assertSettingsWritable();
     const activeFile = this.app.workspace.getActiveFile();
     if (!activeFile) {
       new Notice("请先打开要发布的文章");
@@ -1031,7 +1118,11 @@ export default class EasyPub extends Plugin {
       const pubId = getFrontMatterString(meta, "pub_id");
       if (!pubId || !this.settings.hexoRepoPath) throw new Error("请先配置博客路径，并用 EasyPub 生成 Hexo 发布稿");
       const hexo = PLATFORMS.find(platform => platform.id === "hexo")!;
-      if (!await this.findArticleByPubId(hexo, pubId, meta, file.path)) throw new Error("未找到 Hexo 发布稿，请先通过 Publish to platform 生成稿件");
+      const target = await this.findArticleByPubId(hexo, pubId, meta, file.path);
+      if (!target) throw new Error("未找到 Hexo 发布稿，请先通过 Publish to platform 生成稿件");
+      const published = parseFrontMatter(await this.readPublishFile(hexo, target)).data;
+      const abbrlink = String(published.abbrlink ?? "");
+      hexoPreviewPath(abbrlink);
       await this.openHexoControlRoom(async session => {
         new Notice("正在准备 Hexo 真实主题预览...");
         const url = new URL("/api/preview/article", session.url);
@@ -1045,7 +1136,7 @@ export default class EasyPub extends Plugin {
         const existing = this.app.workspace.getLeavesOfType(HEXO_PREVIEW_VIEW)[0];
         const leaf = existing || this.app.workspace.getLeaf("split");
         if (!existing) await leaf.setViewState({ type: HEXO_PREVIEW_VIEW, active: true });
-        (leaf.view as HexoPreviewView).showArticle(response.json.url, String(response.json.title || file.basename));
+        (leaf.view as HexoPreviewView).showArticle(response.json.url, String(response.json.title || file.basename), abbrlink);
         await this.app.workspace.revealLeaf(leaf);
       });
     } catch (error) { new Notice(`预览失败：${this.getErrorMessage(error)}`, 10000); }

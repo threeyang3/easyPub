@@ -4,6 +4,7 @@ import { renderWechatDocument } from "../utils/wechatRenderer";
 import { loadWechatImage, processWechatImage, releaseWechatImages } from "../utils/wechatImages";
 import { encryptWechatSecret, decryptWechatSecret } from "../utils/wechatSecret";
 import { changedSpan, wechatReadableHtml } from "../utils/wechatComparison";
+import { themePlan } from "../utils/wechatLayoutEngine";
 
 export async function run(app: App) {
   const checks: string[] = [];
@@ -24,6 +25,17 @@ export async function run(app: App) {
     assert(Array.from(html.querySelectorAll('ul,ol')).every(list=>Array.from(list.childNodes).every(n=>n.nodeType===1)), 'no whitespace list children sent to WeChat');
     assert(html.querySelector('pre code')?.textContent?.includes('    const x = 1;'), 'native code indentation');
     assert(html.body.textContent?.includes('可读名称') && !html.querySelector('.internal-link'), 'native internal link readable');
+    assert((doc.layoutDocument?.blocks.length ?? 0) >= 5, 'native source blocks match rendered DOM including table and internal link');
+    const layout = themePlan(doc.layoutDocument!, 'research', 'blue');
+    const paragraph = doc.layoutDocument!.blocks.find(block => block.kind === 'paragraph')!;
+    layout.blocks.push({id: paragraph.id, role: 'lead', component: 'intro', locked: true});
+    const themed = await renderWechatDocument(app, markdown, '', component, () => true, layout);
+    const themedHtml = new DOMParser().parseFromString(themed.html, 'text/html');
+    const tokens = (doc: Document) => Array.from(doc.querySelectorAll('h1,h2,p,li,code,a,img,td,th')).map(el => [el.tagName, el.textContent, el.getAttribute('src'), el.getAttribute('href')]);
+    assert(JSON.stringify(tokens(html)) === JSON.stringify(tokens(themedHtml)), 'native semantic layout preserves complete content and order');
+    assert(!themed.layoutNotice && themed.html.includes('border-left:3px solid #285c91'), 'native semantic component applied with controlled style');
+    const edited = await renderWechatDocument(app, markdown + '\n\n新段落', '', component, () => true, layout);
+    assert(edited.layoutNotice?.includes('过期'), 'native stale layout safely falls back after body edit');
     const unsupported = await renderWechatDocument(app, '$$x^2$$\n\n![[不存在的笔记]]\n\n<audio src="test.mp3"></audio>', '', component);
     assert(unsupported.issues.length >= 2, 'unsupported content blocked');
     const canvas = document.createElement('canvas'); canvas.width = 40; canvas.height = 20;

@@ -101,6 +101,10 @@ For compatible Blog Control Room repositories:
 
 ### WeChat invariants
 
+- Layout follows sanitize → source/DOM mapping → controlled local styles. AI returns a strictly validated LayoutPlan, never HTML/CSS/text. Keep default rendering available when mapping or plan validation fails; report expired plans. Block IDs and plans bind to exact Markdown hashes.
+- AI requests are explicit per-request actions after destination/payload preview, never refresh side effects. Credentials are system-encrypted or session-only and scoped to endpoint; request keys and article snippets are not persisted in plan caches. Do not modify WechatSync's remote write semantics for layout features.
+- Settings load failure locks ordinary saves and publication until a successful reload or an explicitly confirmed, verified backup/reset. Never overwrite unreadable originals with default settings.
+
 - Native Markdown rendering is normalized once for both preview and submission. All workbench CSS is scoped. Stale render generations are discarded; changes during a render queue another refresh.
 - Body images use uploadimg (JPG/PNG <1 MB); permanent image material is used for covers (<10 MB). GIF is rejected with an explicit replacement message, never silently flattened. Original attachments and local Markdown body are preserved.
 - Cover crop uses current `cover_info.crop_percent_list` with independent 2.35:1 and 1:1 coordinates.

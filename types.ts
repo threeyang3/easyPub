@@ -8,6 +8,7 @@ export interface PluginSettings {
   picgoEncryptedSecret: string;
   picgoImageCache: Record<string, PicGoImageCacheEntry>;
   wechat: WechatSettings;
+  wechatAi?: WechatAiSettings;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -151,7 +152,25 @@ export interface WechatArticleSettings {
   cover?: string;
   cropWide?: WechatCrop;
   cropSquare?: WechatCrop;
+  layout?: WechatLayoutPlan;
+  layoutHistory?: WechatLayoutPlan[];
 }
+export type WechatThemeId = "default" | "essay" | "research" | "event" | "minimal";
+export type WechatAccent = "teal" | "blue" | "amber" | "rose";
+export type WechatBlockKind = "paragraph" | "heading" | "list" | "quote" | "code" | "image" | "table" | "divider" | "other";
+export type WechatLayoutComponent = "plain" | "intro" | "highlight-card" | "quote" | "conclusion";
+export type WechatLayoutRole = "body" | "lead" | "key-point" | "quotation" | "summary";
+export interface WechatLayoutBlock { id: string; kind: WechatBlockKind; line: number; text: string }
+export interface WechatLayoutDocument { hash: string; blocks: WechatLayoutBlock[] }
+export interface WechatLayoutInstruction { id: string; role: WechatLayoutRole; component: WechatLayoutComponent; locked?: boolean }
+export interface WechatLayoutPlan {
+  schemaVersion: 1;
+  documentHash: string;
+  theme: WechatThemeId;
+  accentColor: WechatAccent;
+  blocks: WechatLayoutInstruction[];
+}
+export interface WechatAiSettings { endpoint: string; model: string; encryptedKey: string; jsonMode: boolean }
 export interface WechatArticle {
   title: string;
   author: string;
@@ -199,4 +218,6 @@ export interface WechatPreparedDocument {
   images: WechatImage[];
   issues: string[];
   imageReferences?: WechatImageReference[];
+  layoutDocument?: WechatLayoutDocument;
+  layoutNotice?: string;
 }

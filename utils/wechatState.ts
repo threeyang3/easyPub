@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { readWechatLayoutPlan } from "./wechatLayoutEngine";
 import { WechatArticleSettings, WechatCrop, WechatSettings } from "../types";
 
 export const wechatHash = (value: string | Uint8Array): string => createHash("sha256").update(value).digest("hex");
@@ -46,6 +47,11 @@ export function readWechatArticleSettings(value: unknown): WechatArticleSettings
       result[key] = crop as unknown as WechatCrop;
     }
   }
+  // Invalid plans remain visible so rendering can explain safe fallback.
+  if (data.layout !== undefined) result.layout = data.layout as WechatArticleSettings["layout"];
+  if (Array.isArray(data.layoutHistory)) result.layoutHistory = data.layoutHistory.slice(-5).flatMap(plan => {
+    try { return [readWechatLayoutPlan(plan)]; } catch { return []; }
+  });
   return result;
 }
 

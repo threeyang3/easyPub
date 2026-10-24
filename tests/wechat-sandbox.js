@@ -1,7 +1,11 @@
 // Execute via Obsidian CLI eval in the explicitly authorized Sandbox vault.
 // Leaves isolated test notes/attachments for visual inspection. No remote writes.
-async function runSandbox(app) {
-  if (app.vault.adapter.getBasePath().toLowerCase() !== 'e:\\obsidian\\sandbox') throw Error('Wrong vault');
+async function runSandbox(app, options = {}) {
+  const path = require('path');
+  const expected = options.expectedVaultPath || 'E:\\Obsidian\\Sandbox';
+  const normalize = value => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
+  if (!path.isAbsolute(expected) || app.vault.getName() !== 'Sandbox' ||
+      normalize(app.vault.adapter.getBasePath()) !== normalize(expected)) throw Error('Wrong vault');
   const plugin = app.plugins.plugins['easy-pub'];
   if (!plugin) throw Error('EasyPub not loaded');
   const root = `EasyPub-test-${Date.now()}`;

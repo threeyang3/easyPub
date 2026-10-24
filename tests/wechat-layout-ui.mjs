@@ -11,6 +11,14 @@ export async function runLayoutUi(page) {
   const status = () => page.locator('.easy-pub-layout [role=status]');
   await open();
   assert.equal(await page.locator('.easy-pub-layout').count(), 1);
+  const codeGeometry = await page.locator('.epl-preview pre code').evaluate(code => {
+    // Model an editor discarding raw whitespace between explicit line nodes.
+    for (const node of [...code.childNodes]) if (node.nodeType === 3 && node.textContent === '\n') node.remove();
+    const lines = [...code.querySelectorAll(':scope > span')];
+    return {text: lines.slice(0, 2).map(line => line.textContent), tops: lines.slice(0, 2).map(line => line.getBoundingClientRect().top)};
+  });
+  assert.equal(codeGeometry.text.every(line => line.startsWith('    ')), true, 'Code indentation remains in original text');
+  assert.ok(codeGeometry.tops[1] > codeGeometry.tops[0], 'Code lines must remain visibly separate without raw newline whitespace');
   const viewport = page.viewportSize();
   await page.setViewportSize({width: 560, height: 640});
   assert.equal(await page.locator('.easy-pub-layout').evaluate(el => el.scrollWidth <= el.clientWidth + 2), true, 'Narrow layout modal must not overflow horizontally');

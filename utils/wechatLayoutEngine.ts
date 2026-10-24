@@ -62,7 +62,9 @@ export function applyWechatLayout(root: HTMLElement, doc: WechatLayoutDocument, 
     // Block wrappers inherit the article style; only the outer section needs it.
     const style = el === root ? styles.section : tag === "section" ? undefined : styles[tag];
     if (style) el.setAttribute("style", style);
-    if (tag === "code" && el.closest("pre")) el.setAttribute("style", "font-family:monospace;font-size:13px;line-height:1.7;white-space:pre-wrap;background:transparent;");
+    if (tag === "pre") el.style.whiteSpace = "normal";
+    if (tag === "code" && el.closest("pre")) el.setAttribute("style", "font-family:monospace;font-size:13px;line-height:1.7;white-space:normal;background:transparent;");
+    if (tag === "span" && el.parentElement?.tagName === "CODE" && el.closest("pre")) el.setAttribute("style", "white-space:pre-wrap!important;overflow-wrap:anywhere;");
   }
   for (const instruction of plan.blocks) {
     const binding = bindings.find(b => b.id === instruction.id);

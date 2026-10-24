@@ -90,6 +90,9 @@ export async function runWechatLayoutTests() {
     const root = document.createElement('section'); root.innerHTML = micromark(body);
     const diagnosticHtml = '<p>正文 <a href="https://example.com">链接文字</a></p><pre><code>  code</code></pre><img src="https://example.com/image.png">';
     assert.deepEqual(compareWechatReadback(diagnosticHtml, diagnosticHtml), []);
+    const explicitCode = '<pre><code><span>    first();</span><br>\n<span>    second();</span><br>\n</code></pre>';
+    assert.deepEqual(compareWechatReadback(explicitCode, explicitCode.replace(/>\n/g, '>')), [], 'Explicit code breaks retain semantics if editor removes redundant raw newlines');
+    assert.ok(compareWechatReadback(explicitCode, explicitCode.replace('<br>\n', '')).some(warning => warning.includes('文字')), 'Lost code breaks remain a content warning');
     assert.match(compareWechatReadback(diagnosticHtml, diagnosticHtml.replace('<a href="https://example.com">链接文字</a>', '链接文字'))[0], /链接/);
     assert.ok(compareWechatReadback(diagnosticHtml, diagnosticHtml.replace('  code', 'code')).some(warning => warning.includes('文字')));
     assert.ok(compareWechatReadback(diagnosticHtml, diagnosticHtml.replace('image.png', 'other.png')).some(warning => warning.includes('图片')));

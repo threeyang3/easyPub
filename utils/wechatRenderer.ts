@@ -7,6 +7,7 @@ import { loadWechatImage, releaseWechatImages } from "./wechatImages";
 export { WECHAT_TEMPLATE } from "./wechatThemes";
 import { bindWechatBlocks, extractWechatBlocks } from "./wechatLayoutAst";
 import { applyWechatLayout } from "./wechatLayoutEngine";
+import { prepareWechatCode } from "./wechatCode";
 const allowed = new Set("section p h1 h2 h3 h4 h5 h6 blockquote ul ol li pre code table thead tbody tfoot tr th td img a strong em del hr br span sup sub b i s figure figcaption".split(" "));
 
 export function sanitizeWechatHtml(container: HTMLElement, images: WechatImage[]): string[] {
@@ -54,6 +55,7 @@ export function sanitizeWechatHtml(container: HTMLElement, images: WechatImage[]
       if (node.nodeType === 3 && !node.textContent?.trim()) node.remove();
     });
   });
+  prepareWechatCode(container);
   return issues;
 }
 

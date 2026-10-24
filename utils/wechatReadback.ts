@@ -1,7 +1,10 @@
+import { normalizeWechatCodeBreaks } from './wechatCode';
+
 // Readback is a separate diagnostic step; it must never retry a successful write.
 export function compareWechatReadback(expected: string, actual: string): string[] {
   const parse = (html: string) => new DOMParser().parseFromString(html, "text/html");
   const local = parse(expected), remote = parse(actual);
+  normalizeWechatCodeBreaks(local); normalizeWechatCodeBreaks(remote);
   local.querySelectorAll("script,style").forEach(el => el.remove());
   remote.querySelectorAll("script,style").forEach(el => el.remove());
   const warnings: string[] = [];

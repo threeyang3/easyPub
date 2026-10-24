@@ -1,6 +1,7 @@
 import { DEFAULT_SETTINGS, PluginSettings } from "../types";
 import { createHash } from "crypto";
 import { normalizeWechatSettings } from "./wechatState";
+import { normalizeAiSettings } from "./wechatAiProvider";
 
 export function normalizeSettings(value: unknown): PluginSettings {
   const saved = value && typeof value === "object" && !Array.isArray(value)
@@ -17,6 +18,7 @@ export function normalizeSettings(value: unknown): PluginSettings {
     picgoEncryptedSecret: text("picgoEncryptedSecret"),
     picgoImageCache: {},
     wechat: normalizeWechatSettings(saved.wechat),
+    ...(saved.wechatAi ? {wechatAi: normalizeAiSettings(saved.wechatAi)} : {}),
   };
   if (saved.picgoImageCache && typeof saved.picgoImageCache === "object") {
     for (const [key, value] of Object.entries(saved.picgoImageCache)) {
@@ -38,7 +40,7 @@ export function isPicGoEnabled(settings: PluginSettings, platformId?: string): b
 }
 
 export function publishSettingsFingerprint(settings: PluginSettings, platformId?: string): string {
-  const { picgoImageCache, picgoEncryptedSecret, picgoServerUrl, picgoServerSecret, imageHandling, wechat, ...configuration } = settings;
+  const { picgoImageCache, picgoEncryptedSecret, picgoServerUrl, picgoServerSecret, imageHandling, wechat, wechatAi, ...configuration } = settings;
   const enabled = isPicGoEnabled(settings, platformId);
   return createHash("sha256").update(JSON.stringify({ ...configuration,
     imageHandling: enabled ? "picgo" : "local",

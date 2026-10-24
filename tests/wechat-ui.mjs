@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import assert from "node:assert/strict";
+import { runLayoutUi } from "./wechat-layout-ui.mjs";
 
 const bundledChromium = process.env.EASYPUB_USE_BUNDLED_CHROMIUM === "1";
 const chrome = process.env.EASYPUB_CHROME_PATH ?? (bundledChromium ? undefined : [
@@ -267,6 +268,7 @@ try {
   assert.equal(await page.getByRole('button', { name:'信息、配图与封面', exact:true }).evaluate(el => el === document.activeElement), true);
   await page.evaluate(() => document.body.classList.remove('theme-dark'));
   await page.screenshot({ path: screenshot.replace(/\.png$/, "-cover.png"), fullPage: true });
+  await runLayoutUi(page);
   await page.evaluate(async () => {
     window.fixture.setDelay(75);
     const pending = window.fixture.view.refresh(true);

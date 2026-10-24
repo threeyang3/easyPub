@@ -64,6 +64,15 @@ async function testMarkdownAndHtml() {
     assert.equal(container.querySelectorAll("iframe,script,button,a,[onclick],[onerror],.metadata-container").length, 0);
     assert.match(container.textContent!, /Internal/);
     assert.equal(container.querySelector("code")!.textContent, "    a\n\t b");
+    assert.equal(container.querySelectorAll('pre code > br').length, 1);
+    assert.equal(container.querySelector('pre code > span')?.getAttribute('style')?.includes('white-space:pre-wrap'), true);
+    const codeOnly = document.createElement('section');
+    codeOnly.innerHTML = '<pre><code>  &lt;script&gt;\n\n\tlast\n</code></pre>';
+    normalizeWechatHtml(codeOnly, []);
+    const codeHtml = codeOnly.innerHTML;
+    normalizeWechatHtml(codeOnly, []);
+    assert.equal(codeOnly.innerHTML, codeHtml, 'Code break preparation must be idempotent');
+    assert.equal(codeOnly.querySelector('code')!.textContent, '  <script>\n\n\tlast\n');
     assert.equal(container.querySelector("img")!.getAttribute("src"), `easy-pub-image://${img.hash}`);
     assert.match(previewWechatHtml(container.outerHTML, [img]), /blob:assets\/p.png/);
     assert.equal(container.querySelector("h2")!.hasAttribute("style"), true);

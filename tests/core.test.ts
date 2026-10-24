@@ -24,6 +24,7 @@ import { getHexoAssetTargetPath } from "../utils/platforms";
 import { runReliabilityTests } from "./reliability.test";
 import { runBatchPubIdTests } from "./batchPubIds.test";
 import { runWechatTests } from "./wechat.test";
+import { runWechatLayoutTests } from "./wechat-layout.test";
 import { runControlRoomLauncherTests } from "./controlRoomLauncher.test";
 import {
   getPicGoHeartbeatUrl,
@@ -42,6 +43,7 @@ async function run() {
   await runBatchPubIdTests();
   await runReliabilityTests();
   await runWechatTests();
+  await runWechatLayoutTests();
   const assetsRoot = await mkdtemp(path.join(os.tmpdir(), 'easy-pub-assets-'));
   const backupRepo = await mkdtemp(path.join(os.tmpdir(), 'easy-pub-backup-git-'));
   try {

@@ -1,8 +1,10 @@
+import { normalizeWechatCodeBreaks } from './wechatCode';
 export interface WechatComparison { label: string; local: string; remote: string }
 
 // Parse inert HTML only; never insert remote markup into the live document.
 export function wechatReadableHtml(html: string): string {
   const doc = new DOMParser().parseFromString(html, "text/html");
+  normalizeWechatCodeBreaks(doc);
   doc.querySelectorAll("script,style,iframe,object").forEach(el => el.remove());
   doc.querySelectorAll("img").forEach(el => el.replaceWith(doc.createTextNode(`[图片：${el.getAttribute("alt") || "无说明"}]`)));
   doc.querySelectorAll("br").forEach(el => el.replaceWith(doc.createTextNode("\n")));

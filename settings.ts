@@ -16,6 +16,20 @@ export class EasyPubSettingTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.addClass("easy-pub-settings");
 
+    if (this.plugin.settingsRecoveryRequired) {
+      containerEl.createEl("h2", { text: "原配置读取失败，保存已锁定" });
+      containerEl.createEl("p", { text: "原配置可能仍包含草稿关联、素材缓存和加密凭据。重新读取成功后恢复使用；重置会先在插件目录保存原文件副本。备份同样含有敏感配置，请妥善保管。" });
+      new Setting(containerEl).setName("恢复配置")
+        .addButton(button => button.setButtonText("重新读取").onClick(async () => { await this.plugin.loadSettings(); this.display(); }))
+        .addButton(button => button.setButtonText("备份后重置配置").onClick(async () => {
+          const { wechatChoice } = await import("./modals/WechatChoiceModal");
+          if (await wechatChoice(this.app, "备份并重置 EasyPub 配置", "原文件将保留为插件目录中的 .bak 副本；当前配置重置为默认值。之后需要重新配置账号和发布路径。", [{ label: "备份原文件并重置", value: "reset" }]) !== "reset") return;
+          try { new Notice(`原配置已备份：${await this.plugin.backupAndResetSettings()}`); this.display(); }
+          catch { new Notice("无法安全备份并重置，原配置仍受保护。请检查配置文件读取和写入权限。"); }
+        }));
+      return;
+    }
+
     new Setting(containerEl).setName("EasyPub").setHeading();
     containerEl.createEl("p", { text: "按需要配置使用的平台。公众号账号通过向导保存；其余设置修改后自动保存。", cls: "ep-settings-intro" });
     new Setting(containerEl).setName("Hexo").setHeading();
@@ -77,6 +91,9 @@ export class EasyPubSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl).setName("微信公众号").setHeading();
+    new Setting(containerEl).setName("智能排版服务（可选）")
+      .setDesc("本地主题无需 AI；配置兼容 API 后，可在公众号工作台按次确认发送文章片段并生成保真排版方案。")
+      .addButton(button => button.setButtonText("配置 AI 排版").onClick(() => this.plugin.openWechatAiSettings()));
     new Setting(containerEl).setName(this.plugin.hasWechatCredentials() ? "管理公众号账号" : "连接公众号")
       .setDesc(this.plugin.hasWechatCredentials() ? `当前 AppID：${this.plugin.settings.wechat.appId}。通过向导检查连接或更换账号，确认保存后生效。` : "准备账号 → 保存凭据 → 检查连接；需要 AppID、AppSecret 和 API IP 白名单。")
       .addButton(button => button.setButtonText("引导配置公众号").setCta().onClick(() => this.plugin.openWechatSetup(() => this.display())));

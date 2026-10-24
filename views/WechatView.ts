@@ -3,13 +3,16 @@ import type EasyPub from "../main";
 import { WechatArticleSettings, WechatCrop, WechatImage, WechatPreparedDocument } from "../types";
 import { getFrontMatterString, parseFrontMatter } from "../utils/frontMatter";
 import { isWechatDraftPath } from "../utils/platforms";
-import { centeredCrop, readWechatArticleSettings, wechatHash, wechatStateKey } from "../utils/wechatState";
+import { centeredCrop, readWechatArticleSettings, wechatAssetKey, wechatHash, wechatStateKey } from "../utils/wechatState";
 import { IMAGE_EXTENSIONS } from "../utils/wechatMarkdown";
 import { loadWechatImage, readWechatImage, releaseWechatImages } from "../utils/wechatImages";
 import { digestFromWechatHtml, previewWechatHtml, renderWechatDocument } from "../utils/wechatRenderer";
 import { validateWechatArticle, WechatConflictAction, WechatSync } from "../utils/wechatSync";
 import { wechatChoice } from "../modals/WechatChoiceModal";
 import { WechatComparison, wechatReadableHtml } from "../utils/wechatComparison";
+import { WechatLayoutModal } from "../modals/WechatLayoutModal";
+import { readWechatLayoutPlan, themePlan } from "../utils/wechatLayoutEngine";
+import { compareWechatReadback } from "../utils/wechatReadback";
 
 export const WECHAT_VIEW = "easy-pub-wechat";
 export function isWechatDraft(file: TFile, text: string, plugin: EasyPub): boolean {
@@ -90,6 +93,7 @@ export class WechatView extends ItemView {
       else void this.run(() => this.refresh(true));
     });
     this.button(tools, "打开本地稿", () => this.run(async () => { if (this.file) await this.app.workspace.getLeaf(false).openFile(this.file); }));
+    this.button(tools, "智能排版", () => { void this.openLayout().catch(error => this.message((error as Error).message, true)); });
     this.status = root.createDiv({ cls: "epw-status", text: "等待选择公众号本地稿", attr: { role: "status", "aria-live": "polite" } });
     const tabs = root.createDiv({ cls: "epw-tabs", attr: { "aria-label": "预览布局" } });
     this.previewTab = this.button(tabs, "正文预览", () => this.showSettings(false));
@@ -192,6 +196,7 @@ export class WechatView extends ItemView {
     if (!this.file || this.closed) return;
     // A queued automatic refresh must never replace unsaved inspector edits.
     if (this.dirty && !preserveEdits) return;
+    if (this.timer) { clearTimeout(this.timer); this.timer = undefined; }
     const keepDirty = this.dirty;
     const pendingArticle = keepDirty ? structuredClone(this.article) : undefined;
     const version = ++this.version;
@@ -210,7 +215,7 @@ export class WechatView extends ItemView {
     };
     const component = new Component(); component.load();
     let prepared: WechatPreparedDocument;
-    try { prepared = await renderWechatDocument(this.app, parsed.content, filePath, component, this.allowRemoteImages); }
+    try { prepared = await renderWechatDocument(this.app, parsed.content, filePath, component, this.allowRemoteImages, article.layout); }
     finally { component.unload(); }
     if (article.digest === undefined) article.digest = digestFromWechatHtml(prepared.html);
     try { validateWechatArticle(article); } catch (error) { prepared.issues.push((error as Error).message); }
@@ -223,7 +228,8 @@ export class WechatView extends ItemView {
         try { cover = await loadWechatImage(this.app, source, filePath, "cover", this.allowRemoteImages); }
         catch (error) { prepared.issues.push(`封面：${(error as Error).message}`); }
       }
-      if (version !== this.version || this.closed || file.path !== filePath || await this.app.vault.read(file) !== snapshot) {
+      const latest = await this.app.vault.read(file);
+      if (version !== this.version || this.closed || this.file !== file || file.path !== filePath || latest !== snapshot || imagePolicyRevision !== this.imagePolicyRevision) {
         this.rerenderRequested = !this.closed && imagePolicyRevision === this.imagePolicyRevision;
         releaseWechatImages(prepared.images); if (cover) releaseWechatImages([cover]); return;
       }
@@ -236,6 +242,7 @@ export class WechatView extends ItemView {
       this.renderInspector();
       if (prepared.issues.length || !cover) this.showSettings(true);
       this.message(keepDirty ? "正文预览已更新 · 未保存设置已保留，请保存设置并刷新后同步" : prepared.issues.length ? `预检发现 ${prepared.issues.length} 个问题，请修复后刷新` : !cover ? "请选择封面，保存设置后即可同步" : "预检通过 · 同步以此本地成稿为准");
+      if (prepared.layoutNotice) this.message(`${this.status.textContent} · ${prepared.layoutNotice}`, prepared.issues.length > 0);
       this.updateSyncState();
     } catch (error) { releaseWechatImages(prepared.images); if (cover) releaseWechatImages([cover]); throw error; }
   }
@@ -388,7 +395,38 @@ export class WechatView extends ItemView {
     });
     this.dirty = false; await this.refresh();
   }
+  private async openLayout() {
+    if (!this.file || !this.prepared || this.busy || this.stale || this.dirty || this.prepared.issues.length) throw new Error("请先修复问题、保存设置并刷新预览，再调整排版");
+    const doc = this.prepared.layoutDocument;
+    if (!doc) throw new Error("排版文档尚未就绪，请刷新预览");
+    const file = this.file, snapshot = this.snapshot, version = this.version, policy = this.imagePolicyRevision;
+    const assertFresh = async () => {
+      const current = () => !this.closed && this.file === file && file.path === this.snapshotPath && this.version === version
+        && this.imagePolicyRevision === policy && !this.stale && !this.dirty;
+      if (!current()) throw new Error("正文、设置或图片已变化，请关闭排版窗口，刷新后重新规划");
+      const latest = await this.app.vault.read(file);
+      if (!current() || latest !== snapshot) throw new Error("正文、设置或图片已变化，请关闭排版窗口，刷新后重新规划");
+    };
+    await assertFresh();
+    new WechatLayoutModal(this.plugin, { title: this.article.title ?? file.basename, html: this.prepared.html, images: this.prepared.images,
+      document: doc, current: this.article.layout, history: this.article.layoutHistory ?? [], assertFresh,
+      apply: async plan => {
+        this.plugin.assertSettingsWritable?.();
+        await assertFresh();
+        const previous = structuredClone(this.article);
+        let old = themePlan(doc, "default");
+        try { old = readWechatLayoutPlan(previous.layout); } catch { /* First layout or invalid old plan. */ }
+        const history = [...(previous.layoutHistory ?? []), old].slice(-5);
+        this.article = {...previous, layout: plan, layoutHistory: history};
+        this.busy = true; this.updateSyncState();
+        try { await this.saveArticle(); }
+        catch (error) { this.article = previous; this.stale = true; throw error; }
+        finally { this.busy = false; this.updateSyncState(); }
+      },
+    }).open();
+  }
   private async sync() {
+    this.plugin.assertSettingsWritable?.();
     if (!this.plugin.hasWechatCredentials()) { this.plugin.openWechatSetup(() => this.invalidate()); return; }
     if (!this.file || !this.prepared || !this.cover || this.stale || this.dirty || this.prepared.issues.length) throw new Error("请先修复问题并保存设置、刷新预览");
     if (this.plugin.wechatSyncInProgress) throw new Error("已有公众号同步任务正在进行");
@@ -437,7 +475,18 @@ export class WechatView extends ItemView {
           return await wechatChoice(this.app, kind === "missing" ? "远端草稿已删除或发布" : kind === "multiple" ? "已关联多图文，不支持覆盖" : "微信后台内容与上次同步不同", details, choices, kind === "modified" ? comparison : undefined) as WechatConflictAction;
         },
       });
-      this.message(result ? "已同步到公众号草稿箱 · 请在后台预览并发布" : "已取消同步");
+      if (!result) { this.message("已取消同步"); return; }
+      try {
+        const remote = await api.getDraft(result);
+        let expected = this.prepared.html;
+        for (const image of this.prepared.images) {
+          const material = this.plugin.settings.wechat.assets[wechatAssetKey(this.plugin.settings.wechat.appId, "body", image.hash)];
+          if (material) expected = expected.split(`easy-pub-image://${image.hash}`).join(material.url.replace(/&/g, "&amp;").replace(/"/g, "&quot;"));
+        }
+        const content = (remote[0] as {content?: unknown})?.content;
+        const warnings = typeof content === "string" ? compareWechatReadback(expected, content) : ["无法核对回读正文，请在后台检查"];
+        this.message(`已同步到公众号草稿箱 · ${warnings.length ? warnings.join("；") : "正文、图片与链接回读一致，请在后台预览并发布"}`, warnings.length > 0);
+      } catch { this.message("已同步到公众号草稿箱，但补充内容核对失败；请在后台预览，勿重复创建草稿", true); }
     } finally { this.plugin.wechatSyncInProgress = false; this.contentEl.removeAttribute("inert"); controls.forEach(control => { control.disabled = false; }); }
   }
   private async recover() {

@@ -6,6 +6,7 @@ import { Buffer } from "buffer/";
 import { parseFrontMatter, stringifyFrontMatter } from "../../utils/frontMatter";
 import { wechatChoice } from "../../modals/WechatChoiceModal";
 import { WechatSetupModal } from "../../modals/WechatSetupModal";
+import { clearWechatLayoutCache } from "../../utils/wechatAiPlanner";
 
 async function start() {
 const globals = globalThis as any;
@@ -25,10 +26,15 @@ const raw = await blob.arrayBuffer();
 let text = "---\npub_id: local-id\nsource_file: '[[source]]'\n---\n# 把表达，留给内容\n\n这是已经独立编辑的公众号本地稿。调整配图和封面，在这里检查最终排版。\n\n![封面配图](../../assets/cover.png)\n\n## 发布之前，从容检查\n\n- 正文与原稿保持独立\n- 图片适配交给工具\n- 最后在公众号后台发布\n\n> 好的工具，让写作更专注。\n\n```ts\n    const message = 'Hello';\n    console.log(message);\n```";
 const listeners = new Map<string, Set<(...args: any[]) => void>>();
 const emit = (event: string, file: TFile) => listeners.get(event)?.forEach(listener => listener(file));
-let delay = 0, sourceReads = 0;
+let delay = 0, readDelay = 0, sourceReads = 0;
 const app: any = {
   vault: {
-    read: async (target: TFile) => { if (target === source) { sourceReads++; return "SOURCE MUST NOT BE READ"; } return text; },
+    read: async (target: TFile) => {
+      if (target === source) { sourceReads++; return "SOURCE MUST NOT BE READ"; }
+      const snapshot = text;
+      if (readDelay) { globals.fixtureDelayedReads = (globals.fixtureDelayedReads ?? 0) + 1; await new Promise(resolve => setTimeout(resolve, readDelay)); }
+      return snapshot;
+    },
     readBinary: async () => { if (delay) await new Promise(resolve => setTimeout(resolve, delay)); return raw; },
     getAbstractFileByPath: (path: string) => path === file.path ? file : path === attachment.path ? attachment : null,
     getFiles: () => [file, attachment, source],
@@ -47,6 +53,8 @@ const app: any = {
   workspace: { getLeaf: () => ({ openFile: async (file: TFile, options: unknown) => { globals.fixtureOpened = { path: file.path, options }; } }) },
 };
 const plugin: any = { app, settings: normalizeSettings(null), wechatSyncInProgress: false, wechatCredentialRevision: 0,
+  getWechatAiConfiguration: () => ({settings: {endpoint: 'https://ai.example/v1/chat/completions', model: 'test-model', encryptedKey: '', jsonMode: true}, key: 'test-ai-key'}),
+  openWechatAiSettings: () => {},
   hasWechatCredentials: () => true, openWechatSetup: () => {},
   relativeWechatAttachment: () => "../../assets/cover.png", openWechatBackend: async () => {}, saveSettings: async () => {},
   getWechatApi: () => ({ listDrafts: async () => [{ media_id: "recovered", content: { news_item: [{ title: "恢复测试草稿" }] } }],
@@ -54,6 +62,14 @@ const plugin: any = { app, settings: normalizeSettings(null), wechatSyncInProgre
 const view = new WechatView({ app, contentEl: document.querySelector("#workbench") } as any, plugin);
 await view.onOpen(); await view.bind(file);
 globals.fixture = { view,
+  setReadDelay: (value: number) => { readDelay = value; globals.fixtureDelayedReads = 0; },
+  clearAiCache: () => clearWechatLayoutCache(),
+  ai: () => {
+    globals.fixtureAiRequests = [];
+    globals.fixtureRequest = (request: any) => { globals.fixtureAiRequests.push(request); return new Promise(resolve => {
+      globals.fixtureAiResolve = (content: unknown) => resolve({status: 200, arrayBuffer: new TextEncoder().encode(JSON.stringify({choices: [{finish_reason: 'stop', message: {content: typeof content === 'string' ? content : JSON.stringify(content)}}]})).buffer});
+    }); };
+  },
   localOnly: (value: boolean) => { plugin.settings.wechat.allowRemoteImages = !value; view.invalidateImagePolicy(); },
   setup: () => {
     const config = { ...plugin, settings: normalizeSettings(null), hasWechatCredentials: () => Boolean(config.settings.wechat.appId),

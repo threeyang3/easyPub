@@ -157,12 +157,14 @@ export class WechatLayoutModal extends Modal {
     this.change({...this.selected, blocks: [...this.selected.blocks.filter(b => b.id !== id), {id, role: roles[component], component, ...(locked ? {locked: true} : {})}]});
   }
   private updatePreview() {
+    this.requestButton.disabled = this.pending;
     try {
       const plan = this.original ? themePlan(this.context.document, "default") : this.selected;
       this.preview.innerHTML = previewWechatHtml(layoutPreview(this.context.html, this.context.document, plan), this.context.images);
-      this.applyButton.disabled = this.pending && this.pendingVersion === this.requestVersion;
-      this.requestButton.disabled = this.pending;
       this.preview.setAttribute("aria-label", this.original ? "默认模板预览" : "排版方案预览");
+      // Comparing the baseline never changes which plan Apply will save.
+      if (this.original) layoutPreview(this.context.html, this.context.document, this.selected);
+      this.applyButton.disabled = this.pending && this.pendingVersion === this.requestVersion;
     } catch (error) { this.status.textContent = (error as Error).message; this.applyButton.disabled = true; }
   }
   private async prepareRequest() {
@@ -204,8 +206,13 @@ export class WechatLayoutModal extends Modal {
   private async apply() {
     if (this.pending && this.pendingVersion === this.requestVersion || this.closed || this.applyButton.disabled) return;
     this.applyButton.disabled = true;
-    try { await this.context.assertFresh(); await this.context.apply(validateWechatLayout(this.selected, this.context.document)); this.close(); }
-    catch (error) { this.status.textContent = (error as Error).message; this.applyButton.disabled = false; }
+    try {
+      await this.context.assertFresh();
+      const plan = validateWechatLayout(this.selected, this.context.document);
+      layoutPreview(this.context.html, this.context.document, plan);
+      await this.context.apply(plan); this.close();
+    }
+    catch (error) { this.status.textContent = (error as Error).message; this.updatePreview(); }
   }
   onClose() { this.closed = true; this.requestVersion++; this.contentEl.empty(); }
 }

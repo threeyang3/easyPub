@@ -6,7 +6,7 @@ import { isWechatDraftPath } from "../utils/platforms";
 import { centeredCrop, readWechatArticleSettings, wechatAssetKey, wechatHash, wechatStateKey } from "../utils/wechatState";
 import { IMAGE_EXTENSIONS } from "../utils/wechatMarkdown";
 import { loadWechatImage, readWechatImage, releaseWechatImages } from "../utils/wechatImages";
-import { digestFromWechatHtml, previewWechatHtml, renderWechatDocument } from "../utils/wechatRenderer";
+import { digestFromWechatHtml, previewWechatHtml, renderWechatDocument, WECHAT_HTML_LIMIT_ISSUE } from "../utils/wechatRenderer";
 import { validateWechatArticle, WechatConflictAction, WechatSync } from "../utils/wechatSync";
 import { wechatChoice } from "../modals/WechatChoiceModal";
 import { WechatComparison, wechatReadableHtml } from "../utils/wechatComparison";
@@ -219,7 +219,7 @@ export class WechatView extends ItemView {
     finally { component.unload(); }
     if (article.digest === undefined) article.digest = digestFromWechatHtml(prepared.html);
     try { validateWechatArticle(article); } catch (error) { prepared.issues.push((error as Error).message); }
-    if (Array.from(prepared.html).length >= 20000 || new TextEncoder().encode(prepared.html).length >= 1024 * 1024) prepared.issues.push("排版后的正文超过 2 万字符或 1 MB，请精简后重试");
+    if (Array.from(prepared.html).length >= 20000 || new TextEncoder().encode(prepared.html).length >= 1024 * 1024) prepared.issues.push(WECHAT_HTML_LIMIT_ISSUE);
     let cover: WechatImage | undefined;
     try {
       const source = article.cover ?? prepared.images[0]?.source;
@@ -396,7 +396,9 @@ export class WechatView extends ItemView {
     this.dirty = false; await this.refresh();
   }
   private async openLayout() {
-    if (!this.file || !this.prepared || this.busy || this.stale || this.dirty || this.prepared.issues.length) throw new Error("请先修复问题、保存设置并刷新预览，再调整排版");
+    // An old oversized layout must remain repairable here. Other preflight
+    // failures still block entry, and both Apply and Sync enforce the limit.
+    if (!this.file || !this.prepared || this.busy || this.stale || this.dirty || this.prepared.issues.some(issue => issue !== WECHAT_HTML_LIMIT_ISSUE)) throw new Error("请先修复问题、保存设置并刷新预览，再调整排版");
     const doc = this.prepared.layoutDocument;
     if (!doc) throw new Error("排版文档尚未就绪，请刷新预览");
     const file = this.file, snapshot = this.snapshot, version = this.version, policy = this.imagePolicyRevision;

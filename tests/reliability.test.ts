@@ -346,17 +346,17 @@ export async function runReliabilityTests() {
   for (const url of ["https://example.com/", "http://127.0.0.1:5001/posts/a12b/?token=x", "http://user@127.0.0.1:5001/posts/a12b/", "http://127.0.0.1:5002/posts/a12b/", "http://127.0.0.1:5001/admin/"]) {
     assert.throws(() => validateHexoPreviewUrl(url));
   }
-  const macCommands = desktopCommandEnvironment(macEnvironment, "darwin");
+  const macCommands = desktopCommandEnvironment(macEnvironment, "darwin", "/Users/test");
   assert.equal(macCommands.PATH?.split(":")[0], "/Users/test/.nvm/versions/node/v20/bin");
   assert.ok(macCommands.PATH?.includes("/opt/homebrew/bin"));
   assert.ok(macCommands.PATH?.includes("/usr/local/bin"));
-  assert.ok(macCommands.PATH?.split(":").includes(path.join(os.homedir(), ".local", "bin")));
-  const finderEnvironment = desktopCommandEnvironment({ PATH: "/usr/bin:/bin:/usr/sbin:/sbin" }, "darwin");
-  assert.ok(finderEnvironment.PATH?.split(":").includes(path.join(os.homedir(), ".local", "bin")));
+  assert.ok(macCommands.PATH?.split(":").includes("/Users/test/.local/bin"));
+  const finderEnvironment = desktopCommandEnvironment({ PATH: "/usr/bin:/bin:/usr/sbin:/sbin" }, "darwin", "/Users/test");
+  assert.ok(finderEnvironment.PATH?.split(":").includes("/Users/test/.local/bin"));
   assert.ok(finderEnvironment.PATH?.startsWith("/usr/bin:/bin:/usr/sbin:/sbin:"));
   assert.equal(macCommands.CUSTOM, "keep");
   assert.equal(macEnvironment.PATH, "/Users/test/.nvm/versions/node/v20/bin:/usr/bin");
-  assert.equal(desktopCommandEnvironment(macCommands, "darwin").PATH, macCommands.PATH);
+  assert.equal(desktopCommandEnvironment(macCommands, "darwin", "/Users/test").PATH, macCommands.PATH);
   assert.ok(!desktopCommandEnvironment({}, "darwin").PATH?.split(":").includes(""));
   assert.deepEqual(desktopCommandEnvironment({ Path: "C:\\node", CUSTOM: "keep" }, "win32"), { Path: "C:\\node", CUSTOM: "keep" });
   assert.deepEqual(desktopCommandEnvironment(macEnvironment, "linux"), macEnvironment);

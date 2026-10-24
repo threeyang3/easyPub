@@ -4,7 +4,8 @@ import path from "path";
 /** GUI applications on macOS may not inherit the terminal's Node PATH. */
 export function desktopCommandEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
+  homeDirectory: string = os.homedir()
 ): NodeJS.ProcessEnv {
   const result = { ...environment };
   if (platform === "darwin") {
@@ -13,7 +14,7 @@ export function desktopCommandEnvironment(
     const directories = (environment.PATH ?? "").split(":").filter(Boolean);
     result.PATH = [...new Set([...directories,
       "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
-      path.join(os.homedir(), ".local", "bin"),
+      path.posix.join(homeDirectory, ".local", "bin"),
     ])].join(":");
   }
   return result;

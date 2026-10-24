@@ -142,8 +142,20 @@ export async function runWechatLayoutTests() {
     assert.ok(!payload.includes('const x'));
     assert.ok(!payload.includes('https://example.com'));
     assert.ok(payload.includes('code preserved'));
-    const redacted = plannerMessages('参考 https://private.example/token', {...mapped.document, blocks: [{...mapped.document.blocks[1], text: '访问 https://private.example/token?key=hidden 查看信息。'}]}, 'auto')[1].content;
+    assert.throws(() => plannerMessages('unfiltered', {...mapped.document, blocks: [{...mapped.document.blocks[1], planningText: undefined as any}]}, 'auto'), /尚未过滤/);
+    const redacted = plannerMessages('参考 https://private.example/token', {...mapped.document, blocks: [{...mapped.document.blocks[1], planningText: '访问 https://private.example/token?key=hidden 查看信息。'}]}, 'auto')[1].content;
     assert.ok(!redacted.includes('private.example') && redacted.includes('[link]'));
+    for (const nested of ['- safe description\n\n  ```js\n  LIST_SECRET();\n  ```', '> safe description\n>\n> ```js\n> QUOTE_SECRET();\n> ```', 'safe description `INLINE_SECRET`']) {
+      const nestedRoot = document.createElement('section'); nestedRoot.innerHTML = micromark(nested);
+      sanitizeWechatHtml(nestedRoot, []);
+      const completeText = nestedRoot.textContent;
+      const nestedMap = await bindWechatBlocks(nested, nested, nestedRoot, async (markdown, target) => { target.innerHTML = micromark(markdown); return !sanitizeWechatHtml(target, []).length; });
+      assert.equal(nestedMap.document.blocks.length, 1);
+      assert.match(nestedMap.document.blocks[0].text, /SECRET/);
+      assert.equal(nestedRoot.textContent, completeText, 'Request redaction must not change rendered content');
+      const nestedPayload = plannerMessages('nested', nestedMap.document, 'auto')[1].content;
+      assert.ok(!nestedPayload.includes('SECRET') && nestedPayload.includes('safe description') && nestedPayload.includes('[code preserved]'), 'All nested and inline code must be redacted before excerpts');
+    }
     const config = normalizeAiSettings({endpoint: 'https://api.example/v1/chat/completions', model: 'configured-model'});
     const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).buffer as ArrayBuffer;
     const transport = async (request: any) => {
@@ -171,7 +183,7 @@ export async function runWechatLayoutTests() {
     assert.throws(() => validateWechatLayout(semantic, changed), /过期/);
     const long = '# 长文\n\n' + Array.from({length: 80}, (_, i) => `第 ${i} 段。${'长文'.repeat(90)}`).join('\n\n');
     const longSource = extractWechatBlocks(long);
-    const longDoc = {hash: longSource.hash, blocks: longSource.blocks.map(b => ({...b, text: b.markdown}))};
+    const longDoc = {hash: longSource.hash, blocks: longSource.blocks.map(b => ({...b, text: b.markdown, planningText: b.markdown}))};
     assert.ok(Buffer.byteLength(JSON.stringify(plannerMessages('long', longDoc, 'auto'))) < 65536);
     const unmapped = document.createElement('section'); unmapped.innerHTML = '<p>different host rendering</p>';
     const fallback = await bindWechatBlocks('plain', 'plain', unmapped, async (_md, target) => {target.innerHTML = '<p>plain</p>'; return true;});

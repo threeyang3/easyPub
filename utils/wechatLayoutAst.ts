@@ -57,7 +57,11 @@ export async function bindWechatBlocks(body: string, preparedMarkdown: string, r
     group[0].before(wrapper); wrapper.append(...group);
     const original = source.blocks[i];
     const kind: WechatBlockKind = replica.querySelector("table") ? "table" : replica.querySelector("img") && !replica.textContent?.trim() ? "image" : original.kind;
-    blocks.push({ id: original.id, kind, line: original.line, text: wrapper.textContent ?? "" });
+    // A list, quote or paragraph can contain code/images at any depth. Keep
+    // complete text for the inspector, and a separate redacted model input.
+    const planning = wrapper.cloneNode(true) as HTMLElement;
+    planning.querySelectorAll("pre,code,img").forEach(el => el.replaceWith(document.createTextNode(el.tagName === "IMG" ? "[image preserved]" : "[code preserved]")));
+    blocks.push({ id: original.id, kind, line: original.line, text: wrapper.textContent ?? "", planningText: planning.textContent ?? "" });
     bindings.push({ id: original.id, element: wrapper });
   }
   return { document: { hash: source.hash, blocks }, bindings };

@@ -160,7 +160,7 @@ export type WechatAccent = "preset" | "teal" | "blue" | "amber" | "rose";
 export type WechatBlockKind = "paragraph" | "heading" | "list" | "quote" | "code" | "image" | "table" | "divider" | "other";
 export type WechatLayoutComponent = "plain" | "intro" | "highlight-card" | "quote" | "conclusion";
 export type WechatLayoutRole = "body" | "lead" | "key-point" | "quotation" | "summary";
-export interface WechatLayoutBlock { id: string; kind: WechatBlockKind; line: number; text: string }
+export interface WechatLayoutBlock { id: string; kind: WechatBlockKind; line: number; text: string; planningText: string }
 export interface WechatLayoutDocument { hash: string; blocks: WechatLayoutBlock[] }
 export interface WechatLayoutInstruction { id: string; role: WechatLayoutRole; component: WechatLayoutComponent; locked?: boolean }
 export interface WechatLayoutPlan {

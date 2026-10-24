@@ -127,5 +127,55 @@ export async function runLayoutUi(page) {
     window.fixtureAiResolve({schemaVersion: 1, documentHash: data.documentHash, theme: 'event', accentColor: 'blue', blocks: []});
   });
   assert.equal(await page.evaluate(() => window.fixture.read()), savedBeforeClose);
+  const reset = async text => {
+    await page.evaluate(async value => { window.fixture.replace(value); await window.fixture.view.refresh(); }, text);
+    await page.waitForFunction(() => !window.fixture.view.stale && !window.fixture.view.busy);
+  };
+  const prefix = '---\npub_id: local-id\nsource_file: "[[source]]"\n---\n';
+  const image = '\n\n![cover](../../assets/cover.png)';
+  const nestedText = prefix + '- safe description\n\n  ```js\n  NESTED_SECRET();\n  ```' + image;
+  await reset(nestedText);
+  await open(); await button('准备 AI 排版请求').click();
+  await page.getByText('查看将发送的全部内容', {exact: true}).click();
+  const requestPreview = await page.getByRole('textbox', {name: '将发送的全部内容'}).inputValue();
+  assert.ok(!requestPreview.includes('NESTED_SECRET') && requestPreview.includes('[code preserved]'));
+  assert.match(await page.locator('.epl-preview pre code').innerText(), /NESTED_SECRET/);
+  await button('取消').click();
+  assert.equal(await page.evaluate(() => window.fixture.read()), nestedText);
+
+  await reset(prefix + 'x' + image);
+  const overhead = await page.evaluate(() => Array.from(window.fixture.view.prepared.html).length - 1);
+  const nearLimit = prefix + 'x'.repeat(19999 - overhead) + image;
+  await reset(nearLimit);
+  assert.equal(await page.evaluate(() => Array.from(window.fixture.view.prepared.html).length), 19999);
+  await open(); await button('使用深夜电台风格').click();
+  assert.match(await status().innerText(), /超过/);
+  assert.equal(await button('应用排版到本地稿').isDisabled(), true);
+  await button('对比默认 / 当前方案').click();
+  assert.equal(await page.getByRole('region', {name: '默认模板预览'}).count(), 1);
+  assert.equal(await button('应用排版到本地稿').isDisabled(), true, 'Baseline comparison must not enable saving an oversized selection');
+  await button('应用排版到本地稿').evaluate(button => {
+    button.closest('.easy-pub-layout').querySelector('[role=status]').textContent = '';
+    button.disabled = false; button.click();
+  });
+  await page.waitForFunction(() => document.querySelector('.epl-footer .mod-cta').disabled && document.querySelector('.easy-pub-layout [role=status]').textContent.includes('超过'));
+  assert.equal(await page.evaluate(() => window.fixture.read()), nearLimit, 'Final apply gate must reject oversized selection independently of button state');
+  await button('恢复默认排版').click();
+  await button('应用排版到本地稿').click();
+  await page.waitForFunction(() => !document.querySelector('.easy-pub-layout'));
+  assert.equal(await page.evaluate(() => window.fixture.view.prepared.issues.length), 0);
+  await open(); await button('取消').click();
+  const oldOversizedNote = await page.evaluate(value => {
+    const hash = window.fixture.view.prepared.layoutDocument.hash;
+    const plan = {schemaVersion: 1, documentHash: hash, theme: 'noir', accentColor: 'preset', blocks: []};
+    return value.replace('\n---\n', '\nwechat:\n  layout: ' + JSON.stringify(plan) + '\n---\n');
+  }, nearLimit);
+  await reset(oldOversizedNote);
+  assert.ok(await page.evaluate(() => window.fixture.view.prepared.issues.some(issue => issue.includes('超过'))));
+  assert.equal(await button('同步草稿箱').isDisabled(), true);
+  await open(); await button('恢复默认排版').click(); await button('应用排版到本地稿').click();
+  await page.waitForFunction(() => !document.querySelector('.easy-pub-layout'));
+  assert.equal(await page.evaluate(() => window.fixture.view.prepared.issues.length), 0, 'Previously saved oversized layouts must be repairable from the workbench');
+  await reset(savedBeforeClose);
   console.log('Layout UI: local preview/apply, content fidelity, AI consent, locks, undo, invalid/stale/late responses and close passed');
 }

@@ -47,7 +47,11 @@ const app: any = {
   fileManager: { processFrontMatter: async (_file: TFile, callback: (data: any) => void) => {
     const parsed = parseFrontMatter(text);
     callback(parsed.data);
-    text = stringifyFrontMatter(parsed.content, parsed.data);
+    // Match the host's metadata-only write: gray-matter would otherwise add
+    // a trailing body newline and spuriously expire a layout at the limit.
+    const header = stringifyFrontMatter('', parsed.data);
+    const generatedBody = parseFrontMatter(header).content;
+    text = header.slice(0, header.length - generatedBody.length) + parsed.content;
     emit("modify", file);
   } },
   workspace: { getLeaf: () => ({ openFile: async (file: TFile, options: unknown) => { globals.fixtureOpened = { path: file.path, options }; } }) },

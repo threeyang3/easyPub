@@ -9,6 +9,7 @@ import { bindWechatBlocks, extractWechatBlocks } from "./wechatLayoutAst";
 import { applyWechatLayout } from "./wechatLayoutEngine";
 import { prepareWechatCode } from "./wechatCode";
 const allowed = new Set("section p h1 h2 h3 h4 h5 h6 blockquote ul ol li pre code table thead tbody tfoot tr th td img a strong em del hr br span sup sub b i s figure figcaption".split(" "));
+export const WECHAT_HTML_LIMIT_ISSUE = "排版后的正文超过 2 万字符或 1 MB，请精简后重试";
 
 export function sanitizeWechatHtml(container: HTMLElement, images: WechatImage[]): string[] {
   const issues: string[] = [];
@@ -117,7 +118,7 @@ export async function renderWechatDocument(app: App, body: string, filePath: str
     if (!allowRemote() && (rawHtml || images.some(image => !image.localPath))) throw new Error('网络图片权限已变化，请刷新');
     const outcome = applyWechatLayout(container, mapped.document, mapped.bindings, layout);
     const html = container.outerHTML;
-    if (Array.from(html).length >= 20000 || new TextEncoder().encode(html).length >= 1024 * 1024) issues.push("排版后的正文超过 2 万字符或 1 MB，请精简后重试");
+    if (Array.from(html).length >= 20000 || new TextEncoder().encode(html).length >= 1024 * 1024) issues.push(WECHAT_HTML_LIMIT_ISSUE);
     return { html, images, issues: [...new Set(issues)], imageReferences: prepared.imageReferences,
       layoutDocument: mapped.document, layoutNotice: outcome.notice };
   } catch (error) { releaseWechatImages(images); throw error; }

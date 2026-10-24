@@ -7,6 +7,7 @@ import { changedSpan, wechatReadableHtml } from "../utils/wechatComparison";
 import { themePlan } from "../utils/wechatLayoutEngine";
 import { WECHAT_THEMES } from "../utils/wechatThemes";
 import { WechatThemeId } from "../types";
+import { plannerMessages } from "../utils/wechatAiPlanner";
 
 export async function run(app: App) {
   const checks: string[] = [];
@@ -50,6 +51,10 @@ export async function run(app: App) {
       'native length rejection never truncates the article');
     const edited = await renderWechatDocument(app, markdown + '\n\n新段落', '', component, () => true, layout);
     assert(edited.layoutNotice?.includes('过期'), 'native stale layout safely falls back after body edit');
+    const nested = await renderWechatDocument(app, '- public list\n\n  ```js\n  LIST_PRIVATE();\n  ```\n\n> public quote\n>\n> ```js\n> QUOTE_PRIVATE();\n> ```\n\npublic paragraph `INLINE_PRIVATE`', '', component);
+    const nestedPayload = plannerMessages('native privacy check', nested.layoutDocument!, 'auto')[1].content;
+    assert(!nestedPayload.includes('_PRIVATE') && nestedPayload.includes('[code preserved]') && nestedPayload.includes('public list') && nestedPayload.includes('public quote'), 'native nested and inline code excluded from AI request');
+    assert(['LIST_PRIVATE', 'QUOTE_PRIVATE', 'INLINE_PRIVATE'].every(text => nested.html.includes(text)), 'native request redaction preserves complete rendered code');
     const unsupported = await renderWechatDocument(app, '$$x^2$$\n\n![[不存在的笔记]]\n\n<audio src="test.mp3"></audio>', '', component);
     assert(unsupported.issues.length >= 2, 'unsupported content blocked');
     const canvas = document.createElement('canvas'); canvas.width = 40; canvas.height = 20;

@@ -132,3 +132,8 @@ After source or manifest changes:
 - Keep `isDesktopOnly: true` while Node/Electron APIs are required.
 - GitHub Releases must attach `main.js`, `manifest.json`, and `styles.css` from the same build.
 - Do not commit `node_modules/` or local assistant/tooling directories.
+
+## Hexo article preview and metadata
+
+- `utils/hexoMetadata.ts` prepares published-only layout/cover/top_img, preserving explicit false and runtime theme inheritance. Cover attachments share deferred upload/copy and source validation with body images. Never write converted URLs back into the source.
+- `views/HexoPreviewView.ts` accepts only validated fixed loopback article URLs. It displays saved blog content, never implicitly publishes or overwrites a draft.

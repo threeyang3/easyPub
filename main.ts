@@ -2,6 +2,8 @@ import fs from "fs/promises";
 import path from "path";
 import { createHash } from "crypto";
 import { startControlRoom } from "./utils/controlRoomLauncher";
+import { HEXO_PREVIEW_VIEW, HexoPreviewView } from "./views/HexoPreviewView";
+import type { ControlRoomSession } from "./utils/controlRoom";
 import { App, FileSystemAdapter, Modal, Notice, Plugin, Setting, TFile, TFolder, normalizePath, requestUrl } from "obsidian";
 import { EasyPubSettingTab } from "./settings";
 import { PluginSettings, ArticleMeta, ArticleDiff, Platform, PLATFORMS, FrontMatterData, PublishAsset, PicGoImageCacheEntry, PicGoPendingUpload } from "./types";
@@ -34,6 +36,7 @@ import {
   isSourcePublishTarget,
 } from "./utils/platforms";
 import { generateHexoUrl, getHexoRootPath } from "./utils/linkUtils";
+import { prepareHexoMetadata } from "./utils/hexoMetadata";
 import { prepareImageEmbeds, PreparedImageContent } from "./utils/imageEmbeds";
 import { getPicGoHeartbeatUrl, uploadWithPicGo } from "./utils/picgo";
 import { confirmPicGoTransport } from "./modals/PicGoTransportModal";
@@ -92,6 +95,8 @@ export default class EasyPub extends Plugin {
 
   async onload() {
     await this.loadSettings();
+    this.registerView(HEXO_PREVIEW_VIEW, leaf => new HexoPreviewView(leaf));
+    this.addCommand({ id: "preview-hexo", name: "预览 Hexo 发布效果", callback: () => void this.previewHexoArticle() });
     this.identityIndex = new PublishIdentityIndex();
     const invalidateIdentity = (file: unknown) => this.identityIndex?.invalidate(file);
     this.registerEvent(this.app.vault.on("create", invalidateIdentity));
@@ -449,7 +454,7 @@ export default class EasyPub extends Plugin {
       : platform.id === "hexo"
         ? await this.prepareHexoContent(activeFile, sourceParsed.content, pubId)
         : { content: sourceParsed.content, assets: [], picgoUploads: [] };
-    const proposedPublishedData = await this.buildPublishedFrontMatter(
+    let proposedPublishedData = await this.buildPublishedFrontMatter(
       platform,
       activeFile,
       sourceDataWithPubId,
@@ -458,6 +463,19 @@ export default class EasyPub extends Plugin {
       new Date().toISOString(),
       targetPath
     );
+    if (platform.id === "hexo") {
+      proposedPublishedData = await prepareHexoMetadata(proposedPublishedData, title, async markdown => {
+        const image = isPicGoEnabled(this.settings, platform.id)
+          ? await this.preparePicGoContent(activeFile, markdown)
+          : await this.prepareHexoContent(activeFile, markdown, pubId);
+        preparedContent.assets.push(...image.assets);
+        preparedContent.picgoUploads.push(...image.picgoUploads);
+        preparedContent.imageChecks = [...(preparedContent.imageChecks ?? []), ...(image.imageChecks ?? [])];
+        return image.content;
+      });
+      preparedContent.assets = [...new Map(preparedContent.assets.map(asset => [asset.targetPath, asset])).values()];
+      preparedContent.picgoUploads = [...new Map(preparedContent.picgoUploads.map(upload => [upload.token, upload])).values()];
+    }
     if (platform.id === "wechat") {
       // The local draft owns its platform-specific settings, even on an explicit
       // source refresh. Never import a source's WeChat settings over them.
@@ -1005,7 +1023,35 @@ export default class EasyPub extends Plugin {
     }
   }
 
-  async openHexoControlRoom(): Promise<void> {
+  async previewHexoArticle(): Promise<void> {
+    try {
+      const file = this.app.workspace.getActiveFile();
+      if (!file || file.extension !== "md") throw new Error("请先打开要预览的源文章");
+      const meta = parseFrontMatter(await this.app.vault.read(file)).data;
+      const pubId = getFrontMatterString(meta, "pub_id");
+      if (!pubId || !this.settings.hexoRepoPath) throw new Error("请先配置博客路径，并用 EasyPub 生成 Hexo 发布稿");
+      const hexo = PLATFORMS.find(platform => platform.id === "hexo")!;
+      if (!await this.findArticleByPubId(hexo, pubId, meta, file.path)) throw new Error("未找到 Hexo 发布稿，请先通过 Publish to platform 生成稿件");
+      await this.openHexoControlRoom(async session => {
+        new Notice("正在准备 Hexo 真实主题预览...");
+        const url = new URL("/api/preview/article", session.url);
+        url.searchParams.set("token", session.token);
+        const response = await withTimeout(requestUrl({
+          url: url.toString(), method: "POST", contentType: "application/json", body: JSON.stringify({ pubId }), throw: false,
+        }), 40000, "Hexo 预览准备超时，请查看博客后台运行日志");
+        if (response.status !== 200) {
+          throw new Error(response.status === 404 ? "请更新并重启博客管理后台，并确认关联的稿件仍存在" : String(response.json?.error || "无法启动 Hexo 预览"));
+        }
+        const existing = this.app.workspace.getLeavesOfType(HEXO_PREVIEW_VIEW)[0];
+        const leaf = existing || this.app.workspace.getLeaf("split");
+        if (!existing) await leaf.setViewState({ type: HEXO_PREVIEW_VIEW, active: true });
+        (leaf.view as HexoPreviewView).showArticle(response.json.url, String(response.json.title || file.basename));
+        await this.app.workspace.revealLeaf(leaf);
+      });
+    } catch (error) { new Notice(`预览失败：${this.getErrorMessage(error)}`, 10000); }
+  }
+
+  async openHexoControlRoom(onReady?: (session: ControlRoomSession) => Promise<void>): Promise<void> {
     if (this.controlRoomOpening) {
       new Notice("博客管理后台正在打开，请稍候");
       return;
@@ -1029,19 +1075,22 @@ export default class EasyPub extends Plugin {
 
       const session = await readControlRoomSession(integration.sessionPath);
       if (session) {
+        let verified = false;
         try {
           const response = await withTimeout(requestUrl({
             url: getControlRoomStatusUrl(session),
             method: "GET",
             throw: false,
           }), 5000, "博客管理后台响应超时");
-          if (response.status === 200) {
-            await electron.shell.openExternal(session.url);
-            new Notice("已打开博客管理后台");
-            return;
-          }
+          verified = response.status === 200;
         } catch (error) {
           console.debug("EasyPub ignored a stale Blog Control Room session", error);
+        }
+        if (verified) {
+          if (onReady) { await onReady(session); return; }
+          await electron.shell.openExternal(session.url);
+          new Notice("已打开博客管理后台");
+          return;
         }
       }
 
@@ -1051,6 +1100,7 @@ export default class EasyPub extends Plugin {
           const response = await requestUrl({ url: getControlRoomStatusUrl(candidate), method: "GET", throw: false });
           return response.status === 200;
         });
+        if (onReady) { await onReady(started); return; }
         await electron.shell.openExternal(started.url);
         new Notice("已启动并打开博客管理后台");
         return;

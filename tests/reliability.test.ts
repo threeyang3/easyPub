@@ -11,7 +11,9 @@ import { withTimeout } from "../utils/async";
 import { isSourcePublishTarget, formatChildReference } from "../utils/platforms";
 import { generatePubId, parseFrontMatter, parseYamlDocument, stringifyFrontMatter } from "../utils/frontMatter";
 import { buildHexo, getHexoNodeExecutable, validateHexoDeployment } from "../utils/hexoCommands";
+import { prepareHexoMetadata } from "../utils/hexoMetadata";
 import { desktopCommandEnvironment } from "../utils/desktopEnvironment";
+import { validateHexoPreviewUrl } from "../views/HexoPreviewView";
 import { findControlRoomIntegration } from "../utils/controlRoom";
 import { assertPublishIdentity, PublishIdentityIndex } from "../utils/publishIdentity";
 import { inspectPublishDocuments } from "../utils/publishDiagnostics";
@@ -35,6 +37,25 @@ async function expectReportedFailure(action: () => Promise<unknown>) {
 }
 
 export async function runReliabilityTests() {
+  const metaSource = { cover: "[[附件/封面.png]]", top_img: false, custom: "kept" };
+  const metadata = await prepareHexoMetadata(metaSource, "原稿标题", async md => {
+    assert.equal(md, "![[附件/封面.png]]");
+    return "![封面](/picture/easy-pub/id/hash.png)";
+  });
+  assert.deepEqual(metadata, { title: "原稿标题", layout: "post", cover: "/picture/easy-pub/id/hash.png", top_img: false, custom: "kept" });
+  assert.equal(metaSource.cover, "[[附件/封面.png]]");
+  const noAttachment = async () => { throw new Error("Must not read or upload an attachment"); };
+  assert.deepEqual(await prepareHexoMetadata({}, "Title", noAttachment), { title: "Title", layout: "post", cover: "", top_img: "" });
+  for (const cover of [false, "", "/img/cover.webp", "https://example.com/cover.png"]) {
+    assert.equal((await prepareHexoMetadata({ cover }, "Title", noAttachment)).cover, cover);
+  }
+  assert.equal((await prepareHexoMetadata({ top_img: "linear-gradient(red, blue)" }, "Title", noAttachment)).top_img, "linear-gradient(red, blue)");
+  assert.equal((await prepareHexoMetadata({ top_img: "image.png" }, "Title", async () => "![image](easy-pub-picgo://token)")).top_img, "easy-pub-picgo://token");
+  for (const cover of ["javascript:alert(1)", "file:///tmp/a.png", "//remote/a.png", "https://user:pass@example.com/a", {}, ["a.png"]]) {
+    await assert.rejects(prepareHexoMetadata({ cover }, "Title", noAttachment));
+  }
+  await assert.rejects(prepareHexoMetadata({ cover: "[[missing.png]]" }, "Title", async md => md), /找不到/);
+
   const originalRandom = Math.random;
   Math.random = () => { throw new Error('pub_id must use cryptographic randomness'); };
   try { assert.match(generatePubId(), /^[a-f0-9]{16}$/); }
@@ -321,6 +342,10 @@ export async function runReliabilityTests() {
   assert.equal(getHexoNodeExecutable("43.0.0"), process.platform === "win32" ? "node.exe" : "node");
   assert.equal(getHexoNodeExecutable(""), process.execPath);
   const macEnvironment = { PATH: "/Users/test/.nvm/versions/node/v20/bin:/usr/bin", CUSTOM: "keep" };
+  assert.equal(validateHexoPreviewUrl("http://127.0.0.1:5001/posts/a12b/"), "http://127.0.0.1:5001/posts/a12b/");
+  for (const url of ["https://example.com/", "http://127.0.0.1:5001/posts/a12b/?token=x", "http://user@127.0.0.1:5001/posts/a12b/", "http://127.0.0.1:5002/posts/a12b/", "http://127.0.0.1:5001/admin/"]) {
+    assert.throws(() => validateHexoPreviewUrl(url));
+  }
   const macCommands = desktopCommandEnvironment(macEnvironment, "darwin");
   assert.equal(macCommands.PATH?.split(":")[0], "/Users/test/.nvm/versions/node/v20/bin");
   assert.ok(macCommands.PATH?.includes("/opt/homebrew/bin"));
@@ -428,6 +453,31 @@ export async function runReliabilityTests() {
     await rm(serverPath);
     await expectReportedFailure(() => protectedPlugin.deployToHexo());
     assert.equal(await readFile(path.join(portableBlog, "commands.log"), "utf8"), commandLog);
+
+    // End-to-end preparation: visual attachments join the same deferred asset plan
+    // as body images, with no target writes or external uploads during preparation.
+    await writeFile(config, "url: https://example.com\nroot: /blog/\n");
+    const visualPlugin = Object.create(EasyPub.prototype) as EasyPub;
+    visualPlugin.settings = normalizeSettings({ hexoRepoPath: root });
+    const visualSource = Object.assign(new TFile(), { path: "visual.md", basename: "visual", extension: "md" });
+    const visualImage = Object.assign(new TFile(), { path: "attachments/cover.png", basename: "cover", extension: "png" });
+    const visualText = '---\ncover: "[[attachments/cover.png]]"\ntop_img: "[[attachments/cover.png]]"\n---\nBody ![[attachments/cover.png]]';
+    Object.assign(visualPlugin, { app: {
+      workspace: { getActiveFile: () => visualSource },
+      vault: { read: async () => visualText, readBinary: async () => Buffer.from("cover bytes") },
+      metadataCache: { getFirstLinkpathDest: () => visualImage },
+    } });
+    let preparedVisual: ArticleDiff | undefined;
+    visualPlugin.copyAndOpenForEdit = async diff => { preparedVisual = diff; };
+    await (visualPlugin as any).performPublish(PLATFORMS.find(p => p.id === "hexo")!);
+    assert.ok(preparedVisual);
+    const visualMeta = parseFrontMatter(preparedVisual.sourceContent).data;
+    assert.match(String(visualMeta.cover), /^\/blog\/picture\/easy-pub\//);
+    assert.equal(visualMeta.top_img, visualMeta.cover);
+    assert.equal(preparedVisual.assets?.length, 1);
+    assert.equal(preparedVisual.picgoUploads?.length, 0);
+    assert.ok(preparedVisual.sourceContent.includes(`](${visualMeta.cover})`));
+    assert.equal(preparedVisual.sourceSnapshot, visualText);
 
     const plugin = Object.create(EasyPub.prototype) as EasyPub;
     plugin.settings = normalizeSettings({ hexoRepoPath: root });

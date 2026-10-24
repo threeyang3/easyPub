@@ -44,6 +44,10 @@ export class EasyPubSettingTab extends PluginSettingTab {
           })
       );
 
+    new Setting(containerEl).setName("Hexo 真实主题预览")
+      .setDesc("在 Obsidian 内查看当前源文章关联的已保存稿件，包括顶部图、首页封面与手机布局；不会发布上线。")
+      .addButton(button => button.setButtonText("预览当前文章").onClick(() => this.plugin.previewHexoArticle()));
+
     const backups = new Setting(containerEl).setName("发布历史备份")
       .setDesc("覆盖 Hexo 稿件前保留全文备份，可能包含未公开内容。不会自动清理。")
       .addButton(button => button.setButtonText("查看备份").onClick(() => new PublishBackupsModal(this.app, this.plugin.settings.hexoRepoPath).open()))

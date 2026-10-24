@@ -96,3 +96,7 @@ npm run dev    # 监听源码变化
 ## 许可证
 
 [MIT](LICENSE)
+
+### Hexo 真实预览与封面
+
+执行“预览 Hexo 发布效果”可在 Obsidian 内查看已保存稿件的真实主题页面、首页封面和手机宽度。生成 Hexo 稿件时会处理 `cover` / `top_img` 附件并补齐缺失属性；详见[发布稿适配与预览](docs/publishing.md#8-hexo-发布稿适配与真实预览)。

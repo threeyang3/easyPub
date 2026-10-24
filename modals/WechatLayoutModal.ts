@@ -2,7 +2,7 @@ import { Modal } from "obsidian";
 import type EasyPub from "../main";
 import { WechatImage, WechatLayoutDocument, WechatLayoutPlan, WechatLayoutComponent, WechatThemeId } from "../types";
 import { applyWechatLayout, mergeLockedLayout, themePlan, validateWechatLayout } from "../utils/wechatLayoutEngine";
-import { COMPONENT_LABELS, WECHAT_ACCENTS, WECHAT_THEMES } from "../utils/wechatThemes";
+import { COMPONENT_LABELS, WECHAT_ACCENTS, WECHAT_THEMES, WECHAT_THEME_DESIGNS, themePalette } from "../utils/wechatThemes";
 import { plannerMessages, planWechatLayout } from "../utils/wechatAiPlanner";
 import { validateAiEndpoint } from "../utils/wechatAiProvider";
 import { previewWechatHtml } from "../utils/wechatRenderer";
@@ -31,11 +31,14 @@ export class WechatLayoutModal extends Modal {
   private requestVersion = 0;
   private closed = false;
   private pending = false;
+  private pendingVersion?: number;
   private status!: HTMLElement;
   private preview!: HTMLElement;
   private controls!: HTMLElement;
+  private gallery!: HTMLElement;
   private sendArea!: HTMLElement;
   private applyButton!: HTMLButtonElement;
+  private requestButton!: HTMLButtonElement;
   private original = false;
   private aiTheme: WechatThemeId | "auto" = "auto";
   constructor(private plugin: EasyPub, private context: WechatLayoutContext) {
@@ -56,22 +59,25 @@ export class WechatLayoutModal extends Modal {
     const theme = options.createEl("label", {text: "排版风格", cls: "epl-field"}).createEl("select", {attr: {"aria-label": "排版风格"}});
     for (const [id, name] of Object.entries(WECHAT_THEMES)) theme.createEl("option", {value: id, text: name});
     theme.value = this.selected.theme;
-    theme.onchange = () => { this.change({...this.selected, theme: theme.value as WechatThemeId}); };
+    theme.onchange = () => { this.change({...this.selected, theme: theme.value as WechatThemeId, accentColor: "preset"}); };
+    const gallery = options.createEl("details", {cls: "epl-theme-browser"}); gallery.open = true;
+    gallery.createEl("summary", {text: `风格画廊 · ${Object.keys(WECHAT_THEMES).length} 套正文排版`});
+    this.gallery = gallery.createDiv({cls: "epl-theme-grid", attr: {role: "group", "aria-label": "正文风格预设"}});
     const accent = options.createEl("label", {text: "强调色", cls: "epl-field"}).createEl("select", {attr: {"aria-label": "强调色"}});
-    const colors = {teal: "青绿", blue: "蓝色", amber: "暖棕", rose: "玫红"};
+    const colors = {preset: "跟随风格配色", teal: "青绿", blue: "蓝色", amber: "暖棕", rose: "玫红"};
     for (const id of Object.keys(WECHAT_ACCENTS) as Array<keyof typeof colors>) accent.createEl("option", {value: id, text: colors[id]});
     accent.value = this.selected.accentColor;
     accent.onchange = () => this.change({...this.selected, accentColor: accent.value as WechatLayoutPlan["accentColor"]});
     const tools = options.createDiv({cls: "epl-actions"});
     this.button(tools, "对比默认 / 当前方案", () => { this.original = !this.original; this.updatePreview(); });
-    this.button(tools, "撤销本次调整", () => { const last = this.undo.pop(); if (last) { this.requestVersion++; this.selected = last; this.redraw(); } });
+    this.button(tools, "撤销本次调整", () => { const last = this.undo.pop(); if (last) { this.requestVersion++; this.selected = last; this.sendArea.empty(); this.status.textContent = "已撤销调整，尚未保存；旧 AI 响应不会覆盖当前方案。"; this.redraw(); } });
     this.button(tools, "恢复默认排版", () => this.change(themePlan(this.context.document, "default")));
-    this.button(tools, "配置 AI 服务", () => this.plugin.openWechatAiSettings(() => { this.requestVersion++; this.sendArea.empty(); }));
+    this.button(tools, "配置 AI 服务", () => this.plugin.openWechatAiSettings(() => { this.requestVersion++; this.sendArea.empty(); this.status.textContent = "服务配置已更新，请重新准备请求；旧响应不会应用。"; this.updatePreview(); }));
     const preference = options.createEl("label", {text: "AI 风格偏好", cls: "epl-field"}).createEl("select", {attr: {"aria-label": "AI 风格偏好"}});
     preference.createEl("option", {value: "auto", text: "AI 自动判断"});
     for (const [id, name] of Object.entries(WECHAT_THEMES)) preference.createEl("option", {value: id, text: name});
-    preference.onchange = () => { this.aiTheme = preference.value as typeof this.aiTheme; this.requestVersion++; this.sendArea.empty(); };
-    this.button(tools, "准备 AI 排版请求", () => { void this.prepareRequest(); });
+    preference.onchange = () => { this.aiTheme = preference.value as typeof this.aiTheme; this.requestVersion++; this.sendArea.empty(); this.status.textContent = "AI 风格偏好已更新，请重新准备请求；旧响应不会应用。"; this.updatePreview(); };
+    this.requestButton = this.button(tools, "准备 AI 排版请求", () => { void this.prepareRequest(); });
     this.sendArea = options.createDiv({cls: "epl-request"});
     if (!this.context.document.blocks.length) options.createEl("p", {text: "此文章无法可靠映射语义区块，仍可切换本地主题。AI 与逐块调整暂不可用。"});
     this.controls = options.createDiv({cls: "epl-controls"});
@@ -87,6 +93,7 @@ export class WechatLayoutModal extends Modal {
   private change(plan: WechatLayoutPlan) {
     this.undo.push(structuredClone(this.selected)); this.undo = this.undo.slice(-20);
     this.selected = validateWechatLayout(plan, this.context.document); this.original = false;
+    this.status.textContent = this.pending ? "手工调整已保留，旧 AI 响应将被丢弃；可直接应用当前方案。" : "方案已调整，尚未保存到本地稿。";
     this.requestVersion++; this.sendArea.empty(); this.redraw();
   }
   private redraw() {
@@ -97,6 +104,7 @@ export class WechatLayoutModal extends Modal {
     const focus = this.controls.contains(document.activeElement) ? document.activeElement?.getAttribute("aria-label") : null;
     const theme = root.querySelector<HTMLSelectElement>('select[aria-label="排版风格"]'); if (theme) theme.value = this.selected.theme;
     const color = root.querySelector<HTMLSelectElement>('select[aria-label="强调色"]'); if (color) color.value = this.selected.accentColor;
+    this.renderThemeGallery();
     this.controls.empty();
     const saved = this.controls.createEl("label", {text: "候选与历史", cls: "epl-field"}).createEl("select", {attr: {"aria-label": "候选与历史"}});
     saved.createEl("option", {value: "", text: "选择已有方案"});
@@ -121,6 +129,29 @@ export class WechatLayoutModal extends Modal {
     if (focus) Array.from(this.controls.querySelectorAll<HTMLElement>("[aria-label]")).find(el => el.getAttribute("aria-label") === focus)?.focus();
     this.updatePreview();
   }
+  private renderThemeGallery() {
+    const focus = this.gallery.contains(document.activeElement) ? (document.activeElement as HTMLElement)?.dataset.theme : undefined;
+    this.gallery.empty();
+    for (const [id, name] of Object.entries(WECHAT_THEMES) as Array<[WechatThemeId, string]>) {
+      const design = WECHAT_THEME_DESIGNS[id], palette = themePalette(id, "preset");
+      const button = this.button(this.gallery, "", () => this.change({...this.selected, theme: id, accentColor: "preset"}));
+      button.className = "epl-theme-card"; button.dataset.theme = id;
+      button.setAttribute("aria-label", `使用${name}风格`);
+      button.setAttribute("aria-pressed", String(this.selected.theme === id));
+      const sample = button.createEl("span", {cls: "epl-theme-sample", attr: {"aria-hidden": "true"}});
+      sample.style.background = palette.canvas; sample.style.color = palette.text; sample.style.fontFamily = palette.font;
+      const heading = sample.createEl("span", {text: "让文字有温度", cls: "epl-theme-sample-title"});
+      heading.style.color = palette.accent;
+      if (design.motif === "band") { heading.style.background = palette.accent; heading.style.color = "#fff"; heading.style.padding = "3px 4px"; }
+      if (design.motif === "line") { heading.style.borderBottom = `1px solid ${palette.accent}`; heading.style.paddingBottom = "4px"; }
+      if (design.motif === "bar") { heading.style.borderLeft = `2px solid ${palette.accent}`; heading.style.paddingLeft = "5px"; }
+      if (design.motif === "center") { heading.style.textAlign = "center"; heading.style.borderBottom = `1px solid ${palette.line}`; heading.style.paddingBottom = "4px"; }
+      for (const width of ["96%", "72%"]) { const line = sample.createEl("span", {cls: "epl-theme-sample-line"}); line.style.width = width; line.style.background = palette.line; }
+      button.createEl("span", {text: name, cls: "epl-theme-name"});
+      button.createEl("span", {text: design.description, cls: "epl-theme-description"});
+      if (focus === id) button.focus();
+    }
+  }
   private setBlock(id: string, component: WechatLayoutComponent, locked: boolean) {
     const roles = {plain: "body", intro: "lead", "highlight-card": "key-point", quote: "quotation", conclusion: "summary"} as const;
     this.change({...this.selected, blocks: [...this.selected.blocks.filter(b => b.id !== id), {id, role: roles[component], component, ...(locked ? {locked: true} : {})}]});
@@ -129,11 +160,13 @@ export class WechatLayoutModal extends Modal {
     try {
       const plan = this.original ? themePlan(this.context.document, "default") : this.selected;
       this.preview.innerHTML = previewWechatHtml(layoutPreview(this.context.html, this.context.document, plan), this.context.images);
-      this.applyButton.disabled = this.pending;
+      this.applyButton.disabled = this.pending && this.pendingVersion === this.requestVersion;
+      this.requestButton.disabled = this.pending;
       this.preview.setAttribute("aria-label", this.original ? "默认模板预览" : "排版方案预览");
     } catch (error) { this.status.textContent = (error as Error).message; this.applyButton.disabled = true; }
   }
   private async prepareRequest() {
+    if (this.pending) return;
     try {
       await this.context.assertFresh();
       const config = this.plugin.getWechatAiConfiguration();
@@ -151,7 +184,7 @@ export class WechatLayoutModal extends Modal {
   }
   private async generate(messages: ReturnType<typeof plannerMessages>, config: ReturnType<EasyPub["getWechatAiConfiguration"]>, version: number) {
     if (this.pending || this.closed || version !== this.requestVersion) return;
-    this.pending = true; this.updatePreview();
+    this.pending = true; this.pendingVersion = version; this.updatePreview();
     this.status.textContent = "AI 正在规划，可继续查看；修改方案或关闭窗口会丢弃旧响应。";
     try {
       await this.context.assertFresh();
@@ -166,10 +199,10 @@ export class WechatLayoutModal extends Modal {
       if (this.closed || version !== this.requestVersion) return;
       this.change(themePlan(this.context.document, "default"));
       this.status.textContent = `${(error as Error).message}。预览已回退默认模板；本地已保存的排版未变化。`;
-    } finally { this.pending = false; if (!this.closed) this.updatePreview(); }
+    } finally { this.pending = false; this.pendingVersion = undefined; if (!this.closed) this.updatePreview(); }
   }
   private async apply() {
-    if (this.pending || this.closed || this.applyButton.disabled) return;
+    if (this.pending && this.pendingVersion === this.requestVersion || this.closed || this.applyButton.disabled) return;
     this.applyButton.disabled = true;
     try { await this.context.assertFresh(); await this.context.apply(validateWechatLayout(this.selected, this.context.document)); this.close(); }
     catch (error) { this.status.textContent = (error as Error).message; this.applyButton.disabled = false; }

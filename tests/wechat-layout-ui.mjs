@@ -17,6 +17,13 @@ export async function runLayoutUi(page) {
   await button('应用排版到本地稿').scrollIntoViewIfNeeded();
   assert.equal(await button('应用排版到本地稿').isVisible(), true);
   await page.setViewportSize(viewport);
+  assert.equal(await page.locator('.epl-theme-card').count(), 12);
+  for (const [label, id] of [['杂志编排', 'editorial'], ['深夜电台', 'noir'], ['朱砂书卷', 'cinnabar']]) {
+    await button(`使用${label}风格`).click();
+    assert.equal(await theme().inputValue(), id);
+    assert.equal(await page.getByRole('combobox', {name: '强调色', exact: true}).inputValue(), 'preset');
+    assert.equal(await page.evaluate(() => window.fixture.read()), localBefore);
+  }
   await theme().selectOption('essay');
   assert.equal(await page.evaluate(() => window.fixture.read()), localBefore);
   assert.equal(await page.evaluate(() => window.fixtureAiRequests.length), 0);
@@ -62,6 +69,8 @@ export async function runLayoutUi(page) {
   await open(); await button('准备 AI 排版请求').click(); await button('确认发送这些片段并生成方案').click();
   await page.waitForFunction(() => window.fixtureAiRequests.length === 2);
   await theme().selectOption('minimal');
+  assert.equal(await button('应用排版到本地稿').isDisabled(), false, 'Manual edits can be applied while an obsolete request is still completing');
+  assert.match(await status().innerText(), /旧 AI 响应将被丢弃/);
   await page.evaluate(() => {
     const data = JSON.parse(JSON.parse(window.fixtureAiRequests[1].body).messages[1].content);
     window.fixtureAiResolve({schemaVersion: 1, documentHash: data.documentHash, theme: 'event', accentColor: 'rose', blocks: []});
@@ -84,12 +93,15 @@ export async function runLayoutUi(page) {
   await page.evaluate(() => window.fixture.clearAiCache());
   await open(); await button('准备 AI 排版请求').click(); await button('确认发送这些片段并生成方案').click();
   await page.waitForFunction(() => window.fixtureAiRequests.length === 4);
-  await page.evaluate(() => window.fixture.modify('排版确认前的新正文'));
+  await page.evaluate(() => window.fixture.setReadDelay(200));
   await page.evaluate(() => {
     const data = JSON.parse(JSON.parse(window.fixtureAiRequests[3].body).messages[1].content);
     window.fixtureAiResolve({schemaVersion: 1, documentHash: data.documentHash, theme: 'event', accentColor: 'blue', blocks: []});
   });
+  await page.waitForFunction(() => window.fixtureDelayedReads > 0);
+  await page.evaluate(() => window.fixture.modify('排版确认前的新正文'));
   await page.waitForFunction(() => document.querySelector('.easy-pub-layout [role=status]').textContent.includes('已变化'));
+  await page.evaluate(() => window.fixture.setReadDelay(0));
   await button('应用排版到本地稿').click();
   assert.match(await status().innerText(), /已变化/);
   assert.equal(await page.evaluate(() => window.fixture.view.article.layout.theme), 'research');

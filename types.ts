@@ -155,8 +155,8 @@ export interface WechatArticleSettings {
   layout?: WechatLayoutPlan;
   layoutHistory?: WechatLayoutPlan[];
 }
-export type WechatThemeId = "default" | "essay" | "research" | "event" | "minimal";
-export type WechatAccent = "teal" | "blue" | "amber" | "rose";
+export type WechatThemeId = "default" | "essay" | "research" | "event" | "minimal" | "editorial" | "paper" | "noir" | "bloom" | "cobalt" | "cinnabar" | "mono";
+export type WechatAccent = "preset" | "teal" | "blue" | "amber" | "rose";
 export type WechatBlockKind = "paragraph" | "heading" | "list" | "quote" | "code" | "image" | "table" | "divider" | "other";
 export type WechatLayoutComponent = "plain" | "intro" | "highlight-card" | "quote" | "conclusion";
 export type WechatLayoutRole = "body" | "lead" | "key-point" | "quotation" | "summary";

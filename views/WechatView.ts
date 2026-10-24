@@ -196,6 +196,7 @@ export class WechatView extends ItemView {
     if (!this.file || this.closed) return;
     // A queued automatic refresh must never replace unsaved inspector edits.
     if (this.dirty && !preserveEdits) return;
+    if (this.timer) { clearTimeout(this.timer); this.timer = undefined; }
     const keepDirty = this.dirty;
     const pendingArticle = keepDirty ? structuredClone(this.article) : undefined;
     const version = ++this.version;
@@ -227,7 +228,8 @@ export class WechatView extends ItemView {
         try { cover = await loadWechatImage(this.app, source, filePath, "cover", this.allowRemoteImages); }
         catch (error) { prepared.issues.push(`封面：${(error as Error).message}`); }
       }
-      if (version !== this.version || this.closed || file.path !== filePath || await this.app.vault.read(file) !== snapshot) {
+      const latest = await this.app.vault.read(file);
+      if (version !== this.version || this.closed || this.file !== file || file.path !== filePath || latest !== snapshot || imagePolicyRevision !== this.imagePolicyRevision) {
         this.rerenderRequested = !this.closed && imagePolicyRevision === this.imagePolicyRevision;
         releaseWechatImages(prepared.images); if (cover) releaseWechatImages([cover]); return;
       }
@@ -399,8 +401,11 @@ export class WechatView extends ItemView {
     if (!doc) throw new Error("排版文档尚未就绪，请刷新预览");
     const file = this.file, snapshot = this.snapshot, version = this.version, policy = this.imagePolicyRevision;
     const assertFresh = async () => {
-      if (this.closed || this.file !== file || file.path !== this.snapshotPath || this.version !== version || this.imagePolicyRevision !== policy
-        || this.stale || this.dirty || await this.app.vault.read(file) !== snapshot) throw new Error("正文、设置或图片已变化，请关闭排版窗口，刷新后重新规划");
+      const current = () => !this.closed && this.file === file && file.path === this.snapshotPath && this.version === version
+        && this.imagePolicyRevision === policy && !this.stale && !this.dirty;
+      if (!current()) throw new Error("正文、设置或图片已变化，请关闭排版窗口，刷新后重新规划");
+      const latest = await this.app.vault.read(file);
+      if (!current() || latest !== snapshot) throw new Error("正文、设置或图片已变化，请关闭排版窗口，刷新后重新规划");
     };
     await assertFresh();
     new WechatLayoutModal(this.plugin, { title: this.article.title ?? file.basename, html: this.prepared.html, images: this.prepared.images,

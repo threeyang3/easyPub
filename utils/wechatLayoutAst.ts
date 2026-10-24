@@ -1,6 +1,6 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { WechatBlockKind, WechatLayoutDocument } from "../types";
-import { wechatHash } from "./wechatState";
+import { wechatHash } from "./wechatHash";
 
 export interface LayoutSourceBlock { id: string; kind: WechatBlockKind; line: number; markdown: string }
 export function extractWechatBlocks(body: string): { hash: string; blocks: LayoutSourceBlock[]; definitions: string } {

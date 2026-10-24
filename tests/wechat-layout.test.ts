@@ -11,7 +11,7 @@ import { plannerMessages, planWechatLayout } from "../utils/wechatAiPlanner";
 import { normalizeAiSettings, requestWechatPlan, validateAiEndpoint } from "../utils/wechatAiProvider";
 import { layoutPreview } from "../modals/WechatLayoutModal";
 import { readWechatArticleSettings } from "../utils/wechatState";
-import { WECHAT_THEMES } from "../utils/wechatThemes";
+import { WECHAT_THEMES, themePalette, themeStyles } from "../utils/wechatThemes";
 import { compareWechatReadback } from "../utils/wechatReadback";
 
 export async function runWechatLayoutTests() {
@@ -112,7 +112,12 @@ export async function runWechatLayoutTests() {
       applyWechatLayout(root, mapped.document, mapped.bindings, {...semantic, theme});
       assert.deepEqual(content(), before, 'Every theme must preserve text, heading, quote, list, link and code content/order');
       assert.equal(root.querySelectorAll('script,style,[onclick],[class]').length, 0);
+      applyWechatLayout(root, mapped.document, mapped.bindings, {...semantic, theme, accentColor: 'preset'});
+      assert.deepEqual(content(), before, 'Curated palettes must preserve article content');
+      assert.ok(themePalette(theme, 'preset').accent.startsWith('#'));
     }
+    assert.equal(Object.keys(WECHAT_THEMES).length, 12);
+    assert.equal(new Set(Object.keys(WECHAT_THEMES).map(theme => JSON.stringify(themeStyles(theme as any, 'preset')))).size, 12, 'All presets must have distinct output styles');
     const baseline = contentFingerprint(root);
     assert.ok(layoutPreview(root.outerHTML, mapped.document, semantic).includes('border'));
     assert.equal(contentFingerprint(root), baseline, 'Candidate preview cannot modify live DOM');
@@ -134,6 +139,8 @@ export async function runWechatLayoutTests() {
     assert.ok(!payload.includes('const x'));
     assert.ok(!payload.includes('https://example.com'));
     assert.ok(payload.includes('code preserved'));
+    const redacted = plannerMessages('参考 https://private.example/token', {...mapped.document, blocks: [{...mapped.document.blocks[1], text: '访问 https://private.example/token?key=hidden 查看信息。'}]}, 'auto')[1].content;
+    assert.ok(!redacted.includes('private.example') && redacted.includes('[link]'));
     const config = normalizeAiSettings({endpoint: 'https://api.example/v1/chat/completions', model: 'configured-model'});
     const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).buffer as ArrayBuffer;
     const transport = async (request: any) => {

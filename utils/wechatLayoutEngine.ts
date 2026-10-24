@@ -67,8 +67,18 @@ export function applyWechatLayout(root: HTMLElement, doc: WechatLayoutDocument, 
   for (const instruction of plan.blocks) {
     const binding = bindings.find(b => b.id === instruction.id);
     if (!binding) throw new Error("区块与正文映射失效，已停止排版");
-    const style = componentStyle(instruction.component, plan.accentColor);
-    if (style) binding.element.setAttribute("style", style);
+    const style = componentStyle(instruction.component, plan.accentColor, plan.theme);
+    const child = binding.element.firstElementChild as HTMLElement | null;
+    // Existing quotes already have a semantic wrapper; avoid a double border.
+    const target = instruction.component === "quote" && child?.tagName === "BLOCKQUOTE" ? child : binding.element;
+    if (style) {
+      target.setAttribute("style", style);
+      const last = target.lastElementChild as HTMLElement | null;
+      if (last && ["P", "UL", "OL"].includes(last.tagName)) last.style.marginBottom = "0";
+      if (instruction.component === "intro") for (const paragraph of Array.from(target.children).filter(el => el.tagName === "P") as HTMLElement[]) {
+        paragraph.style.fontSize = target.style.fontSize || "18px"; paragraph.style.lineHeight = target.style.lineHeight || "1.9";
+      }
+    }
   }
   if (contentFingerprint(root) !== before) throw new Error("排版内容完整性校验失败");
   return {notice};

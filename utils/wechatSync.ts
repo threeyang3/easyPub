@@ -1,6 +1,7 @@
 import { WechatArticle, WechatArticleSettings, WechatAssetCache, WechatImage, WechatSettings } from "../types";
 import { isMissingWechatMedia, WechatApi, WechatUncertainError } from "./wechatApi";
 import { centeredCrop, cropCoordinates, remoteFingerprint, wechatAssetKey, wechatStateKey } from "./wechatState";
+import { assertWechatHtmlLimit, WECHAT_ARTICLE_FIELDS, wechatFieldLength } from "./wechatLimits";
 import { escapeHtml } from "./wechatMarkdown";
 
 export type WechatConflictAction = "cancel" | "overwrite" | "new";
@@ -13,10 +14,11 @@ export interface WechatSyncInput {
 
 export function validateWechatArticle(article: WechatArticleSettings): void {
   if (!article.title?.trim()) throw new Error("请填写文章标题");
-  for (const [label, value, limit] of [["标题", article.title, 32], ["作者", article.author, 16], ["摘要", article.digest, 120]] as const) {
-    if (Array.from(value ?? "").length > limit) throw new Error(`${label}超过微信文档规定的 ${limit} 字，请缩短`);
+  for (const [key, label, limit] of WECHAT_ARTICLE_FIELDS) {
+    if (key === "sourceUrl") continue;
+    if (wechatFieldLength(key, article[key] ?? "") > limit) throw new Error(`${label}超过微信文档规定的 ${limit} 字，请缩短`);
   }
-  if (article.sourceUrl && (!/^https?:\/\//i.test(article.sourceUrl) || Buffer.byteLength(article.sourceUrl) > 1024)) throw new Error("阅读原文链接需为不超过 1 KB 的 HTTP(S) 地址");
+  if (article.sourceUrl && (!/^https?:\/\//i.test(article.sourceUrl) || wechatFieldLength("sourceUrl", article.sourceUrl) > 1024)) throw new Error("阅读原文链接需为不超过 1 KB 的 HTTP(S) 地址");
 }
 
 export class WechatSync {
@@ -89,7 +91,7 @@ export class WechatSync {
       content, content_source_url: input.article.sourceUrl ?? "", thumb_media_id: cover.mediaId!,
       cover_info: coverInfo,
     };
-    if (Array.from(content).length >= 20000 || Buffer.byteLength(content) >= 1024 * 1024) throw new Error("排版后的正文超过微信限制（2 万字符或 1 MB），请精简后重试");
+    assertWechatHtmlLimit(content);
     await fresh();
     // Recheck immediately before writing, after potentially slow image uploads.
     if (mediaId && remoteFingerprint(await this.api.getDraft(mediaId)) !== baseline) throw new Error("微信后台草稿在同步期间发生变化，请重新同步查看差异");

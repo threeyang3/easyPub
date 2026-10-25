@@ -1,75 +1,46 @@
 # EasyPub
 
-EasyPub 是一个桌面端 Obsidian 插件，用于从当前笔记生成 Hexo、知乎、微信公众号和小红书发布稿。
+EasyPub 是桌面端 Obsidian 插件，将源笔记转换为各平台发布稿，并提供 Hexo 博客预览与公众号草稿工作台。
 
-- 当前版本：`1.7.1`
-- 最低 Obsidian 版本：`1.4.4`
-- 支持平台：Hexo、知乎、微信公众号、小红书
+**[项目概览与架构图](docs/overview.md) · [完整文档](docs/README.md) · [快速开始](docs/getting-started.md)**
 
-EasyPub 负责生成和维护发布稿；微信公众号还提供独立的配图、封面预览与草稿箱同步，最终在微信后台发布。
+本次版本为 **1.7.2**，声明最低 Obsidian **1.4.4**。实际安装与验证范围见[版本状态](docs/status.md)。
 
-## 核心能力
+## 能力与边界
 
-- 通过 `pub_id` 关联源文章和各平台发布稿。
-- 更新前展示差异，避免误覆盖。
-- 命令“检查发布目录（只读）”按平台定位损坏元数据、重复或缺失 ID，不修改历史稿件。
-- 同名但无关的目标文件自动使用编号文件名。
-- 同步源文章字段，同时保留发布稿专属字段和首次发布日期。
-- Hexo 自动处理本地图片并计算 `publish_url`。
-- Hexo 设置中可检查备份的 Git 状态，并分页查看历史备份原文及来源记录；不自动恢复或删除。
-- 可选使用 PicGo 将本地图片转换为网络链接。
-- 可选打开兼容 Hexo 仓库的 Blog Control Room。
-- 公众号本地成稿独立编辑，支持常驻预览、图片适配、双比例封面裁剪和微信草稿箱同步。
-- [公众号智能排版](docs/wechat-layout.md)提供十二套风格、AI 语义规划、逐块调整、锁定与历史，保持原文。
+| 平台 | 发布稿位置 | EasyPub 提供的后续操作 |
+| --- | --- | --- |
+| Hexo | 外部博客仓库的 `source/_posts`；更新时保留已有草稿位置 | 图片处理、本地构建、部署；兼容 Control Room 时进入受保护管理流程并支持文章预览 |
+| 微信公众号 | Vault 内，默认 `发布/微信公众号` | 独立成稿、十二套风格、可选 AI 排版、图片和双比例封面、草稿箱创建与更新 |
+| 知乎 | Vault 内，默认 `发布/知乎/文章` 或 `想法` | 生成和更新本地发布稿 |
+| 小红书 | Vault 内，默认 `发布/小红书` | 生成和更新本地发布稿 |
+
+源文章和发布稿是独立文件，通过 `pub_id` 关联。更新前检查差异与目标身份；平台专用字段保留。公众号已有本地稿默认只打开，正文替换需要显式操作。插件不自动将后台编辑同步回源文章，也不自动挂载外部博客文件夹。
+
+AI 仅规划排版，不改写正文。公众号同步写入草稿箱，正式发布在微信后台完成。知乎和小红书没有自动发帖接口。详见[项目概览](docs/overview.md)。
 
 ## 安装
 
-从 [GitHub Releases](https://github.com/threeyang3/easyPub/releases) 下载同一版本的：
+从 [GitHub Releases](https://github.com/threeyang3/easyPub/releases) 下载**同一版本**的 `main.js`、`manifest.json`、`styles.css`，放入 Vault 的 `.obsidian/plugins/easy-pub/`，重启 Obsidian 并启用插件。
 
-```text
-main.js
-manifest.json
-styles.css
-```
-
-把三个文件复制到 Vault 的 `.obsidian/plugins/easy-pub/`，然后重启 Obsidian，并在“设置 → 第三方插件”中启用 EasyPub。
-
-> 三个文件必须来自同一次 Release 或构建，不能只替换其中一个。
+升级前备份配置，三个安装文件一起替换；不要用其他 Vault 的 `data.json` 覆盖现有账号与草稿关联。具体步骤见[安装与升级](docs/getting-started.md)。
 
 ## 快速开始
 
-1. 在“设置 → EasyPub”中填写所需路径：
-   - 发布到 Hexo：填写 Hexo 仓库的绝对路径。
-   - 发布到其他平台：确认发布根目录，默认是 `发布`。
-2. 打开要发布的笔记，点击功能区云图标，或执行 `Publish to platform`。
-3. 选择平台；更新已有发布稿时，查看差异后确认。公众号已有本地稿时只打开它，避免覆盖已编辑正文。
+1. 在“设置 → EasyPub”确认发布根目录；使用 Hexo 时填写博客仓库绝对路径。
+2. 打开一篇测试笔记，点击云图标或执行 `Publish to platform`，选择平台。
+3. 更新已有稿件时核对差异。生成后打开发布稿继续编辑；公众号按向导配置账号后进入预览工作台。
+4. Hexo 先检查和本地构建，再决定部署；公众号先检查预览，再同步草稿箱。自动部署默认关闭。
 
-生成完成后，EasyPub 会打开发布稿。详细的目标路径、Front Matter 和更新规则见 [发布机制与平台行为](docs/publishing.md)。
+全部十个命令及界面入口见[命令参考](docs/reference/commands.md)。
 
-## 命令
+## 阅读路径
 
-| 命令 | 说明 |
-|------|------|
-| `Publish to platform` | 选择平台并生成或更新发布稿 |
-| `Build Hexo locally (no deploy)` | 本地生成 Hexo 站点，不部署 |
-| `Deploy to Hexo` | 部署普通 Hexo 仓库；兼容 Control Room 时打开受保护流程 |
-| `Open Hexo management console` | 打开兼容 Hexo 仓库的本地管理后台 |
-| `预览并同步公众号草稿` | 固定绑定当前公众号本地稿，检查图片、封面并同步微信草稿箱 |
-| `引导配置微信公众号` | 分步准备账号、保存凭据并运行只读连接检查 |
-| `从源文章更新公众号本地稿（确认后替换正文）` | 明确选择从源文章替换本地稿，先查看差异 |
-
-“自动部署”默认关闭，避免普通发布意外触发外部部署。
-
-## 文档
-
-建议按以下顺序阅读：
-
-1. [发布机制与平台行为](docs/publishing.md)
-2. [PicGo 图片上传](docs/picgo.md)（可选）
-3. [Blog Control Room 接入](docs/control-room.md)（可选）
-4. [微信公众号工作台](docs/wechat.md)
-
-完整文档索引见 [docs/README.md](docs/README.md)。
+- 理解文件关系：[概览](docs/overview.md) → [发布机制](docs/publishing.md) → [数据模型](docs/reference/data-model.md)。
+- 使用公众号：[工作台](docs/wechat.md) → [风格与 AI 排版](docs/wechat-layout.md)。
+- 使用博客：[Control Room](docs/control-room.md) → [macOS 配置](docs/macos.md)；图床可选用 [PicGo](docs/picgo.md)。
+- 处理问题：[排障](docs/operations/troubleshooting.md) → [备份与恢复](docs/operations/backup-and-recovery.md)。
+- 了解数据去向：[配置参考](docs/reference/configuration.md) → [安全与隐私](docs/security.md)。
 
 ## 开发
 
@@ -81,23 +52,10 @@ npm test
 npm run build
 ```
 
-`npm run build` 会执行 TypeScript 检查、生成 `main.js`，并把 `main.js`、`manifest.json`、`styles.css` 同步到 `release/`。构建不会自动安装到 Vault。
+构建执行类型检查、生成插件并同步 `release/`，不会安装到 Vault。CI 基线为 Node 20。
 
-常用命令：
-
-```bash
-npm test       # 核心行为测试
-npm run check  # TypeScript 类型检查
-npm run build  # 生产构建并更新 release/
-npm run dev    # 监听源码变化
-```
-
-实现约束和代码结构见 [CLAUDE.md](CLAUDE.md) 与 [AGENTS.md](AGENTS.md)。
+从[开发环境](docs/development/setup.md)开始，再阅读[模块架构与流程图](docs/development/architecture.md)、[测试指南](docs/development/testing.md)、[贡献约定](docs/development/contributing.md)及[发布流程](docs/development/releasing.md)。仓库约束见 [AGENTS.md](AGENTS.md) 与 [CLAUDE.md](CLAUDE.md)。
 
 ## 许可证
 
 [MIT](LICENSE)
-
-### Hexo 真实预览与封面
-
-执行“预览 Hexo 发布效果”可在 Obsidian 内查看已保存稿件的真实主题页面、首页封面和手机宽度。生成 Hexo 稿件时会处理 `cover` / `top_img` 附件并补齐缺失属性；详见[发布稿适配与预览](docs/publishing.md#8-hexo-发布稿适配与真实预览)。

@@ -9,12 +9,21 @@ import { bindWechatBlocks, contentFingerprint, extractWechatBlocks } from "../ut
 import { applyWechatLayout, mergeLockedLayout, readWechatLayoutPlan, themePlan, validateWechatLayout } from "../utils/wechatLayoutEngine";
 import { plannerMessages, planWechatLayout } from "../utils/wechatAiPlanner";
 import { normalizeAiSettings, requestWechatPlan, validateAiEndpoint } from "../utils/wechatAiProvider";
-import { layoutPreview } from "../modals/WechatLayoutModal";
+import { layoutPreview } from "../utils/wechatLayoutPreview";
 import { readWechatArticleSettings } from "../utils/wechatState";
 import { WECHAT_THEMES, themePalette, themeStyles } from "../utils/wechatThemes";
 import { compareWechatReadback } from "../utils/wechatReadback";
 
+import { exceedsWechatHtmlLimit, wechatFieldLength } from "../utils/wechatLimits";
+
 export async function runWechatLayoutTests() {
+  assert.equal(exceedsWechatHtmlLimit("文".repeat(19999)), false);
+  assert.equal(exceedsWechatHtmlLimit("文".repeat(20000)), true);
+  assert.equal(exceedsWechatHtmlLimit("😀".repeat(19999)), false);
+  assert.equal(exceedsWechatHtmlLimit("😀".repeat(20000)), true);
+  assert.equal(wechatFieldLength("title", "😀文"), 2);
+  assert.equal(wechatFieldLength("sourceUrl", "😀文"), 7);
+
   const plugin = Object.create(EasyPub.prototype) as EasyPub;
   plugin.loadData = async () => { throw new Error("private corrupt content"); };
   const warn = console.warn; console.warn = () => {};

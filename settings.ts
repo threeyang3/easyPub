@@ -5,6 +5,23 @@ import { backupGitMessage, inspectPublishBackups } from "./utils/publishBackups"
 
 export class EasyPubSettingTab extends PluginSettingTab {
   plugin: EasyPub;
+  private saveSequence = 0;
+  private saveStatus?: HTMLElement;
+
+  private async saveOrdinarySettings(): Promise<void> {
+    const sequence = ++this.saveSequence;
+    const status = this.saveStatus;
+    if (status) status.textContent = "正在保存设置…";
+    try {
+      await this.plugin.saveSettings();
+      if (sequence === this.saveSequence && status === this.saveStatus && status) status.textContent = "设置已保存";
+    } catch {
+      if (sequence === this.saveSequence && status === this.saveStatus && status) {
+        status.textContent = "保存失败：修改仅在本次会话生效。请检查插件配置文件的写入权限后重试。";
+      }
+      new Notice("EasyPub 设置保存失败，修改尚未保存到磁盘。请检查写入权限后重试。", 8000);
+    }
+  }
 
   constructor(app: App, plugin: EasyPub) {
     super(app, plugin);
@@ -15,6 +32,7 @@ export class EasyPubSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass("easy-pub-settings");
+    this.saveStatus = undefined;
 
     if (this.plugin.settingsRecoveryRequired) {
       containerEl.createEl("h2", { text: "原配置读取失败，保存已锁定" });
@@ -32,6 +50,7 @@ export class EasyPubSettingTab extends PluginSettingTab {
 
     new Setting(containerEl).setName("EasyPub").setHeading();
     containerEl.createEl("p", { text: "按需要配置使用的平台。公众号账号通过向导保存；其余设置修改后自动保存。", cls: "ep-settings-intro" });
+    this.saveStatus = containerEl.createDiv({cls: "ep-settings-save-status", attr: {role: "status", "aria-live": "polite"}});
     new Setting(containerEl).setName("Hexo").setHeading();
     new Setting(containerEl)
       .setName("Hexo 仓库路径")
@@ -42,7 +61,7 @@ export class EasyPubSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.hexoRepoPath)
           .onChange(async (value) => {
             this.plugin.settings.hexoRepoPath = value;
-            await this.plugin.saveSettings();
+            await this.saveOrdinarySettings();
           })
       );
 
@@ -86,7 +105,7 @@ export class EasyPubSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.publishBasePath)
           .onChange(async (value) => {
             this.plugin.settings.publishBasePath = value;
-            await this.plugin.saveSettings();
+            await this.saveOrdinarySettings();
           })
       );
 
@@ -100,7 +119,7 @@ export class EasyPubSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("默认作者").setDesc("仅用于尚未设置作者的公众号本地稿")
       .addText(text => text.setValue(this.plugin.settings.wechat.defaultAuthor).onChange(async value => {
         this.plugin.settings.wechat.defaultAuthor = value;
-        await this.plugin.saveSettings();
+        await this.saveOrdinarySettings();
       }));
     new Setting(containerEl).setName("公众号网络图片")
       .setDesc("不可信稿件建议选用仅 Vault 附件；禁止正文和封面下载 HTTP(S) 图片。切换后请刷新预览，已发出的下载可能仍在完成。不会影响 PicGo 或其他平台。")
@@ -130,8 +149,10 @@ export class EasyPubSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.imageHandling)
           .onChange(async (value) => {
             this.plugin.settings.imageHandling = value === "picgo" ? "picgo" : "local";
-            await this.plugin.initializePicGoCredentials();
-            await this.plugin.saveSettings();
+            try {
+              await this.plugin.initializePicGoCredentials();
+              await this.saveOrdinarySettings();
+            } catch { new Notice("图片服务初始化失败，请检查配置后重试。", 8000); }
             this.display();
           })
       );
@@ -146,7 +167,7 @@ export class EasyPubSettingTab extends PluginSettingTab {
             .setValue(this.plugin.settings.picgoServerUrl)
             .onChange(async (value) => {
               this.plugin.settings.picgoServerUrl = value.trim();
-              await this.plugin.saveSettings();
+              await this.saveOrdinarySettings();
             })
         );
 
@@ -198,7 +219,7 @@ export class EasyPubSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.autoDeploy)
           .onChange(async (value) => {
             this.plugin.settings.autoDeploy = value;
-            await this.plugin.saveSettings();
+            await this.saveOrdinarySettings();
           })
       );
   }

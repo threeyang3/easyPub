@@ -3,6 +3,7 @@ import { componentStyle, themeStyles, WECHAT_ACCENTS, WECHAT_THEMES } from "./we
 import { contentFingerprint, WechatBlockBinding } from "./wechatLayoutAst";
 
 export const LAYOUT_ROLES = ["body", "lead", "key-point", "quotation", "summary"] as const;
+export const LAYOUT_COMPONENT_ROLES = {plain: "body", intro: "lead", "highlight-card": "key-point", quote: "quotation", conclusion: "summary"} as const;
 export const LAYOUT_COMPONENTS = ["plain", "intro", "highlight-card", "quote", "conclusion"] as const;
 const obj = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("排版方案格式无效");
@@ -30,12 +31,12 @@ export function readWechatLayoutPlan(input: unknown): WechatLayoutPlan {
 export function validateWechatLayout(input: unknown, doc: WechatLayoutDocument): WechatLayoutPlan {
   const plan = readWechatLayoutPlan(input);
   if (plan.documentHash !== doc.hash) throw new Error("文章正文已变化，原排版方案已过期");
+  const sourceBlocks = new Map(doc.blocks.map(block => [block.id, block]));
   for (const block of plan.blocks) {
-    const source = doc.blocks.find(item => item.id === block.id);
+    const source = sourceBlocks.get(block.id);
     if (!source) throw new Error("排版方案引用了不存在的区块");
     if (!["paragraph", "list", "quote"].includes(source.kind) && block.component !== "plain") throw new Error("代码、标题、表格、图片等区块只允许保留原结构");
-    const roles = {plain: "body", intro: "lead", "highlight-card": "key-point", quote: "quotation", conclusion: "summary"};
-    if (roles[block.component] !== block.role) throw new Error("区块角色与组件不一致");
+    if (LAYOUT_COMPONENT_ROLES[block.component] !== block.role) throw new Error("区块角色与组件不一致");
   }
   return plan;
 }
@@ -46,7 +47,8 @@ export function mergeLockedLayout(proposed: WechatLayoutPlan, current: WechatLay
   const plan = validateWechatLayout(proposed, doc);
   if (!current || current.documentHash !== doc.hash) return plan;
   const locks = validateWechatLayout(current, doc).blocks.filter(b => b.locked);
-  return validateWechatLayout({...plan, blocks: [...plan.blocks.filter(b => !locks.some(lock => lock.id === b.id)), ...locks]}, doc);
+  const lockedIds = new Set(locks.map(block => block.id));
+  return validateWechatLayout({...plan, blocks: [...plan.blocks.filter(b => !lockedIds.has(b.id)), ...locks]}, doc);
 }
 export function applyWechatLayout(root: HTMLElement, doc: WechatLayoutDocument, bindings: WechatBlockBinding[], input?: unknown): {notice?: string} {
   let plan = themePlan(doc, "default"), notice: string | undefined;

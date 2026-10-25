@@ -1,5 +1,7 @@
 # Mac 实机验收 — 2026-10-24
 
+> 历史记录：以下结论与待办对应各节记录时的版本和环境，后续进展见[版本与验证状态](status.md)。
+
 基线 EasyPub `62d5fc7`，hexo-blog-source `e9151b1`。环境：Apple Silicon macOS，Sandbox，Electron 43.7.7 / 宿主 Node 24.21.0，外部 Node 22.23.1。
 
 ## 修复

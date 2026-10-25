@@ -1,3 +1,4 @@
+import { WechatLayoutModal } from "../../modals/WechatLayoutModal";
 import { TFile } from "obsidian";
 import { WechatView } from "../../views/WechatView";
 import { normalizeSettings } from "../../utils/settings";
@@ -66,6 +67,19 @@ const plugin: any = { app, settings: normalizeSettings(null), wechatSyncInProgre
 const view = new WechatView({ app, contentEl: document.querySelector("#workbench") } as any, plugin);
 await view.onOpen(); await view.bind(file);
 globals.fixture = { view,
+  layoutHarness: () => {
+    globals.layoutReads = [];
+    globals.layoutSaves = [];
+    const prepared = (view as any).prepared;
+    const modal = new WechatLayoutModal(plugin, {
+      title: "lifecycle", html: prepared.html, images: prepared.images, document: prepared.layoutDocument,
+      history: [],
+      assertFresh: () => new Promise<void>(resolve => globals.layoutReads.push(resolve)),
+      apply: async plan => { globals.layoutSaves.push(plan); },
+    });
+    globals.layoutModal = modal;
+    modal.open();
+  },
   setReadDelay: (value: number) => { readDelay = value; globals.fixtureDelayedReads = 0; },
   clearAiCache: () => clearWechatLayoutCache(),
   ai: () => {

@@ -12,6 +12,7 @@ import { wechatChoice } from "../modals/WechatChoiceModal";
 import { WechatComparison, wechatReadableHtml } from "../utils/wechatComparison";
 import { WechatLayoutModal } from "../modals/WechatLayoutModal";
 import { readWechatLayoutPlan, themePlan } from "../utils/wechatLayoutEngine";
+import { WECHAT_ARTICLE_FIELDS, wechatFieldLength } from "../utils/wechatLimits";
 import { compareWechatReadback } from "../utils/wechatReadback";
 
 export const WECHAT_VIEW = "easy-pub-wechat";
@@ -42,6 +43,8 @@ export class WechatView extends ItemView {
   private stale = true;
   private dirty = false;
   private busy = false;
+  private layoutOpening = false;
+  private layoutModal?: WechatLayoutModal;
   private rerenderRequested = false;
   private manualRefreshRequested = false;
   private timer?: ReturnType<typeof setTimeout>;
@@ -254,13 +257,13 @@ export class WechatView extends ItemView {
     const parent = this.inspector; parent.empty();
     const fields = parent.createEl("details", { cls: "epw-section" }); fields.open = true;
     fields.createEl("summary", { text: "文章信息" });
-    for (const [key, label, limit] of [["title", "标题", 32], ["author", "作者", 16], ["digest", "摘要", 120], ["sourceUrl", "阅读原文链接", 1024]] as const) {
+    for (const [key, label, limit] of WECHAT_ARTICLE_FIELDS) {
       const wrapper = fields.createEl("label", { cls: "epw-field", text: label });
       const input = key === "digest" ? wrapper.createEl("textarea") : wrapper.createEl("input", { type: "text" });
       input.value = this.article[key] ?? "";
       const count = wrapper.createEl("small", { cls: "epw-field-count" });
       const updateCount = () => {
-        const length = key === "sourceUrl" ? new TextEncoder().encode(input.value).length : Array.from(input.value).length;
+        const length = wechatFieldLength(key, input.value);
         count.textContent = `${length} / ${limit} ${key === "sourceUrl" ? "字节" : "字"}${length > limit ? " · 超出限制，请缩短" : ""}`;
         input.setAttribute("aria-invalid", String(length > limit));
         count.classList.toggle("epw-error", length > limit);
@@ -386,46 +389,69 @@ export class WechatView extends ItemView {
       crop.y = Math.max(0, Math.min(1 - crop.height, crop.y + (event.key === "ArrowDown" ? delta : event.key === "ArrowUp" ? -delta : 0))); commit();
     });
   }
-  private async saveArticle() {
-    if (!this.file) return;
-    if (this.file.path !== this.snapshotPath || await this.app.vault.read(this.file) !== this.snapshot) throw new Error("本地稿已变化，请先刷新后重新设置");
-    await this.app.fileManager.processFrontMatter(this.file, data => {
+  private async saveArticle(article?: WechatArticleSettings, assertActive: () => void = () => {}) {
+    const file = this.file, snapshot = this.snapshot, snapshotPath = this.snapshotPath;
+    if (!file) return;
+    const selected = article ? structuredClone(article) : undefined;
+    const latest = await this.app.vault.read(file);
+    assertActive();
+    if (this.closed || this.file !== file || file.path !== snapshotPath || latest !== snapshot) throw new Error("本地稿已变化，请先刷新后重新设置");
+    await this.app.fileManager.processFrontMatter(file, data => {
+      // The host may read asynchronously before invoking this callback. This is
+      // the last cancellable boundary; after it returns the write may complete.
+      assertActive();
       const previous = data.wechat && typeof data.wechat === "object" && !Array.isArray(data.wechat) ? data.wechat : {};
-      data.wechat = { ...previous, ...this.article };
+      data.wechat = { ...previous, ...(selected ?? this.article) };
     });
     this.dirty = false; await this.refresh();
   }
   private async openLayout() {
-    // An old oversized layout must remain repairable here. Other preflight
-    // failures still block entry, and both Apply and Sync enforce the limit.
-    if (!this.file || !this.prepared || this.busy || this.stale || this.dirty || this.prepared.issues.some(issue => issue !== WECHAT_HTML_LIMIT_ISSUE)) throw new Error("请先修复问题、保存设置并刷新预览，再调整排版");
-    const doc = this.prepared.layoutDocument;
-    if (!doc) throw new Error("排版文档尚未就绪，请刷新预览");
-    const file = this.file, snapshot = this.snapshot, version = this.version, policy = this.imagePolicyRevision;
-    const assertFresh = async () => {
-      const current = () => !this.closed && this.file === file && file.path === this.snapshotPath && this.version === version
-        && this.imagePolicyRevision === policy && !this.stale && !this.dirty;
-      if (!current()) throw new Error("正文、设置或图片已变化，请关闭排版窗口，刷新后重新规划");
-      const latest = await this.app.vault.read(file);
-      if (!current() || latest !== snapshot) throw new Error("正文、设置或图片已变化，请关闭排版窗口，刷新后重新规划");
-    };
-    await assertFresh();
-    new WechatLayoutModal(this.plugin, { title: this.article.title ?? file.basename, html: this.prepared.html, images: this.prepared.images,
-      document: doc, current: this.article.layout, history: this.article.layoutHistory ?? [], assertFresh,
-      apply: async plan => {
-        this.plugin.assertSettingsWritable?.();
-        await assertFresh();
-        const previous = structuredClone(this.article);
-        let old = themePlan(doc, "default");
-        try { old = readWechatLayoutPlan(previous.layout); } catch { /* First layout or invalid old plan. */ }
-        const history = [...(previous.layoutHistory ?? []), old].slice(-5);
-        this.article = {...previous, layout: plan, layoutHistory: history};
-        this.busy = true; this.updateSyncState();
-        try { await this.saveArticle(); }
-        catch (error) { this.article = previous; this.stale = true; throw error; }
-        finally { this.busy = false; this.updateSyncState(); }
-      },
-    }).open();
+    if (this.layoutOpening || this.layoutModal) return;
+    this.layoutOpening = true;
+    try {
+      // Oversized layouts remain repairable; other preflight failures block entry.
+      if (this.closed || !this.file || !this.prepared || this.busy || this.stale || this.dirty || this.prepared.issues.some(issue => issue !== WECHAT_HTML_LIMIT_ISSUE)) throw new Error("请先修复问题、保存设置并刷新预览，再调整排版");
+      const doc = this.prepared.layoutDocument;
+      if (!doc) throw new Error("排版文档尚未就绪，请刷新预览");
+      const file = this.file, snapshot = this.snapshot, version = this.version, policy = this.imagePolicyRevision;
+      const assertCurrent = () => {
+        if (this.closed || this.file !== file || file.path !== this.snapshotPath || this.version !== version
+          || this.imagePolicyRevision !== policy || this.stale || this.dirty) throw new Error("正文、设置或图片已变化，请关闭排版窗口，刷新后重新规划");
+      };
+      const assertFresh = async () => {
+        assertCurrent();
+        const latest = await this.app.vault.read(file);
+        assertCurrent();
+        if (latest !== snapshot) throw new Error("正文、设置或图片已变化，请关闭排版窗口，刷新后重新规划");
+      };
+      await assertFresh();
+      const modal = new WechatLayoutModal(this.plugin, { title: this.article.title ?? file.basename, html: this.prepared.html, images: this.prepared.images,
+        document: doc, current: this.article.layout, history: this.article.layoutHistory ?? [], assertFresh,
+        onClose: () => { if (this.layoutModal === modal) this.layoutModal = undefined; },
+        apply: async (plan, assertActive) => {
+          // Acquire the workbench lock before any await, not just within one modal.
+          if (this.busy || this.layoutModal !== modal) throw new Error("公众号任务正在进行或排版窗口已关闭，请稍后重试");
+          this.busy = true; this.updateSyncState();
+          const guard = () => { assertActive(); assertCurrent(); this.plugin.assertSettingsWritable?.(); };
+          try {
+            guard();
+            await assertFresh();
+            guard();
+            const previous = structuredClone(this.article);
+            let old = themePlan(doc, "default");
+            try { old = readWechatLayoutPlan(previous.layout); } catch { /* First layout or invalid old plan. */ }
+            const history = [...(previous.layoutHistory ?? []), old].slice(-5);
+            await this.saveArticle({...previous, layout: plan, layoutHistory: history}, guard);
+          } finally {
+            this.busy = false; this.updateSyncState();
+            if (this.rerenderRequested && !this.closed && !this.paused && !this.dirty) this.scheduleRefresh();
+          }
+        },
+      });
+      this.layoutModal = modal;
+      try { modal.open(); }
+      catch (error) { this.layoutModal = undefined; modal.close(); throw error; }
+    } finally { this.layoutOpening = false; }
   }
   private async sync() {
     this.plugin.assertSettingsWritable?.();
@@ -533,6 +559,7 @@ export class WechatView extends ItemView {
   }
   async onClose() {
     this.closed = true; this.version++;
+    this.layoutModal?.close();
     if (this.timer) clearTimeout(this.timer);
     this.disposePrepared(); this.contentEl.empty();
     this.contentEl.classList.remove("easy-pub-wechat", "epw-settings-open"); this.contentEl.removeAttribute("inert");

@@ -33,6 +33,7 @@ export class WechatLayoutModal extends Modal {
   private applyButton!: HTMLButtonElement;
   private requestButton!: HTMLButtonElement;
   private original = false;
+  private selectedRenderable = true;
   private applying = false;
   private compareButton!: HTMLButtonElement;
   private undoButton!: HTMLButtonElement;
@@ -180,19 +181,18 @@ export class WechatLayoutModal extends Modal {
     this.requestButton.disabled = this.pending || this.applying || !this.context.document.blocks.length;
     this.compareButton.setAttribute("aria-pressed", String(this.original));
     this.previewLabel.textContent = this.original ? "默认模板 · 仅供对比" : `当前方案 · ${WECHAT_THEMES[this.selected.theme]}`;
-    let rendered = false;
     try {
       const plan = this.original ? themePlan(this.context.document, "default") : this.selected;
       this.preview.innerHTML = previewWechatHtml(layoutPreview(this.context.html, this.context.document, plan), this.context.images);
-      rendered = true;
+      if (!this.original) this.selectedRenderable = true;
       this.preview.setAttribute("aria-label", this.original ? "默认模板预览" : "排版方案预览");
-      // Comparing the baseline never changes which plan Apply will save.
-      if (this.original) layoutPreview(this.context.html, this.context.document, this.selected);
-      this.applyButton.disabled = this.applying || this.pending && this.pendingVersion === this.requestVersion;
+      this.applyButton.disabled = this.applying || this.pending && this.pendingVersion === this.requestVersion
+        || !this.selectedRenderable;
     } catch (error) {
       this.status.textContent = (error as Error).message;
       this.applyButton.disabled = true;
-      if (!rendered) {
+      if (!this.original) {
+        this.selectedRenderable = false;
         this.preview.empty();
         this.preview.createEl("p", {text: "当前方案无法预览，请调整风格或减少重点组件。也可切换默认模板对比。"});
       }

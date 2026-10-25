@@ -114,8 +114,14 @@ export async function runWechatLayoutTests() {
     assert.deepEqual(extractWechatBlocks(body), source);
     const content = () => Array.from(root.querySelectorAll('h1,p,li,blockquote,code,a,img')).map(el => [el.tagName, el.textContent, el.getAttribute('href'), el.getAttribute('src')]);
     const before = content();
-    const mapped = await bindWechatBlocks(body, body, root, async (markdown, target) => { target.innerHTML = micromark(markdown); return !sanitizeWechatHtml(target, []).length; });
+    let blockRenderCalls = 0;
+    const mapped = await bindWechatBlocks(body, body, root, async (markdown, target) => {
+      blockRenderCalls++;
+      target.innerHTML = micromark(markdown);
+      return !sanitizeWechatHtml(target, []).length;
+    });
     assert.equal(mapped.document.blocks.length, source.blocks.length);
+    assert.equal(blockRenderCalls, 1, 'All mapped blocks must use one bounded renderer call');
     assert.deepEqual(content(), before);
     const semantic = themePlan(mapped.document, 'research', 'blue');
     semantic.blocks = [{id: mapped.document.blocks[1].id, role: 'lead', component: 'intro', locked: true},

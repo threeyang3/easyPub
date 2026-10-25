@@ -169,19 +169,27 @@ async function testSync() {
   const settings = normalizeSettings(null).wechat; settings.appId = "app";
   const body = image(), cover = image("cover.png", "cover");
   let remote: unknown[] = [], writes = 0, uploads = 0, saves = 0, fresh = true;
+  const imageChecks: string[] = [];
   const api = {
     getDraft: async () => remote,
-    addDraft: async (article: WechatArticle) => { writes++; remote = [article]; return "draft"; },
-    updateDraft: async (_id: string, article: WechatArticle) => { writes++; remote = [article]; },
+    addDraft: async (article: WechatArticle, beforeWrite?: () => Promise<void>) => {
+      await beforeWrite?.(); writes++; remote = [article]; return "draft";
+    },
+    updateDraft: async (_id: string, article: WechatArticle, beforeWrite?: () => Promise<void>) => {
+      await beforeWrite?.(); writes++; remote = [article];
+    },
     upload: async (_img: WechatImage, isCover: boolean) => { uploads++; return { url: `https://mmbiz.qpic.cn/${isCover ? "cover" : "body"}`, ...(isCover ? { mediaId: "cover-id" } : {}) }; },
     materialExists: async () => {},
   };
   const input: WechatSyncInput = { pubId: "pub", html: `<img src="easy-pub-image://${body.hash}">`, images: [body, body], cover,
     article: { title: "Edited local draft", digest: "Local", cropWide: centeredCrop(1200, 800, 2.35), cropSquare: centeredCrop(1200, 800, 1) },
-    assertFresh: async () => { if (!fresh) throw new Error("changed"); }, progress: () => {}, conflict: async () => "cancel" };
+    assertFresh: async images => { imageChecks.push(...(images ?? []).map(image => image.source)); if (!fresh) throw new Error("changed"); },
+    progress: () => {}, conflict: async () => "cancel" };
   const sync = new WechatSync(api, settings, async () => { saves++; });
   assert.equal(await sync.sync(input), "draft");
   assert.equal(writes, 1); assert.equal(uploads, 2, "Repeated body images upload only once; cover cache is separate");
+  assert.deepEqual(imageChecks.sort(), [body.source, body.source, cover.source, cover.source].sort(),
+    "Each unique image is checked before upload and once again before the draft write");
   assert.equal(settings.drafts["app:pub"].uncertain, undefined);
   const result = remote[0] as WechatArticle;
   assert.equal(result.title, "Edited local draft");

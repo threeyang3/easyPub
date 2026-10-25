@@ -1,18 +1,22 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { App, TFile } from "obsidian";
 import { relativeVaultAttachment } from "./platforms";
-import type { WechatImageReference } from "../types";
+import type { WechatImage, WechatImageReference } from "../types";
 
 export const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "svg"]);
 export const escapeHtml = (value: string): string => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-interface MarkdownNode {
+export interface MarkdownNode {
   type: string; url?: string; alt?: string | null; identifier?: string;
   position?: { start: { offset?: number; line: number }; end: { offset?: number } };
   children?: MarkdownNode[];
 }
 
+export function parseWechatMarkdown(body: string): MarkdownNode {
+  return fromMarkdown(body) as MarkdownNode;
+}
+
 export async function transformWechatWikiImages(body: string,
-  resolve: (source: string) => Promise<string | null>): Promise<string> {
+  resolve: (source: string) => Promise<string | null>, tree: MarkdownNode = parseWechatMarkdown(body)): Promise<string> {
   const blocked: Array<[number, number]> = [];
   const visit = (node: MarkdownNode) => {
     if (["code", "inlineCode", "html", "image", "imageReference"].includes(node.type)) {
@@ -21,7 +25,7 @@ export async function transformWechatWikiImages(body: string,
     }
     node.children?.forEach(visit);
   };
-  visit(fromMarkdown(body) as MarkdownNode);
+  visit(tree);
   const pattern = /!\[\[([^\]\r\n]+)\]\]/g;
   const replacements: Array<{ start: number; end: number; content: string }> = [];
   let match: RegExpExecArray | null;
@@ -41,8 +45,8 @@ export async function transformWechatWikiImages(body: string,
 // Use syntax positions, so code, escaped images, reference links and nested alt text
 // cannot be accidentally rewritten by a regular-expression replacement.
 export async function transformMarkdownImages(body: string,
-  resolve: (source: string, alt: string, line: number) => Promise<string>): Promise<string> {
-  const tree = fromMarkdown(body) as MarkdownNode;
+  resolve: (source: string, alt: string, line: number) => Promise<string>,
+  tree: MarkdownNode = parseWechatMarkdown(body)): Promise<string> {
   const definitions = new Map<string, string>();
   const images: MarkdownNode[] = [];
   const visit = (node: MarkdownNode) => {
@@ -87,7 +91,8 @@ export async function rebaseWechatImages(app: App, body: string, sourcePath: str
 }
 
 export async function prepareWechatMarkdown(body: string,
-  resolve: (source: string) => Promise<string>): Promise<{ markdown: string; issues: string[]; imageReferences: WechatImageReference[] }> {
+  resolve: (source: string) => Promise<string>,
+  sourceTree: MarkdownNode = parseWechatMarkdown(body)): Promise<{ markdown: string; issues: string[]; imageReferences: WechatImageReference[] }> {
   const issues: string[] = [];
   const imageReferences: WechatImageReference[] = [];
   const wiki = await transformWechatWikiImages(body, async source => {
@@ -97,7 +102,7 @@ export async function prepareWechatMarkdown(body: string,
     // Preserve the path in a Markdown image; the AST pass resolves every format.
     const url = source.split("/").map(segment => encodeURIComponent(segment).replace(/[()]/g, ch => ch === "(" ? "%28" : "%29")).join("/");
     return `![${(source.split("/").pop() ?? source).replace(/[\[\]\\]/g, "\\$&")}](${url})`;
-  });
+  }, sourceTree);
   const markdown = await transformMarkdownImages(wiki, async (source, alt, line) => {
     try {
       const url = await resolve(source);
@@ -111,4 +116,14 @@ export async function prepareWechatMarkdown(body: string,
     }
   });
   return { markdown, issues, imageReferences };
+}
+
+export function replaceWechatImageTokens(html: string, images: WechatImage[],
+  replacement: (image: WechatImage) => string): string {
+  if (!images.length || !html.includes("easy-pub-image://")) return html;
+  const byHash = new Map(images.map(image => [image.hash, image]));
+  return html.replace(/easy-pub-image:\/\/([a-f0-9]+)/g, (token, hash: string) => {
+    const image = byHash.get(hash);
+    return image ? replacement(image) : token;
+  });
 }

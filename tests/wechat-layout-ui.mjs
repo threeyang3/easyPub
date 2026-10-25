@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { runLayoutCommitUi } from './wechat-layout-commit-ui.mjs';
 
 // Runs against the real layout modal, workbench and renderer with a deferred AI transport.
 export async function runLayoutUi(page) {
@@ -212,6 +213,8 @@ export async function runLayoutUi(page) {
   await button('取消').click();
   await page.evaluate(() => window.layoutReads.shift()());
   assert.equal(await page.evaluate(() => window.layoutSaves.length), 0);
+
+  await runLayoutCommitUi(page);
 
   await reset(prefix + 'x' + image);
   const overhead = await page.evaluate(() => Array.from(window.fixture.view.prepared.html).length - 1);

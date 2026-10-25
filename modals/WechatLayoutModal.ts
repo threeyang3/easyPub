@@ -13,7 +13,8 @@ export interface WechatLayoutContext {
   title: string; html: string; images: WechatImage[]; document: WechatLayoutDocument;
   current?: WechatLayoutPlan; history: WechatLayoutPlan[];
   assertFresh: () => Promise<void>;
-  apply: (plan: WechatLayoutPlan) => Promise<void>;
+  apply: (plan: WechatLayoutPlan, assertActive: () => void) => Promise<void>;
+  onClose?: () => void;
 }
 
 export class WechatLayoutModal extends Modal {
@@ -250,7 +251,10 @@ export class WechatLayoutModal extends Modal {
       if (this.closed || version !== this.requestVersion) return;
       const plan = validateWechatLayout(selected, this.context.document);
       layoutPreview(this.context.html, this.context.document, plan);
-      await this.context.apply(plan); this.close();
+      await this.context.apply(plan, () => {
+        if (this.closed || version !== this.requestVersion) throw new Error("排版应用已取消");
+      });
+      if (!this.closed) this.close();
     }
     catch (error) { if (!this.closed) this.status.textContent = (error as Error).message; }
     finally {
@@ -262,5 +266,8 @@ export class WechatLayoutModal extends Modal {
       }
     }
   }
-  onClose() { this.closed = true; this.requestVersion++; this.contentEl.empty(); }
+  onClose() {
+    this.closed = true; this.requestVersion++; this.contentEl.empty();
+    this.context.onClose?.();
+  }
 }

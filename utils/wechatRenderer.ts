@@ -1,7 +1,6 @@
 import { App, Component, MarkdownRenderer } from "obsidian";
-import { fromMarkdown } from 'mdast-util-from-markdown';
 import { WechatImage, WechatPreparedDocument } from "../types";
-import { escapeHtml, prepareWechatMarkdown } from "./wechatMarkdown";
+import { escapeHtml, MarkdownNode, parseWechatMarkdown, prepareWechatMarkdown, replaceWechatImageTokens } from "./wechatMarkdown";
 import { loadWechatImage, releaseWechatImages } from "./wechatImages";
 
 export { WECHAT_TEMPLATE } from "./wechatThemes";
@@ -84,8 +83,9 @@ export async function renderWechatDocument(app: App, body: string, filePath: str
   try {
     // Do not hand raw HTML to the host in local-only mode: <img>, CSS URLs and
     // media embeds could otherwise bypass the controlled image downloader.
-    const hasHtml = (node: { type: string; children?: any[] }): boolean => node.type === 'html' || Boolean(node.children?.some(hasHtml));
-    const rawHtml = hasHtml(fromMarkdown(body));
+    const sourceTree: MarkdownNode = parseWechatMarkdown(body);
+    const hasHtml = (node: MarkdownNode): boolean => node.type === 'html' || Boolean(node.children?.some(hasHtml));
+    const rawHtml = hasHtml(sourceTree);
     const rawHtmlIssue = '仅 Vault 附件模式不渲染原始 HTML，请转换为 Markdown 后刷新';
     if (!allowRemote() && rawHtml) {
       return { html: '<section></section>', images: [], imageReferences: [], issues: [rawHtmlIssue] };
@@ -97,7 +97,7 @@ export async function renderWechatDocument(app: App, body: string, filePath: str
         bySource.set(source, image); images.push(image);
       }
       return image.previewUrl;
-    });
+    }, sourceTree);
     if (!allowRemote() && images.some(image => !image.localPath)) {
       throw new Error('网络图片权限已变化，本轮预览已丢弃，请刷新');
     }
@@ -112,10 +112,10 @@ export async function renderWechatDocument(app: App, body: string, filePath: str
     const issues = [...prepared.issues, ...sanitizeWechatHtml(container, images)];
     // Raw HTML may have host-side resource effects; never render it a second time
     // to infer source mapping. It remains eligible for safe tag-based themes.
-    const mapped = rawHtml ? {document: {hash: extractWechatBlocks(body).hash, blocks: []}, bindings: []} : await bindWechatBlocks(body, prepared.markdown, container, async (markdown, target) => {
+    const mapped = rawHtml ? {document: {hash: extractWechatBlocks(body, sourceTree).hash, blocks: []}, bindings: []} : await bindWechatBlocks(body, prepared.markdown, container, async (markdown, target) => {
       await MarkdownRenderer.render(app, markdown, target, filePath, component);
       return sanitizeWechatHtml(target, images).length === 0;
-    });
+    }, sourceTree);
     if (!allowRemote() && (rawHtml || images.some(image => !image.localPath))) throw new Error('网络图片权限已变化，请刷新');
     const outcome = applyWechatLayout(container, mapped.document, mapped.bindings, layout);
     const html = container.outerHTML;
@@ -126,6 +126,5 @@ export async function renderWechatDocument(app: App, body: string, filePath: str
 }
 
 export function previewWechatHtml(html: string, images: WechatImage[]): string {
-  for (const image of images) html = html.split(`easy-pub-image://${image.hash}`).join(escapeHtml(image.previewUrl));
-  return html;
+  return replaceWechatImageTokens(html, images, image => escapeHtml(image.previewUrl));
 }

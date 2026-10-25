@@ -2,12 +2,12 @@ import { WechatArticle, WechatArticleSettings, WechatAssetCache, WechatImage, We
 import { isMissingWechatMedia, WechatApi, WechatUncertainError } from "./wechatApi";
 import { centeredCrop, cropCoordinates, remoteFingerprint, wechatAssetKey, wechatStateKey } from "./wechatState";
 import { assertWechatHtmlLimit, WECHAT_ARTICLE_FIELDS, wechatFieldLength } from "./wechatLimits";
-import { escapeHtml } from "./wechatMarkdown";
+import { escapeHtml, replaceWechatImageTokens } from "./wechatMarkdown";
 
 export type WechatConflictAction = "cancel" | "overwrite" | "new";
 export interface WechatSyncInput {
   pubId: string; html: string; images: WechatImage[]; cover: WechatImage; article: WechatArticleSettings;
-  assertFresh: () => Promise<void>;
+  assertFresh: (images?: WechatImage[]) => Promise<void>;
   conflict: (kind: "modified" | "missing" | "multiple", remote: unknown[]) => Promise<WechatConflictAction>;
   progress: (message: string) => void;
 }
@@ -38,9 +38,9 @@ export class WechatSync {
     if (previous?.uncertain) throw new WechatUncertainError();
     let mediaId = previous?.mediaId;
     let baseline: string | undefined;
-    const fresh = async () => {
+    const fresh = async (images?: WechatImage[]) => {
       if (this.settings.appId !== appId) throw new Error("公众号账号已变化，请重新预览");
-      await input.assertFresh();
+      await input.assertFresh(images);
     };
     await fresh();
     if (mediaId) {
@@ -61,7 +61,7 @@ export class WechatSync {
       }
     }
     const cachedUpload = async (image: WechatImage, cover: boolean) => {
-      await fresh();
+      await input.assertFresh([image]);
       const cacheKey = wechatAssetKey(appId, cover ? "cover" : "body", image.hash);
       let cached: WechatAssetCache | undefined = this.settings.assets[cacheKey];
       if (cover && cached?.mediaId) {
@@ -80,10 +80,13 @@ export class WechatSync {
       return result;
     };
     let content = input.html;
-    for (const image of input.images) {
+    const bodyImages = [...new Map(input.images.map(image => [image.hash, image])).values()];
+    const materialUrls = new Map<string, string>();
+    for (const image of bodyImages) {
       const material = await cachedUpload(image, false);
-      content = content.split(`easy-pub-image://${image.hash}`).join(escapeHtml(material.url));
+      materialUrls.set(image.hash, escapeHtml(material.url));
     }
+    content = replaceWechatImageTokens(content, bodyImages, image => materialUrls.get(image.hash)!);
     if (content.includes("easy-pub-image://")) throw new Error("正文仍有未处理图片，请重新预览");
     const cover = await cachedUpload(input.cover, true);
     const article: WechatArticle = {
@@ -92,7 +95,8 @@ export class WechatSync {
       cover_info: coverInfo,
     };
     assertWechatHtmlLimit(content);
-    await fresh();
+    const allImages = [...new Map([...input.images, input.cover]
+      .map(image => [`${image.localPath ?? image.source}\0${image.originalHash}`, image])).values()];
     // Recheck immediately before writing, after potentially slow image uploads.
     if (mediaId && remoteFingerprint(await this.api.getDraft(mediaId)) !== baseline) throw new Error("微信后台草稿在同步期间发生变化，请重新同步查看差异");
     await fresh();
@@ -100,9 +104,9 @@ export class WechatSync {
     await this.save(); // Crash recovery must be durable BEFORE sending the write.
     input.progress("正在保存到公众号草稿箱…");
     try {
-      await fresh();
-      if (mediaId) await this.api.updateDraft(mediaId, article, fresh);
-      else mediaId = await this.api.addDraft(article, fresh);
+      const beforeDraftWrite = () => fresh(allImages);
+      if (mediaId) await this.api.updateDraft(mediaId, article, beforeDraftWrite);
+      else mediaId = await this.api.addDraft(article, beforeDraftWrite);
     } catch (error) {
       if (!(error instanceof WechatUncertainError)) {
         this.settings.drafts[key] = { ...previous, uncertain: false };

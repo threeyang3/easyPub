@@ -68,8 +68,9 @@ export function applyWechatLayout(root: HTMLElement, doc: WechatLayoutDocument, 
     if (tag === "code" && el.closest("pre")) el.setAttribute("style", "font-family:monospace;font-size:13px;line-height:1.7;white-space:normal;background:transparent;");
     if (tag === "span" && el.parentElement?.tagName === "CODE" && el.closest("pre")) el.setAttribute("style", "white-space:pre-wrap!important;overflow-wrap:anywhere;");
   }
+  const bindingsById = new Map(bindings.map(binding => [binding.id, binding]));
   for (const instruction of plan.blocks) {
-    const binding = bindings.find(b => b.id === instruction.id);
+    const binding = bindingsById.get(instruction.id);
     if (!binding) throw new Error("区块与正文映射失效，已停止排版");
     const style = componentStyle(instruction.component, plan.accentColor, plan.theme);
     const child = binding.element.firstElementChild as HTMLElement | null;

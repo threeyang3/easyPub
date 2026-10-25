@@ -4,7 +4,7 @@ import { WechatArticleSettings, WechatCrop, WechatImage, WechatPreparedDocument 
 import { getFrontMatterString, parseFrontMatter } from "../utils/frontMatter";
 import { isWechatDraftPath } from "../utils/platforms";
 import { centeredCrop, readWechatArticleSettings, wechatAssetKey, wechatHash, wechatStateKey } from "../utils/wechatState";
-import { IMAGE_EXTENSIONS } from "../utils/wechatMarkdown";
+import { IMAGE_EXTENSIONS, replaceWechatImageTokens } from "../utils/wechatMarkdown";
 import { loadWechatImage, readWechatImage, releaseWechatImages } from "../utils/wechatImages";
 import { digestFromWechatHtml, previewWechatHtml, renderWechatDocument, WECHAT_HTML_LIMIT_ISSUE } from "../utils/wechatRenderer";
 import { validateWechatArticle, WechatConflictAction, WechatSync } from "../utils/wechatSync";
@@ -220,11 +220,10 @@ export class WechatView extends ItemView {
     let prepared: WechatPreparedDocument;
     try { prepared = await renderWechatDocument(this.app, parsed.content, filePath, component, this.allowRemoteImages, article.layout); }
     finally { component.unload(); }
-    if (article.digest === undefined) article.digest = digestFromWechatHtml(prepared.html);
-    try { validateWechatArticle(article); } catch (error) { prepared.issues.push((error as Error).message); }
-    if (Array.from(prepared.html).length >= 20000 || new TextEncoder().encode(prepared.html).length >= 1024 * 1024) prepared.issues.push(WECHAT_HTML_LIMIT_ISSUE);
-    let cover: WechatImage | undefined;
+    let cover: WechatImage | undefined, installed = false;
     try {
+      if (article.digest === undefined) article.digest = digestFromWechatHtml(prepared.html);
+      try { validateWechatArticle(article); } catch (error) { prepared.issues.push((error as Error).message); }
       const source = article.cover ?? prepared.images[0]?.source;
       if (source) {
         article.cover = source;
@@ -238,6 +237,7 @@ export class WechatView extends ItemView {
       }
       const scroll = this.preview.scrollTop;
       this.disposePrepared(); this.prepared = prepared; this.cover = cover; this.article = article;
+      installed = true;
       this.snapshot = snapshot; this.snapshotPath = filePath; this.dirty = keepDirty; this.stale = false;
       this.identity.textContent = filePath;
       this.preview.innerHTML = previewWechatHtml(prepared.html, prepared.images);
@@ -247,7 +247,18 @@ export class WechatView extends ItemView {
       this.message(keepDirty ? "正文预览已更新 · 未保存设置已保留，请保存设置并刷新后同步" : prepared.issues.length ? `预检发现 ${prepared.issues.length} 个问题，请修复后刷新` : !cover ? "请选择封面，保存设置后即可同步" : "预检通过 · 同步以此本地成稿为准");
       if (prepared.layoutNotice) this.message(`${this.status.textContent} · ${prepared.layoutNotice}`, prepared.issues.length > 0);
       this.updateSyncState();
-    } catch (error) { releaseWechatImages(prepared.images); if (cover) releaseWechatImages([cover]); throw error; }
+    } catch (error) {
+      if (installed) {
+        this.disposePrepared();
+        this.stale = true;
+        this.preview.empty();
+        this.updateSyncState();
+      } else {
+        releaseWechatImages(prepared.images);
+        if (cover) releaseWechatImages([cover]);
+      }
+      throw error;
+    }
   }
   private changed() {
     if (this.timer) { clearTimeout(this.timer); this.timer = undefined; }
@@ -291,10 +302,11 @@ export class WechatView extends ItemView {
     const images = parent.createEl("details", { cls: "epw-section" });
     const references = this.prepared?.imageReferences ?? [];
     const failures = references.filter(ref => ref.status === "error").length;
+    const imagesBySource = new Map((this.prepared?.images ?? []).map(image => [image.source, image]));
     images.createEl("summary", { text: `正文图片 · ${references.length} 处引用${failures ? ` · ${failures} 处失败` : ""}` });
     images.open = failures > 0;
     for (const ref of references) {
-      const image = this.prepared?.images.find(image => image.source === ref.source);
+      const image = imagesBySource.get(ref.source);
       const row = images.createDiv({ cls: "epw-image-row" });
       if (image) row.createEl("img", { attr: { src: image.previewUrl, alt: ref.source } });
       const info = row.createDiv(); info.createEl("span", { text: ref.source });
@@ -464,11 +476,14 @@ export class WechatView extends ItemView {
     const credentialRevision = this.plugin.wechatCredentialRevision;
     const data = parseFrontMatter(snapshot).data;
     const article = { ...this.article };
-    const assertFresh = async () => {
+    const assertFresh = async (imagesToCheck?: WechatImage[]) => {
       if (this.closed || this.version !== version || this.file !== file || file.path !== filePath || await this.app.vault.read(file) !== snapshot) throw new Error("本地成稿或预览已变化，请刷新后重新同步");
       if (settings !== JSON.stringify([this.plugin.settings.wechat.appId, this.plugin.settings.wechat.encryptedSecret, this.plugin.settings.wechat.defaultAuthor, this.allowRemoteImages()]) || credentialRevision !== this.plugin.wechatCredentialRevision) throw new Error("公众号配置已变化，请刷新后重试");
-      for (const image of [...this.prepared!.images, this.cover!]) {
-        if (!image.localPath) continue;
+      const seen = new Set<string>();
+      for (const image of imagesToCheck ?? []) {
+        const key = `${image.localPath ?? image.source}\0${image.originalHash}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
         const raw = await readWechatImage(this.app, image.source, filePath, undefined, this.allowRemoteImages);
         if (wechatHash(raw.bytes) !== image.originalHash) throw new Error(`图片内容已变化，请刷新：${image.source}`);
       }
@@ -476,15 +491,12 @@ export class WechatView extends ItemView {
     this.plugin.wechatSyncInProgress = true;
     this.contentEl.setAttribute("inert", "");
     const controls = Array.from(this.contentEl.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLTextAreaElement | HTMLSelectElement>("input,button,textarea,select"));
+    const disabled = controls.map(control => control.disabled);
     controls.forEach(control => { control.disabled = true; });
     try {
       const api = this.plugin.getWechatApi();
       // Revalidate original attachment bytes, including cached and remote images.
       this.message("正在核对图片内容…");
-      for (const image of [...this.prepared.images, this.cover]) {
-        const raw = await readWechatImage(this.app, image.source, filePath, undefined, this.allowRemoteImages);
-        if (wechatHash(raw.bytes) !== image.originalHash) throw new Error(`图片内容已变化，请刷新：${image.source}`);
-      }
       const result = await new WechatSync(api, this.plugin.settings.wechat, () => this.plugin.saveSettings()).sync({
         pubId: getFrontMatterString(data, "pub_id")!, html: this.prepared.html, images: this.prepared.images, cover: this.cover, article,
         assertFresh, progress: message => this.message(message),
@@ -506,16 +518,20 @@ export class WechatView extends ItemView {
       if (!result) { this.message("已取消同步"); return; }
       try {
         const remote = await api.getDraft(result);
-        let expected = this.prepared.html;
-        for (const image of this.prepared.images) {
+        const expected = replaceWechatImageTokens(this.prepared.html, this.prepared.images, image => {
           const material = this.plugin.settings.wechat.assets[wechatAssetKey(this.plugin.settings.wechat.appId, "body", image.hash)];
-          if (material) expected = expected.split(`easy-pub-image://${image.hash}`).join(material.url.replace(/&/g, "&amp;").replace(/"/g, "&quot;"));
-        }
+          return material ? material.url.replace(/&/g, "&amp;").replace(/"/g, "&quot;") : `easy-pub-image://${image.hash}`;
+        });
         const content = (remote[0] as {content?: unknown})?.content;
         const warnings = typeof content === "string" ? compareWechatReadback(expected, content) : ["无法核对回读正文，请在后台检查"];
         this.message(`已同步到公众号草稿箱 · ${warnings.length ? warnings.join("；") : "正文、图片与链接回读一致，请在后台预览并发布"}`, warnings.length > 0);
       } catch { this.message("已同步到公众号草稿箱，但补充内容核对失败；请在后台预览，勿重复创建草稿", true); }
-    } finally { this.plugin.wechatSyncInProgress = false; this.contentEl.removeAttribute("inert"); controls.forEach(control => { control.disabled = false; }); }
+    } finally {
+      this.plugin.wechatSyncInProgress = false;
+      this.contentEl.removeAttribute("inert");
+      controls.forEach((control, index) => { control.disabled = disabled[index]; });
+      this.updateSyncState();
+    }
   }
   private async recover() {
     if (!this.file || !this.snapshot || this.stale || this.dirty) throw new Error("请先保存设置并刷新预览");

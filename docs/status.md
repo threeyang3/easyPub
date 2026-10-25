@@ -6,9 +6,9 @@
 
 ## 版本边界
 
-- 本次版本：[1.7.2 Release](https://github.com/threeyang3/easyPub/releases/tag/1.7.2)，对应[发布说明](releases/1.7.2.md)。发布状态及最终提交以 GitHub Release 为准。
-- 本次版本通过 [PR #4](https://github.com/threeyang3/easyPub/pull/4) 整合发布存储拆分、目录/备份界面、排版取消与互斥修复，以及结构化项目文档。
-- 安装时使用同一 Release 的三个附件；旧版 1.7.1 不包含这些改进。
+- 本次版本：[1.7.3 Release](https://github.com/threeyang3/easyPub/releases/tag/1.7.3)，对应[发布说明](releases/1.7.3.md)。发布状态及最终提交以 GitHub Release 为准。
+- 1.7.3 基于已发布的 1.7.2，优化长文排版与图片同步，并修复预览资源异常和同步控件状态恢复。
+- 安装时使用同一 Release 的三个附件；旧版 1.7.2 不包含本轮性能优化。
 
 ## 已有验证证据
 
@@ -20,6 +20,7 @@
 | 真实公众号草稿 | 2026-10-24 的创建、更新与回读，以及后续 AI 排版、冲突和新草稿测试，见[账号记录](wechat-acceptance.md)、[排版记录](wechat-layout-acceptance.md) | 已执行正式群发或发布 |
 | 风格显示 | 十二套风格有本地/原生覆盖；“朱砂书卷”测试稿的后台及手机预览由用户确认正常 | 十二套风格均在所有微信客户端人工验收 |
 | 本次文档整理 | 不修改运行代码、配置或安装包；35 份 Markdown 的 221 个本地链接/锚点通过检查，四张 Mermaid 图在 Sandbox Obsidian 实际渲染通过；命令与默认值对照源码核验 | 新一轮真实 AI/微信网络验收 |
+| 1.7.3 性能审查 | 核心、布局、公众号工作台和发布弹窗测试通过；生产构建与 macOS Obsidian 38 项原生检查通过，零 Vault 写入、零公众号请求 | 真实公众号写入和真实模型请求 |
 
 原生环境记录包含 Obsidian 1.14.4 / Electron 43.7.7。manifest 的最低版本 1.4.4 是 API 兼容声明，不是已完整测试的最低宿主环境。
 

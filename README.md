@@ -4,7 +4,7 @@ EasyPub 是桌面端 Obsidian 插件，将源笔记转换为各平台发布稿�
 
 **[项目概览与架构图](docs/overview.md) · [完整文档](docs/README.md) · [快速开始](docs/getting-started.md)**
 
-本次版本为 **1.7.2**，声明最低 Obsidian **1.4.4**。实际安装与验证范围见[版本状态](docs/status.md)。
+本次版本为 **1.7.3**，声明最低 Obsidian **1.4.4**。实际安装与验证范围见[版本状态](docs/status.md)。
 
 ## 能力与边界
 

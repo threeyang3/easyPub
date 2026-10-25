@@ -7,9 +7,13 @@ User-facing behavior belongs in [README.md](README.md) and [docs/](docs/README.m
 ## Architecture
 
 ```text
-main.ts                 Plugin lifecycle, commands, publish orchestration, file IO
+main.ts                 Plugin lifecycle, commands and publish orchestration
 settings.ts             Obsidian settings UI
 types.ts                Settings, platform, metadata, asset, and PicGo types
+modals/PlatformSelectModal.ts  Platform selection UI
+utils/publishStore.ts    Vault/external draft IO and backup notices
+utils/wechatLimits.ts    Shared field and final HTML size rules
+utils/wechatLayoutPreview.ts  Controlled layout preview transformation
 modals/DiffModal.ts     Update diff and confirmation
 utils/frontMatter.ts    Front Matter parsing and merge rules
 utils/platforms.ts      Platform paths, child references, target selection

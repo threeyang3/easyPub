@@ -38,7 +38,10 @@ import {
   readControlRoomSession,
 } from "../utils/controlRoom";
 
+import { runStructureTests } from "./structure.test";
+
 async function run() {
+  await runStructureTests();
   await runControlRoomLauncherTests();
   await runBatchPubIdTests();
   await runReliabilityTests();

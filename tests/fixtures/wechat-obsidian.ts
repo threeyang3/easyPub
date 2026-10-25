@@ -31,10 +31,17 @@ export class TFolder {}
 export class FuzzySuggestModal { constructor(_app: any) {} setPlaceholder() {} open() {} }
 export class Modal extends Component {
   contentEl = document.createElement("div");
+  modalEl = document.createElement("div");
   constructor(_app: any) { super(); }
   onOpen() {} onClose() {}
-  open() { this.contentEl.setAttribute("role", "dialog"); this.contentEl.style.cssText = 'position:fixed;inset:10% 15%;z-index:1000;background:white;padding:24px;overflow:auto'; document.body.appendChild(this.contentEl); this.onOpen(); }
-  close() { this.onClose(); this.contentEl.remove(); }
+  open() {
+    this.contentEl.setAttribute("role", "dialog");
+    this.contentEl.style.cssText = 'padding:24px;overflow:auto';
+    this.modalEl.style.cssText = 'position:fixed;top:5vh;left:50%;transform:translateX(-50%);z-index:1000;background:var(--background-primary,white);max-height:90vh;overflow:auto;border-radius:12px;box-shadow:0 12px 60px #0003';
+    this.modalEl.appendChild(this.contentEl); document.body.appendChild(this.modalEl); this.onOpen();
+    if (!this.modalEl.classList.contains('easy-pub-layout-modal')) this.modalEl.style.width = 'min(700px,94vw)';
+  }
+  close() { this.onClose(); this.modalEl.remove(); }
 }
 export class Setting {
   settingEl: HTMLElement;

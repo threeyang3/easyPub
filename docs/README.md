@@ -20,6 +20,8 @@
 - [稳定性审查记录](reliability-review.md)：本轮修复、故障注入和 Obsidian 宿主验证的范围与限制。
 - [微信公众号验收记录](wechat-acceptance.md)：自动化、原生宿主验证及真实账号待验收清单。
 
+- [结构与交互审查](architecture-review.md)：存储层拆分、排版生命周期、UI 优化及验证边界。
+
 ## 文档职责
 
 | 文档 | 主要受众 | 内容边界 |

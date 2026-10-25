@@ -5,7 +5,11 @@ export async function runLayoutUi(page) {
   await page.evaluate(() => window.fixture.ai());
   const localBefore = await page.evaluate(() => window.fixture.read());
   const bodyBefore = await page.evaluate(() => window.fixture.read().split('---').slice(2).join('---'));
-  const open = () => page.getByRole('button', {name: '智能排版', exact: true}).click();
+  const open = async () => {
+    await page.getByRole('button', {name: '智能排版', exact: true}).click();
+    assert.equal(await page.locator('.epl-ai-section').evaluate(el => el.open), false);
+    await page.locator('.epl-ai-section > summary').click();
+  };
   const theme = () => page.getByRole('combobox', {name: '排版风格', exact: true});
   const button = name => page.getByRole('button', {name, exact: true});
   const status = () => page.locator('.easy-pub-layout [role=status]');
@@ -22,15 +26,36 @@ export async function runLayoutUi(page) {
   const viewport = page.viewportSize();
   await page.setViewportSize({width: 560, height: 640});
   assert.equal(await page.locator('.easy-pub-layout').evaluate(el => el.scrollWidth <= el.clientWidth + 2), true, 'Narrow layout modal must not overflow horizontally');
+  const applyBounds = await button('应用排版到本地稿').boundingBox();
+  assert.ok(applyBounds.y >= 0 && applyBounds.y + applyBounds.height <= 640, 'Apply stays inside a short viewport without scrolling');
   await button('应用排版到本地稿').scrollIntoViewIfNeeded();
   assert.equal(await button('应用排版到本地稿').isVisible(), true);
+  assert.equal(await page.locator('.epl-options').isVisible(), true);
+  await button('查看排版预览').click();
+  assert.equal(await page.locator('.epl-preview').isVisible(), true);
+  assert.equal(await page.locator('.epl-options').isVisible(), false);
+  await button('风格与调整').click();
   await page.setViewportSize(viewport);
   assert.equal(await page.locator('.epl-theme-card').count(), 12);
+  assert.equal(await button('撤销本次调整').isDisabled(), true);
+  await page.evaluate(() => window.originalGalleryCard = document.querySelector('.epl-theme-card'));
   for (const [label, id] of [['杂志编排', 'editorial'], ['深夜电台', 'noir'], ['朱砂书卷', 'cinnabar']]) {
     await button(`使用${label}风格`).click();
     assert.equal(await theme().inputValue(), id);
     assert.equal(await page.getByRole('combobox', {name: '强调色', exact: true}).inputValue(), 'preset');
     assert.equal(await page.evaluate(() => window.fixture.read()), localBefore);
+  }
+  assert.equal(await page.evaluate(() => window.originalGalleryCard === document.querySelector('.epl-theme-card')), true, 'Theme cards retain DOM identity and keyboard focus during edits');
+  if (process.env.EASYPUB_LAYOUT_SCREENSHOT) {
+    await page.locator('.epl-ai-section > summary').click();
+    await page.locator('.epl-options').evaluate(el => { el.scrollTop = 0; });
+    await page.screenshot({path: process.env.EASYPUB_LAYOUT_SCREENSHOT, fullPage: true});
+    await page.setViewportSize({width: 560, height: 640});
+    await button('查看排版预览').click();
+    await page.screenshot({path: process.env.EASYPUB_LAYOUT_SCREENSHOT.replace('.png', '-narrow.png'), fullPage: true});
+    await button('风格与调整').click();
+    await page.setViewportSize(viewport);
+    await page.locator('.epl-ai-section > summary').click();
   }
   await theme().selectOption('essay');
   assert.equal(await page.evaluate(() => window.fixture.read()), localBefore);
@@ -56,6 +81,8 @@ export async function runLayoutUi(page) {
   assert.equal(await page.evaluate(() => window.fixture.read()), localBefore);
   await button('对比默认 / 当前方案').click();
   assert.equal(await page.getByRole('region', {name: '默认模板预览', exact: true}).count(), 1);
+  assert.equal(await button('对比默认 / 当前方案').getAttribute('aria-pressed'), 'true');
+  assert.match(await page.locator('.epl-preview-label').innerText(), /仅供对比/);
   await button('对比默认 / 当前方案').click();
   await button('应用排版到本地稿').click();
   await page.waitForFunction(() => !document.querySelector('.easy-pub-layout'));
@@ -143,6 +170,49 @@ export async function runLayoutUi(page) {
   await button('取消').click();
   assert.equal(await page.evaluate(() => window.fixture.read()), nestedText);
 
+  // Pending preparation is invalidated by a manual choice or closing the modal.
+  await page.evaluate(() => window.fixture.layoutHarness());
+  await page.locator('.epl-ai-section > summary').click();
+  await button('准备 AI 排版请求').click();
+  await theme().selectOption('essay');
+  await page.evaluate(() => window.layoutReads.shift()());
+  assert.equal(await button('确认发送这些片段并生成方案').count(), 0);
+  await button('准备 AI 排版请求').click();
+  await button('取消').click();
+  await page.evaluate(() => window.layoutReads.shift()());
+  assert.equal(await page.evaluate(() => window.layoutModal.contentEl.textContent), '');
+
+  // Closing during the pre-send freshness read must not start an AI request.
+  const requestsBefore = await page.evaluate(() => window.fixtureAiRequests.length);
+  await page.evaluate(() => window.fixture.layoutHarness());
+  await page.locator('.epl-ai-section > summary').click();
+  await button('准备 AI 排版请求').click();
+  await page.evaluate(() => window.layoutReads.shift()());
+  await button('确认发送这些片段并生成方案').click();
+  await button('取消').click();
+  await page.evaluate(() => window.layoutReads.shift()());
+  assert.equal(await page.evaluate(() => window.fixtureAiRequests.length), requestsBefore);
+
+  // Saving is single-flight even if another callback redraws or a DOM button is re-enabled.
+  await page.evaluate(() => window.fixture.layoutHarness());
+  await theme().selectOption('cinnabar');
+  await button('应用排版到本地稿').click();
+  assert.equal(await theme().isDisabled(), true);
+  await page.evaluate(() => {
+    window.layoutModal.updatePreview();
+    const button = document.querySelector('.epl-footer .mod-cta');
+    button.disabled = false; button.click();
+  });
+  assert.equal(await page.evaluate(() => window.layoutReads.length), 1);
+  await page.evaluate(() => window.layoutReads.shift()());
+  assert.equal(await page.evaluate(() => window.layoutSaves.length), 1);
+  assert.equal(await page.evaluate(() => window.layoutSaves[0].theme), 'cinnabar');
+  await page.evaluate(() => window.fixture.layoutHarness());
+  await button('应用排版到本地稿').click();
+  await button('取消').click();
+  await page.evaluate(() => window.layoutReads.shift()());
+  assert.equal(await page.evaluate(() => window.layoutSaves.length), 0);
+
   await reset(prefix + 'x' + image);
   const overhead = await page.evaluate(() => Array.from(window.fixture.view.prepared.html).length - 1);
   const nearLimit = prefix + 'x'.repeat(19999 - overhead) + image;
@@ -150,6 +220,7 @@ export async function runLayoutUi(page) {
   assert.equal(await page.evaluate(() => Array.from(window.fixture.view.prepared.html).length), 19999);
   await open(); await button('使用深夜电台风格').click();
   assert.match(await status().innerText(), /超过/);
+  assert.match(await page.locator('.epl-preview').innerText(), /当前方案无法预览/);
   assert.equal(await button('应用排版到本地稿').isDisabled(), true);
   await button('对比默认 / 当前方案').click();
   assert.equal(await page.getByRole('region', {name: '默认模板预览'}).count(), 1);

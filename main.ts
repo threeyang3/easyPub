@@ -4,7 +4,7 @@ import { createHash } from "crypto";
 import { startControlRoom } from "./utils/controlRoomLauncher";
 import { HEXO_PREVIEW_VIEW, HexoPreviewView, hexoPreviewPath } from "./views/HexoPreviewView";
 import type { ControlRoomSession } from "./utils/controlRoom";
-import { App, FileSystemAdapter, Modal, Notice, Plugin, Setting, TFile, TFolder, normalizePath, requestUrl } from "obsidian";
+import { FileSystemAdapter, Notice, Plugin, TFile, TFolder, normalizePath, requestUrl } from "obsidian";
 import { EasyPubSettingTab } from "./settings";
 import { PluginSettings, ArticleMeta, ArticleDiff, Platform, PLATFORMS, FrontMatterData, PublishAsset, PicGoImageCacheEntry, PicGoPendingUpload } from "./types";
 import {
@@ -24,7 +24,6 @@ import { inspectPublishDocuments } from "./utils/publishDiagnostics";
 import { fillMissingPubIds, externalPubIdDocuments, needsPubId, PubIdBatchResult } from "./utils/batchPubIds";
 import {
   getPublishPath,
-  getPublishBackupDirectory,
   getTargetPath,
   getSubFolder,
   createWikiLink,
@@ -42,10 +41,11 @@ import { getPicGoHeartbeatUrl, uploadWithPicGo } from "./utils/picgo";
 import { confirmPicGoTransport } from "./modals/PicGoTransportModal";
 import { isDeepStrictEqual } from "util";
 import { assertPublishUnchanged, completeControlRoomMetadata } from "./utils/publishSafety";
-import { writeImmutableAsset, writePublishedFile } from "./utils/publishFiles";
+import { writeImmutableAsset } from "./utils/publishFiles";
 import { withTimeout } from "./utils/async";
 import { assertPublishIdentity, PublishIdentityIndex } from "./utils/publishIdentity";
-import { backupGitMessage, inspectPublishBackups } from "./utils/publishBackups";
+import { PublishStore } from "./utils/publishStore";
+import { PlatformSelectModal } from "./modals/PlatformSelectModal";
 import { isPicGoEnabled, normalizeSettings, publishSettingsFingerprint } from "./utils/settings";
 import { WechatApi } from "./utils/wechatApi";
 import { decryptWechatSecret, encryptWechatSecret } from "./utils/wechatSecret";
@@ -940,9 +940,9 @@ export default class EasyPub extends Plugin {
           shell?: { openPath(filePath: string): Promise<string> };
         };
         const error = await electron.shell?.openPath(filePath);
-        new Notice(error ? `File saved to: ${filePath}` : "File opened. Edit and save.");
+        new Notice(error || !electron.shell ? `稿件已保存：${filePath}，请用外部编辑器打开。` : "已用外部编辑器打开发布稿，修改后请保存。");
       } catch {
-        new Notice(`File saved to: ${filePath}`);
+        new Notice(`稿件已保存：${filePath}`);
       }
       return;
     }
@@ -957,122 +957,37 @@ export default class EasyPub extends Plugin {
       return;
     }
 
-    new Notice(`File saved to: ${filePath}`);
+    new Notice(`稿件已保存：${filePath}`);
   }
 
-  async publishPathExists(platform: Platform, filePath: string): Promise<boolean> {
-    if (!platform.isExternal) {
-      return this.app.vault.getAbstractFileByPath(filePath) instanceof TFile;
-    }
-
-    try {
-      await fs.access(filePath);
-      return true;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return false;
-      }
-      throw error;
-    }
+  private publishStore?: PublishStore;
+  private getPublishStore(): PublishStore {
+    return this.publishStore ??= new PublishStore(() => this.app.vault, () => this.settings.hexoRepoPath,
+      (message, timeout) => { new Notice(message, timeout); });
   }
 
-  async publishDirectoryExists(platform: Platform, directoryPath: string): Promise<boolean> {
-    if (!platform.isExternal) {
-      return this.app.vault.getAbstractFileByPath(directoryPath) instanceof TFolder;
-    }
-
-    try {
-      return (await fs.stat(directoryPath)).isDirectory();
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return false;
-      }
-      throw error;
-    }
+  publishPathExists(platform: Platform, filePath: string): Promise<boolean> {
+    return this.getPublishStore().publishPathExists(platform, filePath);
   }
 
-  async readPublishFile(platform: Platform, filePath: string): Promise<string> {
-    if (platform.isExternal) {
-      return fs.readFile(filePath, "utf8");
-    }
-
-    const file = this.app.vault.getAbstractFileByPath(filePath);
-    if (!(file instanceof TFile)) {
-      throw new Error(`Publish file not found: ${filePath}`);
-    }
-
-    return this.app.vault.read(file);
+  publishDirectoryExists(platform: Platform, directoryPath: string): Promise<boolean> {
+    return this.getPublishStore().publishDirectoryExists(platform, directoryPath);
   }
 
-  private backupNoticeRoots?: Set<string>;
-
-  async writePublishFile(platform: Platform, filePath: string, content: string, expected?: string | null): Promise<void> {
-    if (platform.isExternal) {
-      const backupDirectory = getPublishBackupDirectory(this.settings.hexoRepoPath);
-      const notified = this.backupNoticeRoots ??= new Set();
-      if (expected !== null && !notified.has(backupDirectory)) {
-        let message: string;
-        try { message = backupGitMessage((await inspectPublishBackups(this.settings.hexoRepoPath)).git); }
-        catch { message = "无法检查备份目录和 Git 状态，请在设置中检查备份。"; }
-        new Notice(`Hexo 覆盖前会保留全文备份，可能包含未公开内容。${message} 位置：${backupDirectory}`, 15000);
-        notified.add(backupDirectory);
-      }
-      await writePublishedFile(filePath, content, expected,
-        backupDirectory);
-      return;
-    }
-
-    const file = this.app.vault.getAbstractFileByPath(filePath);
-    if (file instanceof TFile) {
-      await this.app.vault.process(file, current => {
-        if (expected !== undefined) assertPublishUnchanged(expected, current);
-        return content;
-      });
-      return;
-    }
-
-    if (expected !== undefined) assertPublishUnchanged(expected, null);
-    await this.app.vault.create(filePath, content);
+  readPublishFile(platform: Platform, filePath: string): Promise<string> {
+    return this.getPublishStore().readPublishFile(platform, filePath);
   }
 
-  async listPublishFiles(platform: Platform, directoryPath: string): Promise<string[]> {
-    if (platform.isExternal) {
-      const entries = await fs.readdir(directoryPath, { withFileTypes: true });
-      const files: string[] = [];
-      for (const entry of entries) {
-        const fullPath = path.join(directoryPath, entry.name);
-        if (entry.isFile()) files.push(fullPath);
-        else if (entry.isDirectory()) files.push(...await this.listPublishFiles(platform, fullPath));
-      }
-      return files;
-    }
-
-    const folder = this.app.vault.getAbstractFileByPath(directoryPath);
-    if (!(folder instanceof TFolder)) {
-      throw new Error(`Publish directory not found: ${directoryPath}`);
-    }
-
-    return folder.children
-      .filter((child): child is TFile => child instanceof TFile)
-      .map((child) => child.path);
+  writePublishFile(platform: Platform, filePath: string, content: string, expected?: string | null): Promise<void> {
+    return this.getPublishStore().writePublishFile(platform, filePath, content, expected);
   }
 
-  async ensurePublishDirectory(platform: Platform, directoryPath: string): Promise<void> {
-    if (platform.isExternal) {
-      await fs.mkdir(directoryPath, { recursive: true });
-      return;
-    }
+  listPublishFiles(platform: Platform, directoryPath: string): Promise<string[]> {
+    return this.getPublishStore().listPublishFiles(platform, directoryPath);
+  }
 
-    const normalizedPath = normalizePath(directoryPath);
-    const parts = normalizedPath.split("/").filter(Boolean);
-    let currentPath = "";
-
-    for (const part of parts) {
-      currentPath = currentPath ? `${currentPath}/${part}` : part;
-      if (!(this.app.vault.getAbstractFileByPath(currentPath) instanceof TFolder)) {
-        await this.app.vault.createFolder(currentPath);
-      }
-    }
+  ensurePublishDirectory(platform: Platform, directoryPath: string): Promise<void> {
+    return this.getPublishStore().ensurePublishDirectory(platform, directoryPath);
   }
 
   async deployToHexo() {
@@ -1489,49 +1404,5 @@ export default class EasyPub extends Plugin {
       }),
       publishedContent
     );
-  }
-}
-
-class PlatformSelectModal extends Modal {
-  private platforms: Platform[];
-  private onSelect: (platform: Platform | null) => void;
-
-  constructor(app: App, platforms: Platform[], onSelect: (platform: Platform | null) => void) {
-    super(app);
-    this.platforms = platforms;
-    this.onSelect = onSelect;
-  }
-
-  onOpen() {
-    const { contentEl } = this;
-    contentEl.empty();
-
-    contentEl.createEl("h2", { text: "选择发布平台" });
-    contentEl.addClass("easy-pub-platform-modal");
-    contentEl.createEl("p", { text: "选择目标平台后生成或打开对应稿件。微信公众号最终发布在微信后台完成。" });
-
-    for (const platform of this.platforms) {
-      new Setting(contentEl)
-        .setName(platform.name)
-        .setDesc(platform.isExternal ? "保存到 Hexo 仓库；后续构建与部署按设置执行" : platform.id === "wechat" ? "打开已有本地成稿，或首次生成后进入预览工作台" : `生成或更新 ${platform.path} 本地稿，供后续编辑`)
-        .addButton((btn) =>
-          btn.setButtonText(platform.id === "wechat" ? "打开工作台" : "准备稿件").onClick(() => {
-            this.close();
-            this.onSelect(platform);
-          })
-        );
-    }
-
-    new Setting(contentEl).addButton((btn) =>
-      btn.setButtonText("取消").onClick(() => {
-        this.close();
-        this.onSelect(null);
-      })
-    );
-  }
-
-  onClose() {
-    const { contentEl } = this;
-    contentEl.empty();
   }
 }

@@ -12,6 +12,7 @@ import { wechatChoice } from "../modals/WechatChoiceModal";
 import { WechatComparison, wechatReadableHtml } from "../utils/wechatComparison";
 import { WechatLayoutModal } from "../modals/WechatLayoutModal";
 import { readWechatLayoutPlan, themePlan } from "../utils/wechatLayoutEngine";
+import { WECHAT_ARTICLE_FIELDS, wechatFieldLength } from "../utils/wechatLimits";
 import { compareWechatReadback } from "../utils/wechatReadback";
 
 export const WECHAT_VIEW = "easy-pub-wechat";
@@ -254,13 +255,13 @@ export class WechatView extends ItemView {
     const parent = this.inspector; parent.empty();
     const fields = parent.createEl("details", { cls: "epw-section" }); fields.open = true;
     fields.createEl("summary", { text: "文章信息" });
-    for (const [key, label, limit] of [["title", "标题", 32], ["author", "作者", 16], ["digest", "摘要", 120], ["sourceUrl", "阅读原文链接", 1024]] as const) {
+    for (const [key, label, limit] of WECHAT_ARTICLE_FIELDS) {
       const wrapper = fields.createEl("label", { cls: "epw-field", text: label });
       const input = key === "digest" ? wrapper.createEl("textarea") : wrapper.createEl("input", { type: "text" });
       input.value = this.article[key] ?? "";
       const count = wrapper.createEl("small", { cls: "epw-field-count" });
       const updateCount = () => {
-        const length = key === "sourceUrl" ? new TextEncoder().encode(input.value).length : Array.from(input.value).length;
+        const length = wechatFieldLength(key, input.value);
         count.textContent = `${length} / ${limit} ${key === "sourceUrl" ? "字节" : "字"}${length > limit ? " · 超出限制，请缩短" : ""}`;
         input.setAttribute("aria-invalid", String(length > limit));
         count.classList.toggle("epw-error", length > limit);

@@ -6,9 +6,9 @@
 
 ## 版本边界
 
-- 稳定版本：[1.7.1 Release](https://github.com/threeyang3/easyPub/releases/tag/1.7.1)，对应[发布说明](releases/1.7.1.md)。
-- 当前文档覆盖 `refactor/publishing-workbench` 分支及 [PR #4](https://github.com/threeyang3/easyPub/pull/4) 的改进，包括发布存储拆分、目录/备份界面及排版取消与互斥修复。它们尚不能当作稳定安装包已经包含的能力。
-- 分支 manifest/package 仍为 1.7.1；版本号相同不能证明安装包包含分支最新提交。部署时应同时记录提交和构建来源。
+- 本次版本：[1.7.2 Release](https://github.com/threeyang3/easyPub/releases/tag/1.7.2)，对应[发布说明](releases/1.7.2.md)。发布状态及最终提交以 GitHub Release 为准。
+- 本次版本通过 [PR #4](https://github.com/threeyang3/easyPub/pull/4) 整合发布存储拆分、目录/备份界面、排版取消与互斥修复，以及结构化项目文档。
+- 安装时使用同一 Release 的三个附件；旧版 1.7.1 不包含这些改进。
 
 ## 已有验证证据
 

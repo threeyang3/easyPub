@@ -4,6 +4,8 @@ EasyPub is a desktop-only Obsidian plugin that generates platform-specific publi
 
 User-facing behavior belongs in [README.md](README.md) and [docs/](docs/README.md). This file records implementation structure and invariants.
 
+Documentation entry points: [overview](docs/overview.md), [module architecture](docs/development/architecture.md), [setup](docs/development/setup.md), and [testing](docs/development/testing.md).
+
 ## Architecture
 
 ```text

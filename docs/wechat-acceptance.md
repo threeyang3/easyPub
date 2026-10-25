@@ -1,5 +1,7 @@
 # 微信公众号改进验收记录
 
+> 历史记录：以下结论与待办对应各节记录时的版本和环境，后续进展见[版本与验证状态](status.md)。
+
 ## 2026-10-24：Mac Sandbox 真实账号验收
 
 环境：Apple Silicon macOS、Obsidian 1.14.4、Electron 43.7.7，已安装 EasyPub 1.6.3。测试对象为当时 Sandbox 安装包；随后发布构建的自动回归单独执行。

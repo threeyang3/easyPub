@@ -46,6 +46,8 @@ import { withTimeout } from "./utils/async";
 import { assertPublishIdentity, PublishIdentityIndex } from "./utils/publishIdentity";
 import { PublishStore } from "./utils/publishStore";
 import { PlatformSelectModal } from "./modals/PlatformSelectModal";
+import { chooseArticleProperties } from "./modals/ArticlePropertiesModal";
+import { applyPropertySelection, asObject, canonicalWechatTitle, initialPlatformProperties, legacyPropertyKeys, platformPropertyFields, SOURCE_FIELDS } from "./utils/articleProperties";
 import { isPicGoEnabled, normalizeSettings, publishSettingsFingerprint } from "./utils/settings";
 import { WechatApi } from "./utils/wechatApi";
 import { decryptWechatSecret, encryptWechatSecret } from "./utils/wechatSecret";
@@ -117,7 +119,7 @@ export default class EasyPub extends Plugin {
       void this.openActiveWechatDraft().catch(error => new Notice((error as Error).message));
     } });
     this.addCommand({ id: "wechat-refresh-source", name: "从源文章更新公众号本地稿（确认后替换正文）", callback: () => {
-      void this.preparePublish(PLATFORMS.find(p => p.id === "wechat")!, true);
+      void this.preparePublish(PLATFORMS.find(p => p.id === "wechat")!, true, { configure: true });
     } });
 
     // 发布命令 - 显示平台选择
@@ -155,6 +157,10 @@ export default class EasyPub extends Plugin {
     });
 
     this.addSettingTab(new EasyPubSettingTab(this.app, this));
+    this.addCommand({ id: "initialize-source-properties", name: "初始化原稿属性", callback: () => {
+      void this.initializeSourceProperties().catch(error => new Notice(this.getErrorMessage(error)));
+    } });
+    this.addCommand({ id: "refresh-platform-properties", name: "从原稿刷新平台属性（选择字段）", callback: () => this.showPlatformSelector(true) });
     this.addCommand({
       id: "fill-missing-pub-ids",
       name: "批量补齐文件夹中的 pub_id",
@@ -438,7 +444,34 @@ export default class EasyPub extends Plugin {
     }
   }
 
-  showPlatformSelector() {
+  async initializeSourceProperties() {
+    this.assertSettingsWritable();
+    const file = this.app.workspace.getActiveFile();
+    if (!file || file.extension !== "md") throw new Error("请先打开 Markdown 原稿");
+    if (this.publishInProgress || this.publishConfirmationOpen || this.pubIdBatchInProgress) throw new Error("已有 EasyPub 任务正在进行，请稍候");
+    this.publishInProgress = true;
+    try {
+      const filePath = file.path, snapshot = await this.app.vault.read(file);
+      const parsed = parseFrontMatter(snapshot, true);
+      if (parsed.data.source_file || PLATFORMS.filter(p => !p.isExternal).some(p => filePath.startsWith(`${getPublishPath(p, this.settings)}/`))) {
+        throw new Error("当前文件是发布稿，请打开原稿后初始化");
+      }
+      const selection = await chooseArticleProperties(this.app, { title: "初始化原稿属性",
+        description: "填写通用文章信息。自定义属性保留；缺失的 pub_id 在确认后生成，发布稿关联在发布后建立。",
+        fields: SOURCE_FIELDS, current: { ...parsed.data, title: parsed.data.title || file.basename }, suggested: {} });
+      if (!selection) return;
+      if (file.path !== filePath || await this.app.vault.read(file) !== snapshot) throw new Error("原稿已变化，请重新初始化");
+      await this.app.fileManager.processFrontMatter(file, data => {
+        if (file.path !== filePath || !isDeepStrictEqual(data, parsed.data)) throw new Error("原稿属性已变化，请重新初始化");
+        const result = applyPropertySelection(data, selection);
+        if (needsPubId(result.pub_id)) result.pub_id = generatePubId();
+        Object.assign(data, result);
+      });
+      new Notice("原稿属性已初始化");
+    } finally { this.publishInProgress = false; }
+  }
+
+  showPlatformSelector(refreshProperties = false) {
     const activeFile = this.app.workspace.getActiveFile();
     if (!activeFile) {
       new Notice("请先打开要发布的文章");
@@ -447,12 +480,12 @@ export default class EasyPub extends Plugin {
 
     new PlatformSelectModal(this.app, PLATFORMS, async (platform) => {
       if (platform) {
-        await this.preparePublish(platform);
+        await this.preparePublish(platform, false, { configure: true, propertiesOnly: refreshProperties });
       }
-    }).open();
+    }, refreshProperties).open();
   }
 
-  async preparePublish(platform: Platform, updateWechatFromSource = false) {
+  async preparePublish(platform: Platform, updateWechatFromSource = false, options: { configure?: boolean; propertiesOnly?: boolean } = {}) {
     if (this.publishInProgress || this.publishConfirmationOpen || this.pubIdBatchInProgress) {
       new Notice("已有发布任务正在进行，请稍候");
       return;
@@ -460,7 +493,7 @@ export default class EasyPub extends Plugin {
 
     this.publishInProgress = true;
     try {
-      await this.performPublish(platform, updateWechatFromSource);
+      await this.performPublish(platform, updateWechatFromSource, options);
     } catch (error) {
       console.error("EasyPub publish failed", error);
       new Notice(`发布失败：${this.getErrorMessage(error)}`);
@@ -469,7 +502,7 @@ export default class EasyPub extends Plugin {
     }
   }
 
-  private async performPublish(platform: Platform, updateWechatFromSource = false) {
+  private async performPublish(platform: Platform, updateWechatFromSource = false, options: { configure?: boolean; propertiesOnly?: boolean } = {}) {
     this.assertSettingsWritable();
     const activeFile = this.app.workspace.getActiveFile();
     if (!activeFile) {
@@ -492,7 +525,8 @@ export default class EasyPub extends Plugin {
 
     const content = await this.app.vault.read(activeFile);
     const settingsFingerprint = publishSettingsFingerprint(this.settings, platform.id);
-    const sourceParsed = parseFrontMatter(content);
+    const sourceParsed = parseFrontMatter(content, true);
+    if (sourceParsed.data.source_file && (platform.id !== "wechat" || options.propertiesOnly)) throw new Error("请打开原稿后生成或刷新平台稿件");
     if (platform.id === "wechat" && isWechatDraft(activeFile, content, this)) {
       if (updateWechatFromSource) throw new Error("请打开源文章后执行更新，不会把本地成稿再次当作源文章");
       await this.openWechatDraft(activeFile);
@@ -514,7 +548,8 @@ export default class EasyPub extends Plugin {
       pubId = generatePubId();
     }
 
-    if (platform.id === "wechat" && existingPath && !updateWechatFromSource) {
+    if (options.propertiesOnly && !existingContent) throw new Error("未找到此平台发布稿，请先生成稿件");
+    if (platform.id === "wechat" && existingPath && !updateWechatFromSource && !options.propertiesOnly) {
       const draft = this.app.vault.getAbstractFileByPath(existingPath);
       if (draft instanceof TFile) {
         await this.openPublishedFile(existingPath, platform);
@@ -526,15 +561,31 @@ export default class EasyPub extends Plugin {
       ...sourceParsed.data,
       pub_id: pubId,
     };
-    const title = getFrontMatterString(sourceDataWithPubId, "title") || activeFile.basename;
-    const subFolder = getSubFolder(platform, sourceDataWithPubId);
+    const initial = initialPlatformProperties(platform.id, sourceDataWithPubId,
+      getFrontMatterString(sourceDataWithPubId, "title") || activeFile.basename, this.settings.wechat.defaultAuthor);
+    const existingData = existingContent !== null ? parseFrontMatter(existingContent, true).data : undefined;
+    let selectedProperties = existingData === undefined ? initial : platform.id === "wechat" ? canonicalWechatTitle(existingData) : existingData;
+    let refreshCover = !existingData;
+    if (options.configure && (isNew || options.propertiesOnly)) {
+      const selection = await chooseArticleProperties(this.app, { title: options.propertiesOnly ? `刷新${platform.name}属性` : `生成${platform.name}稿件`,
+        description: options.propertiesOnly ? "勾选要从原稿刷新的字段，可调整建议值。正文和首次日期保留。" : "确认该平台的文章属性；后续更新正文时保留这些设置。",
+        fields: platformPropertyFields(platform.id), current: selectedProperties, suggested: initial,
+        refresh: options.propertiesOnly, removable: existingData ? legacyPropertyKeys(platform.id, existingData) : [] });
+      if (!selection) return;
+      refreshCover = refreshCover || Object.prototype.hasOwnProperty.call(selection.values, platform.id === "wechat" ? "wechat.cover" : "cover");
+      selectedProperties = applyPropertySelection(selectedProperties, selection);
+    }
+    const title = getFrontMatterString(selectedProperties, "title") || activeFile.basename;
+    const subFolder = getSubFolder(platform, selectedProperties);
     const desiredTargetPath = getTargetPath(platform, this.settings, title, subFolder);
     let targetPath = existingPath || desiredTargetPath;
     if (!existingPath && await this.publishPathExists(platform, desiredTargetPath)) {
       targetPath = await this.getAvailableTargetPath(platform, desiredTargetPath);
       new Notice(`发现同名文件，将保存为 ${this.getDisplayFileName(platform, targetPath)}`);
     }
-    const preparedContent: PreparedPublishContent = platform.id === "wechat"
+    const preparedContent: PreparedPublishContent = options.propertiesOnly
+      ? { content: parseFrontMatter(existingContent!).content, assets: [], picgoUploads: [] }
+      : platform.id === "wechat"
       ? { content: await rebaseWechatImages(this.app, sourceParsed.content, activeFile.path, targetPath), assets: [], picgoUploads: [] }
       : isPicGoEnabled(this.settings, platform.id)
       ? await this.preparePicGoContent(activeFile, sourceParsed.content)
@@ -548,8 +599,25 @@ export default class EasyPub extends Plugin {
       existingContent,
       pubId,
       new Date().toISOString(),
-      targetPath
+      targetPath,
+      selectedProperties
     );
+    if (platform.id !== "hexo" && refreshCover) {
+      // Only newly inherited/refreshed cover paths are relative to the source.
+      const properties = platform.id === "wechat" ? asObject(proposedPublishedData.wechat) : proposedPublishedData;
+      const cover = properties.cover;
+      if (typeof cover === "string" && cover) {
+        if (!/^https?:\/\//i.test(cover)) {
+          const link = cover.replace(/^!?\[\[|\]\]$/g, "").split("|", 1)[0];
+          const attachment = this.app.metadataCache.getFirstLinkpathDest(link, activeFile.path);
+          if (!(attachment instanceof TFile) || !HEXO_IMAGE_EXTENSIONS.has(attachment.extension.toLowerCase())) throw new Error(`找不到封面附件：${cover}`);
+          properties.cover = platform.id === "wechat" ? relativeVaultAttachment(targetPath, attachment.path) : `[[${attachment.path}]]`;
+        }
+      }
+      if (platform.id === "wechat" && properties.cover !== asObject(existingData?.wechat).cover) {
+        delete properties.cropWide; delete properties.cropSquare;
+      }
+    }
     if (platform.id === "hexo") {
       proposedPublishedData = await prepareHexoMetadata(proposedPublishedData, title, async markdown => {
         const image = isPicGoEnabled(this.settings, platform.id)
@@ -563,12 +631,6 @@ export default class EasyPub extends Plugin {
       preparedContent.assets = [...new Map(preparedContent.assets.map(asset => [asset.targetPath, asset])).values()];
       preparedContent.picgoUploads = [...new Map(preparedContent.picgoUploads.map(upload => [upload.token, upload])).values()];
     }
-    if (platform.id === "wechat") {
-      // The local draft owns its platform-specific settings, even on an explicit
-      // source refresh. Never import a source's WeChat settings over them.
-      proposedPublishedData.wechat = existingContent ? parseFrontMatter(existingContent).data.wechat ?? {} : {};
-    }
-
     const diff: ArticleDiff = {
       pub_id: pubId,
       sourcePath: activeFile.path,
@@ -684,16 +746,26 @@ export default class EasyPub extends Plugin {
     existingContent: string | null,
     pubId: string,
     timestamp: string,
-    targetPath: string
+    targetPath: string,
+    selectedProperties?: FrontMatterData
   ): Promise<FrontMatterData> {
     const existingData = existingContent ? parseFrontMatter(existingContent).data : undefined;
     let publishedData = mergePublishedFrontMatter({
+      platformId: platform.id,
+      title: getFrontMatterString(sourceData, "title") || sourceFile.basename,
+      defaultAuthor: this.settings.wechat.defaultAuthor,
       sourceData,
       existingData,
       pubId,
       sourceFileLink: createWikiLink(sourceFile.path),
       timestamp,
     });
+    if (selectedProperties) {
+      const protectedKeys = new Set(["pub_id", "source_file", "date", "updated"]);
+      if (platform.id === "hexo") { protectedKeys.add("publish_url"); protectedKeys.add("workflow"); }
+      for (const key of Object.keys(publishedData)) if (!protectedKeys.has(key)) delete publishedData[key];
+      for (const [key, value] of Object.entries(selectedProperties)) if (!protectedKeys.has(key)) publishedData[key] = value;
+    }
 
     if (platform.id === "hexo" && await findControlRoomIntegration(this.settings.hexoRepoPath)) {
       const used = new Set<string>();

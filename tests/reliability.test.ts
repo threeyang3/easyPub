@@ -473,7 +473,7 @@ export async function runReliabilityTests() {
     assert.ok(preparedVisual);
     const visualMeta = parseFrontMatter(preparedVisual.sourceContent).data;
     assert.match(String(visualMeta.cover), /^\/blog\/picture\/easy-pub\//);
-    assert.equal(visualMeta.top_img, visualMeta.cover);
+    assert.equal(visualMeta.top_img, "", "A source's Hexo-only top_img is not a common inherited property");
     assert.equal(preparedVisual.assets?.length, 1);
     assert.equal(preparedVisual.picgoUploads?.length, 0);
     assert.ok(preparedVisual.sourceContent.includes(`](${visualMeta.cover})`));

@@ -37,6 +37,27 @@ cover: "[[附件/封面.png]]"
 
 源文件可以在 Vault 的普通笔记目录中。Vault 内子文件使用 wiki link；外部 Hexo 使用普通文件路径。`source_file`、`publish_url`、`updated` 不应作为源稿的发布状态保留：源关联更新时会清理它们，源文章自己设置的 `date` 保留。
 
+## 属性归属
+
+原稿基础属性为 `title`、`author`、`description`、`tags`、`categories`、`cover`、可选 `date`；关联属性为插件维护的 `pub_id`、`子文件`。其他自定义笔记属性保留在原稿，首次生成平台稿时不导出。
+
+所有平台稿都有 `title`、`pub_id`、`source_file`、`date`、`updated`。专用属性如下：
+
+| 平台 | 首次继承的通用属性 | 平台专用属性 |
+| --- | --- | --- |
+| Hexo | title、author、description、tags、categories、cover | layout 默认 post；top_img 默认空；可设置 abbrlink、password_secret；兼容后台生成短链接并管理 workflow；publish_url 由插件计算 |
+| 知乎 | title、description、tags、cover | zhihu_type 在生成表单选择，默认“文章” |
+| 微信公众号 | title；author → wechat.author，description → wechat.digest，cover → wechat.cover | wechat.sourceUrl、cropWide、cropSquare、layout、layoutHistory；作者缺失时采用账号默认作者，摘要缺失时由工作台提取 |
+| 小红书 | title、description、tags、cover | 暂无额外专用字段；属性用于本地整理 |
+
+Hexo 的空封面/顶部图继承主题，`false` 保持禁用。公众号封面附件路径转换为相对于本地稿的路径；知乎/小红书的附件封面转换为 Vault 路径的 wiki link。
+
+“初始化原稿属性”提供表单与写入预览，确认后才补齐缺失 ID。已有 ID 和自定义属性保持不变，`子文件` 在实际发布后生成。列表使用 JSON，例如 `["写作", "AI"]`；分类也支持嵌套文本列表。
+
+“从原稿刷新平台属性（选择字段）”默认不勾选任何字段，显示源稿建议值与目标当前值。只写入选中的字段，允许调整建议值；正文、首次日期和身份保持原有关系。旧稿的额外属性默认保留，可逐项选择移除并核对最终差异。改变公众号封面时清除旧裁剪，之后在工作台调整新封面。
+
+已有稿件保留原文件位置；刷新知乎 `zhihu_type` 不自动移动目录。更新后的文件路径仍在最终差异窗口显示。
+
 ## 发布稿合并规则
 
 | 字段/内容 | 新建 | 更新 |
@@ -45,9 +66,10 @@ cover: "[[附件/封面.png]]"
 | `pub_id` / `source_file` | 生成关联 | 按本次确认的源身份维护 |
 | `date` | 源稿值优先，否则当前时间 | 保留目标已有首次日期 |
 | `updated` | 当前时间 | 随更新刷新 |
-| 源稿拥有的其他字段 | 复制 | 覆盖目标同名值 |
-| 仅目标拥有的字段 | 按平台补齐 | 保留 |
-| 目标 `wechat` | 初始化 | 公众号源刷新仍保留本地设置，不被源稿同名字段覆盖 |
+| 基础字段 | 按平台白名单继承，生成表单可调整 | 保留平台稿当前值；仅显式选择刷新才改变 |
+| 原稿自定义字段 | 不导出 | 不自动加入目标 |
+| 目标额外字段 | 不自动加入 | 保留；显式清理时展示预览 |
+| 目标 `wechat` | 从通用作者、摘要和封面初始化 | 公众号正文刷新仍保留本地设置；属性刷新只改变选中字段 |
 | Hexo `publish_url` | 能解析则生成 | 能解析则更新，否则保留已有值 |
 
 解析接受数据型 YAML/JSON，不执行 JavaScript Front Matter。序列化可能调整注释或格式，不应依靠 YAML 原始排版保存运行状态。
@@ -60,7 +82,6 @@ title: 一篇示例文章
 pub_id: 0123456789abcdef
 source_file: "[[笔记/一篇示例文章]]"
 wechat:
-  title: 公众号展示标题
   author: 示例作者
   digest: 手工编辑的摘要
   sourceUrl: "https://example.com/article"
@@ -68,7 +89,7 @@ wechat:
 ---
 ```
 
-`wechat.title/author/digest/sourceUrl` 的插件校验上限分别为 32 字、16 字、120 字和 1024 UTF-8 字节。标题必填；原文链接使用 HTTP(S)。这些是当前实现的提交规则，不是对平台所有内容类型的通用承诺。
+顶层 `title`、`wechat.author/digest/sourceUrl` 的插件校验上限分别为 32 字、16 字、120 字和 1024 UTF-8 字节。标题必填；原文链接使用 HTTP(S)。旧稿仍优先读取历史 `wechat.title`；确认保存或源刷新时将实际展示标题移到顶层 `title`，移除重复的嵌套标题。这些是当前实现的提交规则，不是对平台所有内容类型的通用承诺。
 
 `cropWide` 与 `cropSquare` 各保存 `{x, y, width, height}` 的归一化裁剪矩形，用于 2.35:1 与 1:1；应通过裁剪界面生成。封面设置只选择和裁剪，不改写正文图片顺序。
 

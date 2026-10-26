@@ -9,12 +9,23 @@ const bundle = await build({
     import { PublishBackupsModal } from './modals/PublishBackupsModal';
     import { PublishDirectoryModal } from './modals/PublishDirectoryModal';
     import { PicGoTransportModal } from './modals/PicGoTransportModal';
+    import { ArticlePropertiesModal } from './modals/ArticlePropertiesModal';
+    import { SOURCE_FIELDS, platformPropertyFields } from './utils/articleProperties';
     const pending = [];
     window.pending = pending;
     window.defer = (kind, args) => new Promise((resolve, reject) => pending.push({kind, args, resolve, reject}));
     window.openBackups = () => { window.modal = new PublishBackupsModal({}, '/blog'); window.modal.open(); };
     window.openDirectory = () => { window.modal = new PublishDirectoryModal({}, (...args) => window.defer('inspect', args)); window.modal.open(); };
     window.openTransport = () => { window.consent = null; window.modal = new PicGoTransportModal({}, 'http://example.com', value => { window.consent = value; }); window.modal.open(); };
+    window.openProperties = (refresh = false) => {
+      window.selection = 'pending';
+      window.modal = new ArticlePropertiesModal({}, { title: '文章属性', description: '确认属性',
+        fields: refresh ? platformPropertyFields('zhihu') : SOURCE_FIELDS,
+        current: { title: 'Local', tags: ['Local'], custom: '<img src=x onerror="window.injected=true">' },
+        suggested: { title: 'Source', tags: ['Source'], zhihu_type: '文章' }, refresh,
+        removable: refresh ? ['custom'] : [] }, value => { window.selection = value; });
+      window.modal.open();
+    };
   `, resolveDir: process.cwd() },
   bundle: true, platform: 'browser', format: 'esm', write: false,
   plugins: [{ name: 'publishing-ui-fixtures', setup(builder) {
@@ -106,5 +117,28 @@ try {
   await page.evaluate(() => window.openTransport());
   await button('仅允许本次上传').click();
   assert.equal(await page.evaluate(() => window.consent), true);
+  await page.evaluate(() => window.openProperties());
+  assert.equal(await button('确认并继续').isDisabled(), true);
+  await page.getByRole('textbox', { name: '标签', exact: true }).fill('not a list');
+  await button('预览属性变更').click();
+  assert.equal(await button('确认并继续').isDisabled(), true);
+  await page.getByRole('textbox', { name: '标签', exact: true }).fill('["reviewed"]');
+  await button('预览属性变更').click();
+  assert.equal(await button('确认并继续').isDisabled(), false);
+  await page.getByRole('textbox', { name: '标题', exact: true }).fill('Reviewed');
+  assert.equal(await button('确认并继续').isDisabled(), true, 'Editing after preview must require a new review');
+  await button('预览属性变更').click(); await button('确认并继续').click();
+  assert.deepEqual(await page.evaluate(() => window.selection), { values: { title: 'Reviewed', tags: ['reviewed'] }, remove: [] });
+  await page.evaluate(() => window.openProperties(true));
+  assert.equal(await page.getByRole('textbox', { name: '标题', exact: true }).isDisabled(), true);
+  await page.getByRole('checkbox', { name: '刷新标题', exact: true }).check();
+  await page.getByRole('checkbox', { name: '移除 custom', exact: true }).check();
+  await button('预览属性变更').click();
+  assert.equal(await page.evaluate(() => !!window.injected), false);
+  await button('确认并继续').click();
+  assert.deepEqual(await page.evaluate(() => window.selection), { values: { title: 'Source' }, remove: ['custom'] });
+  await page.evaluate(() => { window.openProperties(); window.modal.close(); });
+  assert.equal(await page.evaluate(() => window.selection), null);
+  assert.deepEqual(errors, []);
   console.log('Publishing UI: pagination, retry, stale reads, cancellation and readonly text passed.');
 } finally { await browser.close(); }

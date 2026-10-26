@@ -22,7 +22,7 @@ Before the build, use `npm test` for core metadata and Hexo URL behavior.
 - Keep `minAppVersion` aligned with any Obsidian APIs in use. Current code requires `1.4.4+` because it uses `app.fileManager.processFrontMatter`.
 - Keep path logic in `utils/platforms.ts`.
 - Preserve front matter fields from existing published files.
-- Source-owned fields override matching published values; preserve platform-only fields.
+- New platform drafts inherit only their explicit property whitelist. Updates preserve target-owned properties; source refresh is an explicit field selection with preview. Legacy extra properties are removed only when selected.
 - Source files should only keep source-owned metadata such as `pub_id` and `子文件`.
 - Hexo child references in source front matter are plain external file paths, not wiki links.
 - Never overwrite an unrelated same-name publish target; select a numbered filename automatically.

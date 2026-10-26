@@ -279,7 +279,6 @@ async function testDraftIsolation() {
   let proposed = "";
   DiffModal.prototype.open = function () { proposed = (this as any).diff.sourceContent; };
   plugin.readPublishFile = async () => local;
-  plugin.buildPublishedFrontMatter = async () => ({ pub_id: "shared", source_file: "[[source/a]]", wechat: { author: "source-author" } });
   try { await plugin.preparePublish(PLATFORMS.find(p => p.id === "wechat")!, true); }
   finally { DiffModal.prototype.open = originalOpen; (plugin as any).publishConfirmationOpen = false; }
   assert.equal(readWechatArticleSettings(parseFrontMatter(proposed).data.wechat).author, "local-author");
@@ -287,12 +286,11 @@ async function testDraftIsolation() {
   // New drafts bypass global PicGo too, and rebase only their own image references.
   plugin.findArticleByPubId = async () => null;
   plugin.publishPathExists = async () => false;
-  plugin.buildPublishedFrontMatter = async () => ({ pub_id: "shared", source_file: "[[source/a]]" });
   let generated = "";
   plugin.copyAndOpenForEdit = async diff => { generated = diff.sourceContent; };
   await plugin.preparePublish(PLATFORMS.find(p => p.id === "wechat")!);
   assert.equal(uploaded, 0); assert.match(generated, /Source changed/);
-  assert.deepEqual(parseFrontMatter(generated).data.wechat, {});
+  assert.deepEqual(parseFrontMatter(generated).data.wechat, { author: "" });
 }
 
 export async function runWechatTests() {

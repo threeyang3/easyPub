@@ -3,7 +3,7 @@ import type EasyPub from "../main";
 import { WechatArticleSettings, WechatCrop, WechatImage, WechatPreparedDocument } from "../types";
 import { getFrontMatterString, parseFrontMatter } from "../utils/frontMatter";
 import { isWechatDraftPath } from "../utils/platforms";
-import { centeredCrop, readWechatArticleSettings, wechatAssetKey, wechatHash, wechatStateKey } from "../utils/wechatState";
+import { centeredCrop, readWechatArticleSettings, wechatArticleNeedsSave, wechatAssetKey, wechatHash, wechatStateKey } from "../utils/wechatState";
 import { IMAGE_EXTENSIONS, replaceWechatImageTokens } from "../utils/wechatMarkdown";
 import { loadWechatImage, readWechatImage, releaseWechatImages } from "../utils/wechatImages";
 import { digestFromWechatHtml, previewWechatHtml, renderWechatDocument, WECHAT_HTML_LIMIT_ISSUE } from "../utils/wechatRenderer";
@@ -413,7 +413,10 @@ export class WechatView extends ItemView {
       // the last cancellable boundary; after it returns the write may complete.
       assertActive();
       const previous = data.wechat && typeof data.wechat === "object" && !Array.isArray(data.wechat) ? data.wechat : {};
-      data.wechat = { ...previous, ...(selected ?? this.article) };
+      const { title, ...settings } = selected ?? this.article;
+      data.title = title;
+      data.wechat = { ...previous, ...settings };
+      delete (data.wechat as Record<string, unknown>).title;
     });
     this.dirty = false; await this.refresh();
   }
@@ -470,7 +473,7 @@ export class WechatView extends ItemView {
     if (!this.plugin.hasWechatCredentials()) { this.plugin.openWechatSetup(() => this.invalidate()); return; }
     if (!this.file || !this.prepared || !this.cover || this.stale || this.dirty || this.prepared.issues.length) throw new Error("请先修复问题并保存设置、刷新预览");
     if (this.plugin.wechatSyncInProgress) throw new Error("已有公众号同步任务正在进行");
-    if (JSON.stringify(readWechatArticleSettings(parseFrontMatter(this.snapshot).data.wechat)) !== JSON.stringify(this.article)) await this.saveArticle();
+    if (wechatArticleNeedsSave(parseFrontMatter(this.snapshot).data, this.article)) await this.saveArticle();
     const file = this.file, snapshot = this.snapshot, filePath = this.snapshotPath, version = this.version;
     const settings = JSON.stringify([this.plugin.settings.wechat.appId, this.plugin.settings.wechat.encryptedSecret, this.plugin.settings.wechat.defaultAuthor, this.allowRemoteImages()]);
     const credentialRevision = this.plugin.wechatCredentialRevision;

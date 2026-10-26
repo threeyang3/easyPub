@@ -1,15 +1,12 @@
 import matter from "gray-matter";
 import { randomBytes } from "crypto";
 import { FrontMatterData, ParsedFrontMatter } from "../types";
-
-const SOURCE_ONLY_PUBLISHED_OMIT_FIELDS = new Set([
-  "子文件",
-  "source_file",
-  "publish_url",
-  "updated",
-]);
+import { canonicalWechatTitle, initialPlatformProperties } from "./articleProperties";
 
 export interface PublishedFrontMatterMergeOptions {
+  platformId: string;
+  title?: string;
+  defaultAuthor?: string;
   sourceData: FrontMatterData;
   existingData?: FrontMatterData;
   pubId: string;
@@ -95,27 +92,31 @@ export function mergeSourceFrontMatter(
 }
 
 export function mergePublishedFrontMatter({
+  platformId,
+  title = "Untitled",
+  defaultAuthor = "",
   sourceData,
-  existingData = {},
+  existingData,
   pubId,
   sourceFileLink,
   timestamp,
   publishUrl,
   forcePublishUrl = false,
 }: PublishedFrontMatterMergeOptions): FrontMatterData {
-  const publishableSourceData = getPublishableSourceFrontMatter(sourceData);
+  const properties = existingData === undefined
+    ? initialPlatformProperties(platformId, sourceData, title, defaultAuthor)
+    : platformId === "wechat" ? canonicalWechatTitle(existingData) : existingData;
   const data: FrontMatterData = {
-    ...existingData,
-    ...publishableSourceData,
+    ...properties,
     pub_id: pubId,
     source_file: sourceFileLink,
     updated: timestamp,
   };
 
-  if (hasFrontMatterValue(existingData.date)) {
-    data.date = existingData.date;
-  } else if (hasFrontMatterValue(publishableSourceData.date)) {
-    data.date = publishableSourceData.date;
+  if (hasFrontMatterValue(existingData?.date)) {
+    data.date = existingData!.date;
+  } else if (hasFrontMatterValue(sourceData.date)) {
+    data.date = sourceData.date;
   } else {
     data.date = timestamp;
   }
@@ -127,14 +128,6 @@ export function mergePublishedFrontMatter({
   }
 
   return data;
-}
-
-function getPublishableSourceFrontMatter(sourceData: FrontMatterData): FrontMatterData {
-  return Object.fromEntries(
-    Object.entries(sourceData).filter(
-      ([key]) => !SOURCE_ONLY_PUBLISHED_OMIT_FIELDS.has(key)
-    )
-  );
 }
 
 function normalizeChildReference(value: unknown): string | null {

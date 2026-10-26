@@ -240,3 +240,10 @@
   .easy-pub-layout-modal .easy-pub-layout.epl-show-preview .epl-options { display:none; }
   .easy-pub-layout-modal .epl-intro { font-size:12px; margin:0 0 6px; }
 }
+.easy-pub-properties label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+.easy-pub-properties label > span { min-width: 140px; }
+.easy-pub-properties label > input[type="text"], .easy-pub-properties label > select { flex: 1; min-width: 180px; }
+.easy-pub-properties label > small { flex-basis: 100%; color: var(--text-muted); overflow-wrap: anywhere; }
+.easy-pub-properties pre { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.easy-pub-properties [role="alert"] { color: var(--text-error); }
+.easy-pub-properties button { margin-right: 8px; }

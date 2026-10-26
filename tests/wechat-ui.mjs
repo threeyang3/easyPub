@@ -119,6 +119,9 @@ try {
   assert.equal(await titleInput.getAttribute('aria-invalid'), 'false');
   await page.getByRole('button', { name:'保存设置并刷新', exact:true }).click();
   await page.waitForFunction(() => !document.querySelector('.epw-footer .mod-cta').disabled);
+  const canonicalTitle = await page.evaluate(() => window.fixture.read());
+  assert.match(canonicalTitle, /^title:/m);
+  assert.doesNotMatch(canonicalTitle, /^  title:/m, 'Saving must remove the duplicate wechat.title');
   await page.evaluate(() => {
     const unrelated = document.createElement('div'); unrelated.className = 'diff-container';
     unrelated.id = 'unrelated-diff'; document.querySelector('main').appendChild(unrelated);

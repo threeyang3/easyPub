@@ -96,6 +96,13 @@ export class EasyPubSettingTab extends PluginSettingTab {
       }));
 
     new Setting(containerEl).setName("本地发布稿").setHeading();
+    new Setting(containerEl).setName("文章属性")
+      .setDesc("原稿保存基础信息；各平台稿分别设置标题、封面等属性。打开原稿后可初始化，或选择字段刷新已有平台稿。")
+      .addButton(button => button.setButtonText("初始化当前原稿").onClick(async () => {
+        try { await this.plugin.initializeSourceProperties(); }
+        catch (error) { new Notice((error as Error).message); }
+      }))
+      .addButton(button => button.setButtonText("刷新平台属性").onClick(() => this.plugin.showPlatformSelector(true)));
     new Setting(containerEl)
       .setName("发布根目录")
       .setDesc("知乎、微信公众号、小红书的本地稿目录，相对于 Vault 根目录")

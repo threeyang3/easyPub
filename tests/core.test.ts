@@ -39,9 +39,11 @@ import {
 } from "../utils/controlRoom";
 
 import { runStructureTests } from "./structure.test";
+import { runArticlePropertyTests } from "./articleProperties.test";
 
 async function run() {
   await runStructureTests();
+  await runArticlePropertyTests();
   await runControlRoomLauncherTests();
   await runBatchPubIdTests();
   await runReliabilityTests();
@@ -320,6 +322,7 @@ async function run() {
   );
 
   const merged = mergePublishedFrontMatter({
+    platformId: "hexo",
     sourceData: {
       title: "新标题",
       tags: ["新标签"],
@@ -337,8 +340,8 @@ async function run() {
     timestamp: "2026-07-27T00:00:00.000Z",
   });
 
-  assert.equal(merged.title, "新标题");
-  assert.deepEqual(merged.tags, ["新标签"]);
+  assert.equal(merged.title, "旧标题");
+  assert.deepEqual(merged.tags, ["旧标签"]);
   assert.equal(merged.date, "2026-01-01");
   assert.equal(merged.platform_status, "draft");
   assert.equal(merged.pub_id, "article-id");
@@ -346,15 +349,15 @@ async function run() {
   assert.equal("子文件" in merged, false);
   assert.equal("publish_url" in merged, false);
 
-  // hexo-blog's editor owns these fields unless the source explicitly sets them.
+  // Platform editors own their properties even when the source sets the same keys.
   for (const top_img of [false, "/picture/top.png", "https://example.com/top.png"]) {
     const existingData = { top_img, cover: "/picture/cover.png", description: "后台摘要", workflow: "pending", password_secret: "BLOG_ENCRYPTION_POST" };
-    const options = { existingData, pubId: "legacy-id", sourceFileLink: "[[旧稿]]", timestamp: "2026-10-23" };
+    const options = { platformId: "hexo", existingData, pubId: "legacy-id", sourceFileLink: "[[旧稿]]", timestamp: "2026-10-23" };
     const updated = mergePublishedFrontMatter({ ...options, sourceData: { title: "修改正文" } });
     for (const [key, value] of Object.entries(existingData)) assert.equal(updated[key], value);
     const overridden = mergePublishedFrontMatter({ ...options, sourceData: { top_img: false, cover: "/picture/source.png" } });
-    assert.equal(overridden.top_img, false);
-    assert.equal(overridden.cover, "/picture/source.png");
+    assert.equal(overridden.top_img, top_img);
+    assert.equal(overridden.cover, "/picture/cover.png");
   }
 
   const source = mergeSourceFrontMatter(

@@ -9,6 +9,8 @@
 | ID | 名称 | 从哪里执行 / 行为 |
 | --- | --- | --- |
 | `publish` | `Publish to platform` | 当前源 Markdown；选平台后生成或确认更新稿件。公众号已有本地稿时只打开 |
+| `initialize-source-properties` | `初始化原稿属性` | 当前原稿；填写基础属性并预览，确认后补齐缺失 ID；保留自定义属性 |
+| `refresh-platform-properties` | `从原稿刷新平台属性（选择字段）` | 当前原稿；选择已有平台稿及要刷新的字段，可预览并选择清理旧额外属性；保留目标正文与首次日期 |
 | `build-hexo` | `Build Hexo locally (no deploy)` | 使用设置中的博客仓库执行 clean + generate，不部署；构建成功后尝试更新当前文章发布链接 |
 | `deploy-hexo` | `Deploy to Hexo` | 普通仓库执行 Hexo 构建/部署；兼容后台则打开保护流程 |
 | `open-hexo-control-room` | `Open Hexo management console` | 打开设置中的兼容博客后台，不要求当前文件是文章 |
@@ -26,6 +28,7 @@
 - 设置页“预览当前文章”：仍需要当前源文章的关联，不会预览尚未保存到博客的源正文。
 - 设置页“查看备份”：只读浏览原文与来源；“检查备份”：统计及 Git 状态检查，不自动删除或恢复。
 - 设置页“配置 AI 排版”：只保存服务配置，不会自动发送文章。
+- 设置页“本地发布稿 → 文章属性”：提供初始化当前原稿、刷新平台属性的入口。
 
 ## 公众号工作台按钮
 

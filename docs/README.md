@@ -61,6 +61,6 @@
 | [公众号验收](wechat-acceptance.md) | 各轮自动化及真实账号测试 |
 | [排版验收](wechat-layout-acceptance.md) | AI、风格、冲突及后台/手机反馈 |
 | [macOS 验收](macos-acceptance.md) | Mac 环境和兼容后台专项证据 |
-| [1.6.3](releases/1.6.3.md)、[1.6.4](releases/1.6.4.md)、[1.7.0](releases/1.7.0.md)、[1.7.1](releases/1.7.1.md)、[1.7.2](releases/1.7.2.md)、[1.7.3](releases/1.7.3.md) | 各稳定版本发布说明 |
+| [1.6.3](releases/1.6.3.md)、[1.6.4](releases/1.6.4.md)、[1.7.0](releases/1.7.0.md)、[1.7.1](releases/1.7.1.md)、[1.7.2](releases/1.7.2.md)、[1.7.3](releases/1.7.3.md)、[1.8.0](releases/1.8.0.md) | 各稳定版本发布说明 |
 
 结构化验收摘要保存在 [verification/](verification/)。不要向该目录提交真实账号密钥、访问令牌、未公开文章或完整插件配置。

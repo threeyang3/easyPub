@@ -1,7 +1,7 @@
 import { wechatHash } from "./wechatHash";
 export { wechatHash } from "./wechatHash";
 import { readWechatLayoutPlan } from "./wechatLayoutEngine";
-import { WechatArticleSettings, WechatCrop, WechatSettings } from "../types";
+import { FrontMatterData, WechatArticleSettings, WechatCrop, WechatSettings } from "../types";
 
 const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value)
   ? value as Record<string, unknown> : {};
@@ -53,6 +53,14 @@ export function readWechatArticleSettings(value: unknown): WechatArticleSettings
     try { return [readWechatLayoutPlan(plan)]; } catch { return []; }
   });
   return result;
+}
+
+export function wechatArticleNeedsSave(data: FrontMatterData, article: WechatArticleSettings): boolean {
+  const saved = readWechatArticleSettings(data.wechat);
+  const { title, ...settings } = article;
+  return data.title !== title || saved.title !== undefined
+    || (Object.keys({ ...saved, ...settings }) as Array<Exclude<keyof WechatArticleSettings, "title">>)
+      .some(key => JSON.stringify(saved[key]) !== JSON.stringify(settings[key]));
 }
 
 export function centeredCrop(width: number, height: number, ratio: number, zoom = 1, x = 0.5, y = 0.5): WechatCrop {

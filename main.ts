@@ -1,3 +1,6 @@
+import { PublishingView, PUBLISHING_VIEW } from "./views/PublishingView";
+import { formatHexoMarkdown } from "./utils/hexoFormatting";
+import { HexoFormatModal } from "./modals/HexoFormatModal";
 import fs from "fs/promises";
 import path from "path";
 import { createHash } from "crypto";
@@ -23,6 +26,7 @@ import { PublishDirectoryModal } from "./modals/PublishDirectoryModal";
 import { inspectPublishDocuments } from "./utils/publishDiagnostics";
 import { fillMissingPubIds, externalPubIdDocuments, needsPubId, PubIdBatchResult } from "./utils/batchPubIds";
 import {
+  resolveVaultAttachment,
   getPublishPath,
   getTargetPath,
   getSubFolder,
@@ -104,6 +108,19 @@ export default class EasyPub extends Plugin {
 
   async onload() {
     await this.loadSettings();
+    this.registerView(PUBLISHING_VIEW, leaf => new PublishingView(leaf, this));
+    this.addRibbonIcon("panels-top-left", "打开 EasyPub 发布面板", () => { void this.openPublishingPanel().catch(error => new Notice(this.getErrorMessage(error))); });
+    this.addCommand({ id: "open-publishing-panel", name: "打开发布面板", callback: () => this.openPublishingPanel() });
+    this.addCommand({ id: "format-hexo", name: "一键排版 Hexo 发布稿", callback: () => {
+      void this.formatHexoArticle().catch(error => new Notice(this.getErrorMessage(error)));
+    } });
+    this.app.workspace.onLayoutReady(() => {
+      if (!this.settings.workbenchIntroduced && !this.settingsRecoveryRequired) {
+        void this.openPublishingPanel().then(async () => {
+          this.settings.workbenchIntroduced = true; await this.saveSettings();
+        }).catch(error => new Notice(this.getErrorMessage(error)));
+      }
+    });
     this.registerView(HEXO_PREVIEW_VIEW, leaf => new HexoPreviewView(leaf));
     this.addCommand({ id: "preview-hexo", name: "预览 Hexo 发布效果", callback: () => void this.previewHexoArticle() });
     this.identityIndex = new PublishIdentityIndex();
@@ -341,11 +358,96 @@ export default class EasyPub extends Plugin {
 
   async openWechatDraft(file: TFile): Promise<void> {
     const existing = this.app.workspace.getLeavesOfType(WECHAT_VIEW)[0];
-    const leaf = existing ?? this.app.workspace.getRightLeaf(false);
+    const leaf = existing ?? this.app.workspace.getLeaf("tab");
     if (!leaf) throw new Error("无法打开公众号工作台");
     if (!existing) await leaf.setViewState({ type: WECHAT_VIEW, active: true });
     await (leaf.view as WechatView).bind(file);
     await this.app.workspace.revealLeaf(leaf);
+    for (const panel of this.app.workspace.getLeavesOfType(PUBLISHING_VIEW)) {
+      if (panel.view instanceof PublishingView) await panel.view.followFile(file);
+    }
+  }
+
+  async openPublishingPanel(): Promise<void> {
+    const existing = this.app.workspace.getLeavesOfType(PUBLISHING_VIEW)[0];
+    const leaf = existing ?? this.app.workspace.getRightLeaf(false);
+    if (!leaf) throw new Error("无法打开 EasyPub 发布面板");
+    if (!existing) await leaf.setViewState({ type: PUBLISHING_VIEW, active: true });
+    await this.app.workspace.revealLeaf(leaf);
+  }
+
+  async resolvePublishingSource(file: TFile, meta: FrontMatterData): Promise<TFile | null> {
+    const raw = getFrontMatterString(meta, "source_file");
+    if (!raw) return file;
+    const link = raw.replace(/^\[\[|\]\]$/g, "").split("|")[0].split("#")[0];
+    const source = this.app.metadataCache.getFirstLinkpathDest(link, file.path);
+    if (!source || source.extension !== "md" || source === file) return null;
+    const sourceMeta = parseFrontMatter(await this.app.vault.read(source), true).data;
+    const id = getFrontMatterString(meta, "pub_id");
+    return id && id === getFrontMatterString(sourceMeta, "pub_id") && !sourceMeta.source_file ? source : null;
+  }
+
+  async openRelatedDraft(source: TFile, platform: Platform): Promise<void> {
+    const meta = parseFrontMatter(await this.app.vault.read(source), true).data;
+    const id = getFrontMatterString(meta, "pub_id");
+    if (!id) throw new Error("请先从原稿创建发布稿");
+    if (platform.isExternal) await validateHexoBlog(this.settings.hexoRepoPath);
+    const target = await this.findArticleByPubId(platform, id, meta, source.path);
+    if (!target) throw new Error(`尚未创建${platform.name}发布稿，请使用“创建 / 更新发布稿”`);
+    if (platform.isExternal) {
+      // The protected Control Room is the editor for external Hexo files.
+      await this.openHexoControlRoom(); return;
+    }
+    const file = this.app.vault.getAbstractFileByPath(target);
+    if (!(file instanceof TFile)) throw new Error("发布稿已移动，请刷新后重试");
+    if (platform.id === "wechat") await this.openWechatDraft(file);
+    else await this.app.workspace.getLeaf(false).openFile(file);
+  }
+
+  async formatHexoArticle(selected?: TFile): Promise<void> {
+    this.assertSettingsWritable();
+    const active = selected ?? this.app.workspace.getActiveFile();
+    if (!active || active.extension !== "md") throw new Error("请先打开关联 Hexo 稿件的原稿");
+    const data = parseFrontMatter(await this.app.vault.read(active), true).data;
+    const source = await this.resolvePublishingSource(active, data);
+    if (!source) throw new Error("未找到关联原稿");
+    const sourcePath = source.path;
+    const sourceText = await this.app.vault.read(source);
+    const meta = parseFrontMatter(sourceText, true).data;
+    const id = getFrontMatterString(meta, "pub_id");
+    if (!id) throw new Error("请先生成 Hexo 发布稿");
+    const repository = this.settings.hexoRepoPath;
+    await validateHexoBlog(repository);
+    const hexo = PLATFORMS.find(p => p.id === "hexo")!;
+    const target = await this.findArticleByPubId(hexo, id, meta, source.path);
+    if (!target) throw new Error("未找到 Hexo 发布稿，请先生成稿件");
+    const before = await this.readPublishFile(hexo, target);
+    const result = formatHexoMarkdown(before);
+    if (result.content === before) { new Notice("Hexo 发布稿已经符合排版规则"); return; }
+    new HexoFormatModal(this.app, target, before, result, async assertActive => {
+      if (this.publishInProgress || this.publishConfirmationOpen || this.deployInProgress) throw new Error("已有发布任务正在进行，请稍候");
+      this.publishInProgress = true;
+      let sourceInvalidated = false;
+      const sourceEvents: ReturnType<typeof this.app.vault.on>[] = [];
+      try {
+        const invalidate = (file: unknown) => { if (file === source) sourceInvalidated = true; };
+        sourceEvents.push(this.app.vault.on("modify", invalidate), this.app.vault.on("rename", invalidate), this.app.vault.on("delete", invalidate));
+        if (repository !== this.settings.hexoRepoPath || sourceText !== await this.app.vault.read(source)) throw new Error("原稿或博客配置已变化，请重新排版");
+        if (target !== await this.findArticleByPubId(hexo, id, meta, source.path)) throw new Error("发布稿已移动，请重新排版");
+        const guard = () => {
+          assertActive(); this.assertSettingsWritable();
+          if (sourceInvalidated) throw new Error("原稿内容或状态已变化，请重新排版");
+          if (repository !== this.settings.hexoRepoPath || source.path !== sourcePath) throw new Error("原稿路径或博客配置已变化，请重新排版");
+        };
+        guard();
+        await this.getPublishStore().writePublishFile(hexo, target, result.content, before, guard, async () => {
+          guard();
+          if (sourceText !== await this.app.vault.read(source)) throw new Error("原稿内容已变化，请重新排版");
+          guard();
+        });
+        new Notice("Hexo 排版已保存；需要恢复时可在设置中查看发布稿备份并手动恢复");
+      } finally { sourceEvents.forEach(event => this.app.vault.offref(event)); this.publishInProgress = false; }
+    }).open();
   }
 
   async loadSettings() {
@@ -458,7 +560,7 @@ export default class EasyPub extends Plugin {
       }
       const selection = await chooseArticleProperties(this.app, { title: "初始化原稿属性",
         description: "填写通用文章信息。自定义属性保留；缺失的 pub_id 在确认后生成，发布稿关联在发布后建立。",
-        fields: SOURCE_FIELDS, current: { ...parsed.data, title: parsed.data.title || file.basename }, suggested: {} });
+        attachmentSourcePath: filePath, fields: SOURCE_FIELDS, current: { ...parsed.data, title: parsed.data.title || file.basename }, suggested: {} });
       if (!selection) return;
       if (file.path !== filePath || await this.app.vault.read(file) !== snapshot) throw new Error("原稿已变化，请重新初始化");
       await this.app.fileManager.processFrontMatter(file, data => {
@@ -471,8 +573,8 @@ export default class EasyPub extends Plugin {
     } finally { this.publishInProgress = false; }
   }
 
-  showPlatformSelector(refreshProperties = false) {
-    const activeFile = this.app.workspace.getActiveFile();
+  showPlatformSelector(refreshProperties = false, selected?: TFile) {
+    const activeFile = selected ?? this.app.workspace.getActiveFile();
     if (!activeFile) {
       new Notice("请先打开要发布的文章");
       return;
@@ -480,12 +582,12 @@ export default class EasyPub extends Plugin {
 
     new PlatformSelectModal(this.app, PLATFORMS, async (platform) => {
       if (platform) {
-        await this.preparePublish(platform, false, { configure: true, propertiesOnly: refreshProperties });
+        await this.preparePublish(platform, false, { configure: true, propertiesOnly: refreshProperties, sourceFile: activeFile });
       }
     }, refreshProperties).open();
   }
 
-  async preparePublish(platform: Platform, updateWechatFromSource = false, options: { configure?: boolean; propertiesOnly?: boolean } = {}) {
+  async preparePublish(platform: Platform, updateWechatFromSource = false, options: { configure?: boolean; propertiesOnly?: boolean; sourceFile?: TFile } = {}) {
     if (this.publishInProgress || this.publishConfirmationOpen || this.pubIdBatchInProgress) {
       new Notice("已有发布任务正在进行，请稍候");
       return;
@@ -502,9 +604,9 @@ export default class EasyPub extends Plugin {
     }
   }
 
-  private async performPublish(platform: Platform, updateWechatFromSource = false, options: { configure?: boolean; propertiesOnly?: boolean } = {}) {
+  private async performPublish(platform: Platform, updateWechatFromSource = false, options: { configure?: boolean; propertiesOnly?: boolean; sourceFile?: TFile } = {}) {
     this.assertSettingsWritable();
-    const activeFile = this.app.workspace.getActiveFile();
+    const activeFile = options.sourceFile ?? this.app.workspace.getActiveFile();
     if (!activeFile) {
       new Notice("请先打开要发布的文章");
       return;
@@ -569,7 +671,7 @@ export default class EasyPub extends Plugin {
     if (options.configure && (isNew || options.propertiesOnly)) {
       const selection = await chooseArticleProperties(this.app, { title: options.propertiesOnly ? `刷新${platform.name}属性` : `生成${platform.name}稿件`,
         description: options.propertiesOnly ? "勾选要从原稿刷新的字段，可调整建议值。正文和首次日期保留。" : "确认该平台的文章属性；后续更新正文时保留这些设置。",
-        fields: platformPropertyFields(platform.id), current: selectedProperties, suggested: initial,
+        attachmentSourcePath: activeFile.path, fields: platformPropertyFields(platform.id), current: selectedProperties, suggested: initial,
         refresh: options.propertiesOnly, removable: existingData ? legacyPropertyKeys(platform.id, existingData) : [] });
       if (!selection) return;
       refreshCover = refreshCover || Object.prototype.hasOwnProperty.call(selection.values, platform.id === "wechat" ? "wechat.cover" : "cover");
@@ -609,7 +711,7 @@ export default class EasyPub extends Plugin {
       if (typeof cover === "string" && cover) {
         if (!/^https?:\/\//i.test(cover)) {
           const link = cover.replace(/^!?\[\[|\]\]$/g, "").split("|", 1)[0];
-          const attachment = this.app.metadataCache.getFirstLinkpathDest(link, activeFile.path);
+          const attachment = resolveVaultAttachment(this.app, link, activeFile.path);
           if (!(attachment instanceof TFile) || !HEXO_IMAGE_EXTENSIONS.has(attachment.extension.toLowerCase())) throw new Error(`找不到封面附件：${cover}`);
           properties.cover = platform.id === "wechat" ? relativeVaultAttachment(targetPath, attachment.path) : `[[${attachment.path}]]`;
         }
@@ -1097,9 +1199,9 @@ export default class EasyPub extends Plugin {
     }
   }
 
-  async previewHexoArticle(): Promise<void> {
+  async previewHexoArticle(selected?: TFile): Promise<void> {
     try {
-      const file = this.app.workspace.getActiveFile();
+      const file = selected ?? this.app.workspace.getActiveFile();
       if (!file || file.extension !== "md") throw new Error("请先打开要预览的源文章");
       const meta = parseFrontMatter(await this.app.vault.read(file)).data;
       const pubId = getFrontMatterString(meta, "pub_id");
@@ -1264,10 +1366,7 @@ export default class EasyPub extends Plugin {
 
     const rootPath = await getHexoRootPath(this.settings.hexoRepoPath);
     const prepared = await prepareImageEmbeds(content, async (linkPath) => {
-      const attachment = this.app.metadataCache.getFirstLinkpathDest(
-        linkPath,
-        sourceFile.path
-      );
+      const attachment = resolveVaultAttachment(this.app, linkPath, sourceFile.path);
       const requestedExtension = path.extname(linkPath).slice(1).toLowerCase();
       if (!attachment) {
         if (HEXO_IMAGE_EXTENSIONS.has(requestedExtension)) {
@@ -1316,10 +1415,7 @@ export default class EasyPub extends Plugin {
     const imageChecks: Array<{ sourcePath: string; contentHash: string }> = [];
     const resolvedImages = new Map<string, { url: string; alt: string }>();
     const prepared = await prepareImageEmbeds(content, async (linkPath) => {
-      const attachment = this.app.metadataCache.getFirstLinkpathDest(
-        linkPath,
-        sourceFile.path
-      );
+      const attachment = resolveVaultAttachment(this.app, linkPath, sourceFile.path);
       const requestedExtension = path.extname(linkPath).slice(1).toLowerCase();
       if (!attachment) {
         if (HEXO_IMAGE_EXTENSIONS.has(requestedExtension)) {

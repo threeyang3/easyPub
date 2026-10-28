@@ -12,6 +12,7 @@ export function normalizeSettings(value: unknown): PluginSettings {
     hexoRepoPath: text("hexoRepoPath"),
     publishBasePath: text("publishBasePath") || DEFAULT_SETTINGS.publishBasePath,
     autoDeploy: saved.autoDeploy === true,
+    workbenchIntroduced: saved.workbenchIntroduced === true,
     imageHandling: saved.imageHandling === "picgo" ? "picgo" : "local",
     picgoServerUrl: text("picgoServerUrl") || DEFAULT_SETTINGS.picgoServerUrl,
     picgoServerSecret: text("picgoServerSecret"),

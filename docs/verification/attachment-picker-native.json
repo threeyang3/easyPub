@@ -1,0 +1,17 @@
+{
+  "date": "2026-10-28",
+  "environment": {
+    "vault": "Sandbox",
+    "obsidian": "1.14.5",
+    "platform": "darwin"
+  },
+  "method": "Temporary in-memory ArticlePropertiesModal, operated through CUA with the actual macOS Open panel; supplied synthetic PNG only",
+  "checks": [
+    "OS file chooser selects the synthetic PNG",
+    "Native property form imports into configured attachment directory",
+    "Cover reference reaches property confirmation",
+    "Imported bytes are identical and source note remains unchanged"
+  ],
+  "cleanup": "Synthetic attachment and test note directory removed; pre-existing Hexo generation dialog preserved",
+  "remoteWrites": 0
+}

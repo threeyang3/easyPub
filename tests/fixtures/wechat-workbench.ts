@@ -1,3 +1,6 @@
+import { ArticlePropertiesModal } from "../../modals/ArticlePropertiesModal";
+import { platformPropertyFields } from "../../utils/articleProperties";
+import { PublishingView } from "../../views/PublishingView";
 import { WechatLayoutModal } from "../../modals/WechatLayoutModal";
 import { TFile } from "obsidian";
 import { WechatView } from "../../views/WechatView";
@@ -15,6 +18,7 @@ globals.Buffer = Buffer;
 const source = Object.assign(new TFile(), { path: "source.md", basename: "source", extension: "md" });
 const file = Object.assign(new TFile(), { path: "发布/微信公众号/local.md", basename: "local", extension: "md" });
 const attachment = Object.assign(new TFile(), { path: "assets/cover.png", basename: "cover", extension: "png" });
+const alternate = Object.assign(new TFile(), {path:"assets/alternate.png",basename:"alternate",extension:"png"});
 const canvas = document.createElement("canvas"); canvas.width = 1440; canvas.height = 900;
 const ctx = canvas.getContext("2d")!;
 ctx.fillStyle = "#e8eee4"; ctx.fillRect(0, 0, 1440, 900);
@@ -27,7 +31,8 @@ const raw = await blob.arrayBuffer();
 let text = "---\npub_id: local-id\nsource_file: '[[source]]'\n---\n# 把表达，留给内容\n\n这是已经独立编辑的公众号本地稿。调整配图和封面，在这里检查最终排版。\n\n![封面配图](../../assets/cover.png)\n\n## 发布之前，从容检查\n\n- 正文与原稿保持独立\n- 图片适配交给工具\n- 最后在公众号后台发布\n\n> 好的工具，让写作更专注。\n\n```ts\n    const message = 'Hello';\n    console.log(message);\n```";
 const listeners = new Map<string, Set<(...args: any[]) => void>>();
 const emit = (event: string, file: TFile) => listeners.get(event)?.forEach(listener => listener(file));
-let delay = 0, readDelay = 0, sourceReads = 0;
+let delay = 0, readDelay = 0, sourceReads = 0, connected = true, settingsWrites = 0;
+const imported = new Map<string,TFile>();
 const app: any = {
   vault: {
     read: async (target: TFile) => {
@@ -37,15 +42,21 @@ const app: any = {
       return snapshot;
     },
     readBinary: async () => { if (delay) await new Promise(resolve => setTimeout(resolve, delay)); return raw; },
-    getAbstractFileByPath: (path: string) => path === file.path ? file : path === attachment.path ? attachment : null,
-    getFiles: () => [file, attachment, source],
+    getAbstractFileByPath: (path: string) => path === file.path ? file : path === attachment.path ? attachment : path === alternate.path ? alternate : imported.get(path) ?? null,
+    getFiles: () => [file, attachment, alternate, source, ...imported.values()],
+    createBinary: async (path: string, _bytes: ArrayBuffer) => { const file = Object.assign(new TFile(), {path, extension:path.split(".").pop(),basename:path.split("/").pop()}); imported.set(path,file); return file; },
     on: (event: string, listener: (...args: any[]) => void) => {
       if (!listeners.has(event)) listeners.set(event, new Set());
       listeners.get(event)!.add(listener); return () => listeners.get(event)?.delete(listener);
     },
   },
-  metadataCache: { getFirstLinkpathDest: (path: string) => path.includes('missing') ? null : attachment },
-  fileManager: { processFrontMatter: async (_file: TFile, callback: (data: any) => void) => {
+  metadataCache: { getFirstLinkpathDest: (path: string) => path.includes('missing') ? null : path.includes('alternate') ? alternate : attachment },
+  fileManager: { getAvailablePathForAttachment: async (name: string, _sourcePath: string) => {
+    let destination = `assets/${name}`, number = 1;
+    while (imported.has(destination) || destination === attachment.path) destination = `assets/${number++}-${name}`;
+    return destination;
+  }, processFrontMatter: async (_file: TFile, callback: (data: any) => void) => {
+    settingsWrites++;
     const parsed = parseFrontMatter(text);
     callback(parsed.data);
     // Match the host's metadata-only write: gray-matter would otherwise add
@@ -55,18 +66,21 @@ const app: any = {
     text = header.slice(0, header.length - generatedBody.length) + parsed.content;
     emit("modify", file);
   } },
-  workspace: { getLeaf: () => ({ openFile: async (file: TFile, options: unknown) => { globals.fixtureOpened = { path: file.path, options }; } }) },
+  workspace: { on: (event: string, listener: (...args: any[]) => void) => { if (!listeners.has(event)) listeners.set(event, new Set()); listeners.get(event)!.add(listener); return () => listeners.get(event)?.delete(listener); }, getActiveFile: () => file, requestSaveLayout: () => {}, getLeaf: () => ({ openFile: async (file: TFile, options: unknown) => { globals.fixtureOpened = { path: file.path, options }; } }) },
 };
 const plugin: any = { app, settings: normalizeSettings(null), wechatSyncInProgress: false, wechatCredentialRevision: 0,
   getWechatAiConfiguration: () => ({settings: {endpoint: 'https://ai.example/v1/chat/completions', model: 'test-model', encryptedKey: '', jsonMode: true}, key: 'test-ai-key'}),
   openWechatAiSettings: () => {},
-  hasWechatCredentials: () => true, openWechatSetup: () => {},
+  hasWechatCredentials: () => connected, openWechatSetup: (done?:()=>void) => {connected=true; done?.();},
   relativeWechatAttachment: () => "../../assets/cover.png", openWechatBackend: async () => {}, saveSettings: async () => {},
   getWechatApi: () => ({ listDrafts: async () => [{ media_id: "recovered", content: { news_item: [{ title: "恢复测试草稿" }] } }],
     getDraft: async () => [{ title: "恢复测试草稿", content: "<p>远端正文</p>" }] }) };
 const view = new WechatView({ app, contentEl: document.querySelector("#workbench") } as any, plugin);
 await view.onOpen(); await view.bind(file);
 globals.fixture = { view,
+  selectNewCover: () => (view as any).selectCover("../../assets/alternate.png"),
+  settingsWrites: () => settingsWrites,
+  disconnectAccount: async () => {connected=false; await view.refresh();},
   layoutHarness: () => {
     globals.layoutReads = [];
     globals.layoutSaves = [];
@@ -133,6 +147,20 @@ globals.fixture = { view,
     URL.revokeObjectURL(result.previewUrl);
     return { mime: result.mime, size: result.bytes.length, width: result.width, height: result.height };
   },
+};
+if (document.querySelector("#publishing")) {
+  plugin.manifest = { id: "easy-pub" };
+  plugin.resolvePublishingSource = () => source;
+  plugin.openHexoControlRoom = async () => { document.querySelector("#verification")!.textContent = "Hexo 管理后台入口已触发"; };
+  plugin.openRelatedDraft = async () => {};
+  const panel = new PublishingView({app,contentEl:document.querySelector("#publishing")} as any, plugin);
+  await panel.onOpen();
+}
+globals.openAttachmentProperties = () => {
+  new ArticlePropertiesModal(app, {title:"生成微信公众号稿件",description:"确认文章属性，上传封面后继续生成。", fields:platformPropertyFields("wechat"),
+    current:{title:"从写作到发布"}, suggested:{},attachmentSourcePath:source.path}, value => {
+      document.querySelector("#verification")!.textContent = value ? JSON.stringify(value,null,2) : "已取消生成，已上传的附件保留";
+    }).open();
 };
 globals.fixtureReady = true;
 }

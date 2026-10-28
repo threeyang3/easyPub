@@ -1,6 +1,6 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { App, TFile } from "obsidian";
-import { relativeVaultAttachment } from "./platforms";
+import { relativeVaultAttachment, resolveVaultAttachment } from "./platforms";
 import type { WechatImage, WechatImageReference } from "../types";
 
 export const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "svg"]);
@@ -70,7 +70,7 @@ export async function transformMarkdownImages(body: string,
 export function resolveVaultImage(app: App, source: string, filePath: string): TFile {
   let decoded = source;
   try { decoded = decodeURIComponent(source); } catch { /* Keep a literal percent in a filename. */ }
-  const file = app.metadataCache.getFirstLinkpathDest(decoded, filePath);
+  const file = resolveVaultAttachment(app, decoded, filePath);
   if (!(file instanceof TFile) || !IMAGE_EXTENSIONS.has(file.extension.toLowerCase())) throw new Error(`找不到图片附件：${source}`);
   return file;
 }
@@ -84,7 +84,7 @@ export async function rebaseWechatImages(app: App, body: string, sourcePath: str
     return `![${alt.replace(/[\[\]\\]/g, "\\$&")}](${url})`;
   });
   return transformWechatWikiImages(standard, async source => {
-    const file = app.metadataCache.getFirstLinkpathDest(source, sourcePath);
+    const file = resolveVaultAttachment(app, source, sourcePath);
     if (!(file instanceof TFile) || !IMAGE_EXTENSIONS.has(file.extension.toLowerCase())) return null;
     return `![${file.basename.replace(/[\[\]\\]/g, "\\$&")}](${encodedPath(file)})`;
   });

@@ -1,6 +1,6 @@
 # macOS 使用与迁移
 
-EasyPub 为桌面插件，最低 Obsidian 版本为 1.4.4。Windows 与 macOS 使用同一套插件文件，无需专用构建。macOS 已加入核心测试和构建的 CI 矩阵；CI 结果不代替真实 Mac 上的 Obsidian、公众号与博客后台验收。
+EasyPub 为桌面插件，最低 Obsidian 版本为 1.5.7。Windows 与 macOS 使用同一套插件文件，无需专用构建。macOS 已加入核心测试和构建的 CI 矩阵；CI 结果不代替真实 Mac 上的 Obsidian、公众号与博客后台验收。
 
 ## 博客与历史文章
 

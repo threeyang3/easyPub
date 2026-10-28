@@ -3,13 +3,14 @@ import type EasyPub from "../main";
 import { WechatArticleSettings, WechatCrop, WechatImage, WechatPreparedDocument } from "../types";
 import { getFrontMatterString, parseFrontMatter } from "../utils/frontMatter";
 import { isWechatDraftPath } from "../utils/platforms";
-import { centeredCrop, readWechatArticleSettings, wechatArticleNeedsSave, wechatAssetKey, wechatHash, wechatStateKey } from "../utils/wechatState";
+import { cropCoordinates, centeredCrop, readWechatArticleSettings, wechatArticleNeedsSave, wechatAssetKey, wechatHash, wechatStateKey } from "../utils/wechatState";
 import { IMAGE_EXTENSIONS, replaceWechatImageTokens } from "../utils/wechatMarkdown";
 import { loadWechatImage, readWechatImage, releaseWechatImages } from "../utils/wechatImages";
 import { digestFromWechatHtml, previewWechatHtml, renderWechatDocument, WECHAT_HTML_LIMIT_ISSUE } from "../utils/wechatRenderer";
 import { validateWechatArticle, WechatConflictAction, WechatSync } from "../utils/wechatSync";
 import { wechatChoice } from "../modals/WechatChoiceModal";
 import { WechatComparison, wechatReadableHtml } from "../utils/wechatComparison";
+import { WechatCropModal } from "../modals/WechatCropModal";
 import { WechatLayoutModal } from "../modals/WechatLayoutModal";
 import { readWechatLayoutPlan, themePlan } from "../utils/wechatLayoutEngine";
 import { WECHAT_ARTICLE_FIELDS, wechatFieldLength } from "../utils/wechatLimits";
@@ -41,6 +42,8 @@ export class WechatView extends ItemView {
   private closed = false;
   private paused = false;
   private stale = true;
+  // Independent of pending article settings: only external content/policy changes block crop.
+  private cropSourceStale = true;
   private dirty = false;
   private busy = false;
   private layoutOpening = false;
@@ -53,8 +56,13 @@ export class WechatView extends ItemView {
   private status!: HTMLElement;
   private identity!: HTMLElement;
   private syncButton!: HTMLButtonElement;
+  private accountButton!: HTMLButtonElement;
   private pauseButton!: HTMLButtonElement;
   private previewTab!: HTMLButtonElement;
+  private page: "preview" | "article" | "images" = "preview";
+  private imagesTab!: HTMLButtonElement;
+  private cropOpening = false;
+  private cropModal?: WechatCropModal;
   private settingsTab!: HTMLButtonElement;
 
   constructor(leaf: WorkspaceLeaf, private plugin: EasyPub) { super(leaf); }
@@ -71,16 +79,12 @@ export class WechatView extends ItemView {
     this.closed = false;
     const root = this.contentEl; root.empty(); root.addClass("easy-pub-wechat");
     const header = root.createDiv({ cls: "epw-header" });
-    header.createEl("span", { text: "EASYPUB / WECHAT", cls: "epw-eyebrow" });
     header.createEl("h2", { text: "公众号工作台" });
     this.identity = header.createDiv({ cls: "epw-identity", text: "请从公众号本地稿打开此工作台" });
-    const setup = header.createEl("details", { cls: "epw-setup-entry" });
-    setup.createEl("summary", { text: "公众号连接设置" });
-    setup.createEl("p", { text: this.plugin.hasWechatCredentials() ? "公众号凭据已保存，可检查连接或更换账号。" : "首次同步前，请先连接你的公众号。" });
-    this.button(setup, "配置公众号", () => this.plugin.openWechatSetup(() => {
-      setup.querySelector("p")!.textContent = "公众号配置已保存，请检查连接并刷新预览。";
-      this.invalidate();
+    this.accountButton = this.button(header, this.plugin.hasWechatCredentials() ? "账号设置" : "连接公众号", () => this.plugin.openWechatSetup(() => {
+      this.updateAccountButton(); this.invalidate();
     }));
+    this.accountButton.addClass("epw-account");
     const tools = root.createDiv({ cls: "epw-tools" });
     this.pauseButton = this.button(tools, "暂停刷新", () => {
       this.paused = !this.paused; this.pauseButton.textContent = this.paused ? "恢复刷新" : "暂停刷新";
@@ -100,7 +104,12 @@ export class WechatView extends ItemView {
     this.status = root.createDiv({ cls: "epw-status", text: "等待选择公众号本地稿", attr: { role: "status", "aria-live": "polite" } });
     const tabs = root.createDiv({ cls: "epw-tabs", attr: { "aria-label": "预览布局" } });
     this.previewTab = this.button(tabs, "正文预览", () => this.showSettings(false));
-    this.settingsTab = this.button(tabs, "信息、配图与封面", () => this.showSettings(true));
+    this.settingsTab = this.button(tabs, "文章信息", () => this.showPage("article"));
+    this.imagesTab = this.button(tabs, "图片与封面", () => this.showPage("images"));
+    this.button(tools, "并排预览与设置", () => {
+      this.contentEl.classList.toggle("epw-expanded");
+      if (this.page === "preview") this.showPage("article");
+    }).addClass("epw-expand");
     const body = root.createDiv({ cls: "epw-body" });
     this.preview = body.createDiv({ cls: "epw-paper", attr: { role: "region", "aria-label": "公众号正文预览", tabindex: "0" } });
     this.inspector = body.createDiv({ cls: "epw-inspector", attr: { role: "region", "aria-label": "信息、配图与封面", tabindex: "0" } });
@@ -126,10 +135,16 @@ export class WechatView extends ItemView {
   private button(parent: HTMLElement, label: string, action: () => void): HTMLButtonElement {
     const button = parent.createEl("button", { text: label }); button.addEventListener("click", action); return button;
   }
-  private showSettings(show: boolean) {
-    this.inspector.hidden = !show;
-    this.contentEl.classList.toggle("epw-settings-open", show);
-    this.previewTab.setAttribute("aria-pressed", String(!show)); this.settingsTab.setAttribute("aria-expanded", String(show));
+  private showSettings(show: boolean) { this.showPage(show ? "images" : "preview"); }
+  private showPage(page: "preview" | "article" | "images") {
+    this.page = page;
+    this.inspector.hidden = page === "preview";
+    this.preview.hidden = page !== "preview";
+    this.contentEl.classList.toggle("epw-settings-open", page !== "preview");
+    this.previewTab.setAttribute("aria-pressed", String(page === "preview"));
+    this.settingsTab.setAttribute("aria-pressed", String(page === "article"));
+    this.imagesTab.setAttribute("aria-pressed", String(page === "images"));
+    for (const section of Array.from(this.inspector.querySelectorAll<HTMLElement>("[data-page]"))) section.hidden = section.dataset.page !== page;
   }
   private async run(action: () => Promise<void>) {
     if (this.busy) return;
@@ -149,20 +164,23 @@ export class WechatView extends ItemView {
   }
   private message(text: string, error = false) {
     if (this.closed) return;
-    this.status.textContent = text; this.status.classList.toggle("epw-error", error);
+    this.status.textContent = text; this.status.title = text; this.status.classList.toggle("epw-error", error);
+  }
+  private updateAccountButton() {
+    if (this.accountButton) this.accountButton.textContent = this.plugin.hasWechatCredentials() ? "账号设置" : "连接公众号";
   }
   private updateSyncState() {
     if (this.syncButton) this.syncButton.disabled = this.busy || this.stale || this.dirty || !this.prepared || !this.cover || this.prepared.issues.length > 0;
   }
   private invalidate() {
-    this.version++; this.stale = true; this.updateSyncState(); this.message(this.paused ? "预览待更新 · 已暂停自动刷新，请手动刷新或恢复刷新" : "预览待更新 · 本地稿或附件已变化");
+    this.version++; this.stale = true; this.cropSourceStale = true; this.updateSyncState(); this.message(this.paused ? "预览待更新 · 已暂停自动刷新，请手动刷新或恢复刷新" : "预览待更新 · 本地稿或附件已变化");
     this.rerenderRequested = true;
     if (this.timer) clearTimeout(this.timer);
     if (!this.paused && !this.dirty && !this.busy) this.scheduleRefresh();
   }
   invalidateImagePolicy() {
     if (this.closed) return;
-    this.imagePolicyRevision++; this.version++; this.stale = true;
+    this.imagePolicyRevision++; this.version++; this.stale = true; this.cropSourceStale = true;
     this.rerenderRequested = false; this.manualRefreshRequested = false;
     if (this.timer) { clearTimeout(this.timer); this.timer = undefined; }
     this.disposePrepared();
@@ -179,14 +197,14 @@ export class WechatView extends ItemView {
     }, 500);
   }
   async bind(file: TFile) {
-    if (this.busy) throw new Error("公众号任务正在进行，请稍候再切换稿件");
+    if (this.busy || this.cropOpening || this.cropModal || this.layoutModal) throw new Error("请先完成当前任务并关闭编辑窗口，再切换稿件");
     if (this.file === file && this.snapshot && (!this.stale || this.dirty)) return;
     const text = await this.app.vault.read(file);
     if (!isWechatDraft(file, text, this.plugin)) { this.message("请打开已生成的公众号本地稿，不会从源文章直接同步", true); return; }
     if (this.dirty && this.file !== file) {
       if (await wechatChoice(this.app, "切换公众号稿件", "当前设置尚未保存。切换会丢弃这些设置修改，正文不会改变。", [{ label: "丢弃未保存设置并切换", value: "switch" }]) !== "switch") return;
     }
-    this.file = file; this.dirty = false; this.stale = true;
+    this.file = file; this.dirty = false; this.stale = true; this.cropSourceStale = true;
     this.app.workspace.requestSaveLayout?.();
     await this.run(() => this.refresh());
   }
@@ -197,6 +215,7 @@ export class WechatView extends ItemView {
   }
   async refresh(preserveEdits = false) {
     if (!this.file || this.closed) return;
+    if (this.cropModal) { this.rerenderRequested = true; return; }
     // A queued automatic refresh must never replace unsaved inspector edits.
     if (this.dirty && !preserveEdits) return;
     if (this.timer) { clearTimeout(this.timer); this.timer = undefined; }
@@ -205,7 +224,8 @@ export class WechatView extends ItemView {
     const version = ++this.version;
     const imagePolicyRevision = this.imagePolicyRevision;
     this.rerenderRequested = false;
-    this.stale = true; this.updateSyncState(); this.message("正在检查排版与图片…");
+    this.updateAccountButton();
+    this.stale = true; this.cropSourceStale = true; this.updateSyncState(); this.message("正在检查排版与图片…");
     const file = this.file, filePath = file.path;
     const snapshot = await this.app.vault.read(file);
     if (!isWechatDraft(file, snapshot, this.plugin)) throw new Error("当前文件已不再是公众号本地稿，请重新打开");
@@ -223,12 +243,19 @@ export class WechatView extends ItemView {
     let cover: WechatImage | undefined, installed = false;
     try {
       if (article.digest === undefined) article.digest = digestFromWechatHtml(prepared.html);
-      try { validateWechatArticle(article); } catch (error) { prepared.issues.push((error as Error).message); }
+      let articleInvalid = false;
+      try { validateWechatArticle(article); } catch (error) { articleInvalid = true; prepared.issues.push((error as Error).message); }
       const source = article.cover ?? prepared.images[0]?.source;
       if (source) {
         article.cover = source;
         try { cover = await loadWechatImage(this.app, source, filePath, "cover", this.allowRemoteImages); }
         catch (error) { prepared.issues.push(`封面：${(error as Error).message}`); }
+      }
+      if (cover) {
+        try {
+          if (article.cropWide) cropCoordinates(article.cropWide, cover.width, cover.height, 2.35);
+          if (article.cropSquare) cropCoordinates(article.cropSquare, cover.width, cover.height, 1);
+        } catch { prepared.issues.push("封面尺寸或裁剪比例已变化，请重新调整封面裁剪"); }
       }
       const latest = await this.app.vault.read(file);
       if (version !== this.version || this.closed || this.file !== file || file.path !== filePath || latest !== snapshot || imagePolicyRevision !== this.imagePolicyRevision) {
@@ -238,19 +265,20 @@ export class WechatView extends ItemView {
       const scroll = this.preview.scrollTop;
       this.disposePrepared(); this.prepared = prepared; this.cover = cover; this.article = article;
       installed = true;
-      this.snapshot = snapshot; this.snapshotPath = filePath; this.dirty = keepDirty; this.stale = false;
-      this.identity.textContent = filePath;
+      this.snapshot = snapshot; this.snapshotPath = filePath; this.dirty = keepDirty; this.stale = false; this.cropSourceStale = false;
+      this.identity.textContent = filePath; this.identity.title = filePath;
       this.preview.innerHTML = previewWechatHtml(prepared.html, prepared.images);
       this.preview.scrollTop = scroll;
       this.renderInspector();
-      if (prepared.issues.length || !cover) this.showSettings(true);
+      if (articleInvalid) this.showPage("article");
+      else if (prepared.issues.length || !cover) this.showSettings(true);
       this.message(keepDirty ? "正文预览已更新 · 未保存设置已保留，请保存设置并刷新后同步" : prepared.issues.length ? `预检发现 ${prepared.issues.length} 个问题，请修复后刷新` : !cover ? "请选择封面，保存设置后即可同步" : "预检通过 · 同步以此本地成稿为准");
       if (prepared.layoutNotice) this.message(`${this.status.textContent} · ${prepared.layoutNotice}`, prepared.issues.length > 0);
       this.updateSyncState();
     } catch (error) {
       if (installed) {
         this.disposePrepared();
-        this.stale = true;
+        this.stale = true; this.cropSourceStale = true;
         this.preview.empty();
         this.updateSyncState();
       } else {
@@ -267,6 +295,7 @@ export class WechatView extends ItemView {
   private renderInspector() {
     const parent = this.inspector; parent.empty();
     const fields = parent.createEl("details", { cls: "epw-section" }); fields.open = true;
+    fields.dataset.page = "article";
     fields.createEl("summary", { text: "文章信息" });
     for (const [key, label, limit] of WECHAT_ARTICLE_FIELDS) {
       const wrapper = fields.createEl("label", { cls: "epw-field", text: label });
@@ -282,7 +311,7 @@ export class WechatView extends ItemView {
       updateCount();
       input.addEventListener("input", () => { this.article[key] = input.value; updateCount(); this.changed(); });
     }
-    const covers = parent.createEl("details", { cls: "epw-section" }); covers.open = true;
+    const covers = parent.createEl("details", { cls: "epw-section" }); covers.open = true; covers.dataset.page = "images";
     this.button(fields, "从正文重新提取摘要", () => {
       if (!this.prepared || this.snapshotPath !== this.file?.path) return;
       this.article.digest = digestFromWechatHtml(this.prepared.html); this.changed(); this.renderInspector();
@@ -296,10 +325,13 @@ export class WechatView extends ItemView {
     this.button(covers, "从附件选图", () => new CoverPicker(this.plugin, file => { void this.run(() => this.selectCover(this.relativeCoverPath(file.path))); }).open());
     if (this.article.cover) covers.createEl("small", { text: this.article.cover, cls: "epw-cover-source" });
     if (this.cover) {
-      this.cropEditor(covers, "cropWide", 2.35, "横版 2.35:1");
-      this.cropEditor(covers, "cropSquare", 1, "方形 1:1");
+      const preview = covers.createEl("img", { cls: "epw-cover-thumbnail", attr: { src: this.cover.previewUrl, alt: "当前封面原图" } });
+      preview.setAttribute("loading", "lazy");
+      covers.createEl("p", { text: "横版 2.35:1 与方形 1:1 的构图分别保存。" });
+      this.button(covers, "调整封面裁剪", () => { void this.openCrop().catch(error => this.message((error as Error).message, true)); });
     }
     const images = parent.createEl("details", { cls: "epw-section" });
+    images.dataset.page = "images";
     const references = this.prepared?.imageReferences ?? [];
     const failures = references.filter(ref => ref.status === "error").length;
     const imagesBySource = new Map((this.prepared?.images ?? []).map(image => [image.source, image]));
@@ -320,6 +352,7 @@ export class WechatView extends ItemView {
     }
     const actions = parent.createDiv({ cls: "epw-inspector-actions" });
     this.button(actions, "保存设置并刷新", () => this.run(() => this.saveArticle())).addClass("mod-cta");
+    this.showPage(this.page);
   }
   private async openImageReference(bodyLine: number) {
     const file = this.file;
@@ -345,61 +378,41 @@ export class WechatView extends ItemView {
     this.article.cropSquare = centeredCrop(cover.width, cover.height, 1);
     this.changed(); this.renderInspector();
   }
-  private cropEditor(parent: HTMLElement, key: "cropWide" | "cropSquare", ratio: number, label: string) {
-    const image = this.cover!;
-    let crop = this.article[key] ?? centeredCrop(image.width, image.height, ratio);
-    if (Math.abs(crop.width * image.width / (crop.height * image.height) / ratio - 1) > 0.005) crop = centeredCrop(image.width, image.height, ratio);
-    this.article[key] = crop;
-    parent.createEl("small", { text: `${label} · 拖动图片调整位置` });
-    parent.createEl("small", { text: "虚线内为构图参考安全区，文字与主体尽量远离裁剪边缘；虚线不会上传。", cls: "epw-cover-source" });
-    const canvas = parent.createEl("canvas", { cls: "epw-crop", attr: { "aria-label": label, tabindex: "0" } });
-    canvas.width = 470; canvas.height = Math.round(470 / ratio);
-    const resolution = parent.createEl("p", { cls: "epw-crop-resolution" });
-    const updateResolution = () => {
-      const width = Math.floor(crop.width * image.width), height = Math.floor(crop.height * image.height);
-      const minWidth = ratio === 1 ? 383 : 900, minHeight = 383;
-      const low = width < minWidth || height < minHeight;
-      resolution.textContent = `${label}选区：${width} × ${height} 像素${low ? ` · 清晰度较低，建议至少 ${minWidth} × ${minHeight}，请减小缩放或换图` : " · 清晰度充足"}`;
-      resolution.classList.toggle("epw-warning", low);
-    };
-    updateResolution();
-    const bitmap = new Image(); bitmap.src = image.previewUrl;
-    const draw = () => {
-      const context = canvas.getContext("2d"); if (!context || !bitmap.complete) return;
-      context.clearRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(bitmap, crop.x * image.width, crop.y * image.height, crop.width * image.width, crop.height * image.height, 0, 0, canvas.width, canvas.height);
-      context.save(); context.strokeStyle = "rgba(255,255,255,.9)"; context.lineWidth = 2; context.setLineDash([6,5]);
-      context.strokeRect(canvas.width * 0.08, canvas.height * 0.08, canvas.width * 0.84, canvas.height * 0.84); context.restore();
-    };
-    bitmap.onload = draw; draw();
-    const zoom = parent.createEl("input", { type: "range", cls: "epw-zoom", attr: { min: "1", max: "4", step: "0.01", "aria-label": `${label}缩放` } });
-    zoom.value = String(centeredCrop(image.width, image.height, ratio).width / crop.width);
-    const commit = () => { this.article[key] = { ...crop }; this.changed(); updateResolution(); draw(); };
-    const position = parent.createEl("select", { attr: { "aria-label": `${label}构图位置` } });
-    for (const [value, text] of [["", "快速调整构图"], ["center", "居中"], ["top", "顶部居中"], ["top-left", "左上对齐"], ["bottom", "底部居中"]]) position.createEl("option", { value, text });
-    position.onchange = () => {
-      if (!position.value) return;
-      crop = { ...crop, x: position.value === "top-left" ? 0 : (1 - crop.width) / 2,
-        y: position.value === "center" ? (1 - crop.height) / 2 : position.value === "bottom" ? 1 - crop.height : 0 };
-      commit(); position.value = "";
-    };
-    zoom.addEventListener("input", () => { crop = centeredCrop(image.width, image.height, ratio, Number(zoom.value), crop.x + crop.width / 2, crop.y + crop.height / 2); commit(); });
-    let drag: { x: number; y: number; crop: WechatCrop } | undefined;
-    canvas.addEventListener("pointerdown", event => { drag = { x: event.clientX, y: event.clientY, crop: { ...crop } }; canvas.setPointerCapture(event.pointerId); });
-    canvas.addEventListener("pointermove", event => {
-      if (!drag) return;
-      const rect = canvas.getBoundingClientRect();
-      crop = { ...crop, x: Math.max(0, Math.min(1 - crop.width, drag.crop.x - (event.clientX - drag.x) / rect.width * crop.width)),
-        y: Math.max(0, Math.min(1 - crop.height, drag.crop.y - (event.clientY - drag.y) / rect.height * crop.height)) }; commit();
-    });
-    canvas.addEventListener("pointerup", () => { drag = undefined; }); canvas.addEventListener("pointercancel", () => { drag = undefined; });
-    canvas.addEventListener("keydown", event => {
-      const delta = 0.01;
-      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
-      event.preventDefault();
-      crop.x = Math.max(0, Math.min(1 - crop.width, crop.x + (event.key === "ArrowRight" ? delta : event.key === "ArrowLeft" ? -delta : 0)));
-      crop.y = Math.max(0, Math.min(1 - crop.height, crop.y + (event.key === "ArrowDown" ? delta : event.key === "ArrowUp" ? -delta : 0))); commit();
-    });
+  private async openCrop() {
+    if (!this.cover || this.cropModal || this.cropOpening || this.busy || !this.file || this.closed) return;
+    if (this.cropSourceStale) throw new Error("预览待更新，请先刷新预览后再调整裁剪");
+    this.cropOpening = true;
+    try {
+      const version = this.version, file = this.file, snapshot = this.snapshot, cover = this.cover;
+      const assertFresh = async () => {
+        const check = () => {
+          if (this.closed || this.cropSourceStale || this.version !== version || this.file !== file || this.cover !== cover || file.path !== this.snapshotPath) {
+            throw new Error("稿件或图片已变化，请先刷新预览后再调整裁剪");
+          }
+        };
+        check();
+        if (await this.app.vault.read(file) !== snapshot) throw new Error("稿件或图片已变化，请先刷新预览后再调整裁剪");
+        const raw = await readWechatImage(this.app, cover.source, file.path, undefined, this.allowRemoteImages);
+        check();
+        if (wechatHash(raw.bytes) !== cover.originalHash || raw.localPath !== cover.localPath) {
+          throw new Error("封面图片内容已变化，请先刷新预览后再调整裁剪");
+        }
+      };
+      await assertFresh();
+      const modal = new WechatCropModal(this.app, cover, this.article, async (wide, square, assertActive) => {
+        await assertFresh(); assertActive();
+        this.article.cropWide = wide; this.article.cropSquare = square; this.changed();
+      }, () => {
+        if (this.cropModal === modal) this.cropModal = undefined;
+        if (!this.closed) {
+          this.renderInspector();
+          if (this.rerenderRequested && !this.dirty && !this.paused) this.scheduleRefresh();
+        }
+      });
+      this.cropModal = modal;
+      try { modal.open(); }
+      catch (error) { this.cropModal = undefined; modal.close(); throw error; }
+    } finally { this.cropOpening = false; }
   }
   private async saveArticle(article?: WechatArticleSettings, assertActive: () => void = () => {}) {
     const file = this.file, snapshot = this.snapshot, snapshotPath = this.snapshotPath;
@@ -579,8 +592,9 @@ export class WechatView extends ItemView {
   async onClose() {
     this.closed = true; this.version++;
     this.layoutModal?.close();
+    this.cropModal?.close();
     if (this.timer) clearTimeout(this.timer);
     this.disposePrepared(); this.contentEl.empty();
-    this.contentEl.classList.remove("easy-pub-wechat", "epw-settings-open"); this.contentEl.removeAttribute("inert");
+    this.contentEl.classList.remove("easy-pub-wechat", "epw-settings-open", "epw-expanded"); this.contentEl.removeAttribute("inert");
   }
 }

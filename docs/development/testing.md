@@ -90,3 +90,34 @@ Hexo 原生测试必须先阅读 [tests/hexo-native.ts](../../tests/hexo-native.
 | 只有 Markdown 文档 | 相对链接、标题锚点、命令/默认值核对、Mermaid 语法和渲染检查 |
 
 CI 当前为三系统 Node 20 核心/构建，以及 Linux 浏览器任务。CI 校验已提交产物与构建结果一致。原生测试和真实服务测试不在普通 CI 内。
+
+## 不启动外部浏览器的工作台预览
+
+```bash
+node tests/preview-workbench.mjs
+```
+
+只监听 `127.0.0.1:4197`，使用合成正文与图片，不访问真实公众号。使用应用内浏览器访问终端显示的本机地址；提供 320px、360px 和 920px 的布局切换。停止服务使用 Ctrl+C。
+
+`tests/hexoFormatting.test.ts` 覆盖补空行、幂等、CRLF、Front Matter 和特殊结构；`tests/publishingWorkbench.test.ts` 覆盖空状态快捷入口、固定稿件、旧读取结果丢弃，以及排版取消后的文件与备份字节。它们通过 `npm test` 执行。
+
+`tests/attachmentImport.test.ts` 覆盖附件目录上下文、同名避让、索引延迟、图片字段自动填入、批量部分失败、关闭期间取消和磁盘错误重试；同时通过真实发布编排校验公众号封面相对路径与裁剪重置。预览页的“生成稿件并添加图片”提供本地文件选择器验收入口。
+
+## 常驻面板稳定性原生验收
+
+```bash
+EASYPUB_TEST_VAULT=Sandbox EASYPUB_TEST_HEXO_REPO=/absolute/disposable-blog node tests/run-wechat-native.mjs --workbench
+```
+
+必须使用 `Sandbox` 和含 `.easypub-test-copy` 标记的可丢弃博客副本。临时内存加载组件，使用合成笔记与图片，不替换已安装插件或保存账号设置。覆盖附件目录与同名避让、固定面板、裁剪保存/过期/关闭、单图片解码、博客排版、备份字节与恢复；结束后清理本次创建的数据。系统文件选择器需要交互式原生验收，入口见下文。已记录的宿主结果见 [workbench-stability-native.json](../verification/workbench-stability-native.json)。
+
+`node tests/publishing-ui.mjs --bundle-only` 仅验证浏览器模式打包，不启动浏览器；不能替代完整发布管理浏览器测试。本机禁止启动外部 Chrome/Chromium 时使用该入口，完整套件由 GitHub Actions 运行。
+
+
+## 真实系统文件选择器验收
+
+```bash
+EASYPUB_TEST_VAULT=Sandbox node tests/run-wechat-native.mjs --file-picker
+```
+
+终端显示合成 PNG 路径，并在 Sandbox 打开独立验收窗口。点击“上传封面”，在真实操作系统文件对话框中选取该 PNG，再预览并确认。验收核对附件字节和属性引用并清理测试数据；不确认其他已打开的生成窗口。两分钟无操作会取消测试窗口。Mac 实测记录见 [attachment-picker-native.json](../verification/attachment-picker-native.json)。

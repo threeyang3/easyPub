@@ -1,6 +1,6 @@
 {
   "name": "easy-pub",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Prepare and manage Obsidian publishing drafts for Hexo and content platforms",
   "main": "main.js",
   "scripts": {

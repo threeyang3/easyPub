@@ -21,7 +21,7 @@ try {
       build.onLoad({ filter: /.*/, namespace: 'test' }, () => ({ contents: `
         export class App {} export class Plugin {} export class Modal {}
         export class Notice {} export class Setting {} export class PluginSettingTab {}
-        export class ItemView {} export class FuzzySuggestModal {} export class Component {}
+        export class ItemView { async setState() {} } export class FuzzySuggestModal {} export class Component {}
         export class MarkdownRenderer {}
         export class TFile {} export class TFolder {} export class FileSystemAdapter {}
         export const normalizePath = p => p.replaceAll('\\\\', '/');

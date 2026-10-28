@@ -25,7 +25,7 @@ export async function run(app: App, options: { blogPath?: string }) {
   const post = path.join(blog, 'source/_posts', `${title}.md`);
   const draft = path.join(blog, 'source/_drafts', `${title}.md`);
   const leaf = app.workspace.getLeaf('tab');
-  const plugin = new EasyPub(app, { id, name: id, version: '0.0.0', minAppVersion: '1.4.4', author: 'test', description: 'native acceptance' });
+  const plugin = new EasyPub(app, { id, name: id, version: '0.0.0', minAppVersion: '1.5.7', author: 'test', description: 'native acceptance' });
   plugin.settings = structuredClone(DEFAULT_SETTINGS);
   plugin.settings.hexoRepoPath = blog;
   plugin.settings.autoDeploy = false;

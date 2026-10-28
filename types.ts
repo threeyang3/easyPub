@@ -1,6 +1,7 @@
 export interface PluginSettings {
   hexoRepoPath: string;     // Hexo 仓库根目录
   autoDeploy: boolean;
+  workbenchIntroduced?: boolean;
   publishBasePath: string;  // 其他平台发布路径基础目录，默认 "发布"
   imageHandling: "local" | "picgo";
   picgoServerUrl: string;
@@ -14,6 +15,7 @@ export interface PluginSettings {
 export const DEFAULT_SETTINGS: PluginSettings = {
   hexoRepoPath: "",
   autoDeploy: false,
+  workbenchIntroduced: false,
   publishBasePath: "发布",
   imageHandling: "local",
   picgoServerUrl: "http://127.0.0.1:36677/upload",

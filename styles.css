@@ -329,3 +329,16 @@
 .easy-pub-properties { height:min(760px,78vh); display:flex; flex-direction:column; min-height:0; overflow:hidden; }
 .easy-pub-properties .ep-property-form { flex:1 1 auto; min-height:0; overflow:auto; padding-right:4px; }
 .easy-pub-properties .ep-property-actions { flex-shrink:0; padding:12px 0; background:var(--background-primary); border-top:1px solid var(--background-modifier-border); z-index:1; }
+
+/* Workbench chrome stays compact so editing gets the majority of the pane. */
+.easy-pub-wechat > .epw-header { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:2px 8px; padding:6px 0; }
+.easy-pub-wechat > .epw-header h2 { grid-column:1; grid-row:1; margin:0; font-size:16px; line-height:1.4; }
+.easy-pub-wechat > .epw-header .epw-account { grid-column:2; grid-row:1; font-size:12px; height:28px; }
+.easy-pub-wechat > .epw-header .epw-identity { grid-column:1 / -1; grid-row:2; font-size:11px; line-height:1.4; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.easy-pub-wechat > .epw-tools, .easy-pub-wechat > .epw-footer { padding:6px 0; gap:6px; }
+.easy-pub-wechat > .epw-status { padding:3px 0; margin:0 0 4px; border:0; background:transparent; line-height:1.5; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
+.easy-pub-wechat > .epw-status.epw-error { padding:6px 8px; border-left:3px solid var(--text-error); background:var(--background-secondary); white-space:pre-wrap; max-height:80px; overflow:auto; }
+.easy-pub-wechat > .epw-tabs { margin:0 0 6px; }
+.easy-pub-wechat .epw-section[data-page="article"] { padding:0; border:0; }
+.easy-pub-wechat .epw-section[data-page="article"] > summary { display:none; }
+.easy-pub-wechat .epw-inspector-actions { bottom:0; padding:6px 0; }

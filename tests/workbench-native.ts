@@ -67,6 +67,10 @@ export async function run(app: App, options: {blogPath?: string; styles?: string
     const view=leaf.view as WechatView, internal=view as any;
     await until(()=>!!internal.cover&&!internal.busy&&!internal.stale,'Native workbench refresh timed out');
     assert(view.contentEl.textContent?.includes('预检通过'),'native WeChat renderer and local cover preflight pass');
+    internal.showPage('article');
+    const rootHeight=view.contentEl.getBoundingClientRect().height;
+    if(rootHeight>=700) assert(view.contentEl.querySelector('.epw-inspector')!.getBoundingClientRect().height>=rootHeight*0.6,'native article editor owns most of the available pane');
+    assert(getComputedStyle(view.contentEl.querySelector('.epw-paper')!).display==='none','native article page releases preview space');
     let decodes=0;
     window.Image=new Proxy(OriginalImage,{construct(target,args){decodes++; return Reflect.construct(target,args,target);}});
     await internal.openCrop();

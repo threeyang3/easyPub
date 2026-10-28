@@ -78,13 +78,7 @@ export class WechatView extends ItemView {
     const header = root.createDiv({ cls: "epw-header" });
     header.createEl("h2", { text: "公众号工作台" });
     this.identity = header.createDiv({ cls: "epw-identity", text: "请从公众号本地稿打开此工作台" });
-    const setup = header.createEl("details", { cls: "epw-setup-entry" });
-    setup.createEl("summary", { text: "公众号连接设置" });
-    setup.createEl("p", { text: this.plugin.hasWechatCredentials() ? "公众号凭据已保存，可检查连接或更换账号。" : "首次同步前，请先连接你的公众号。" });
-    this.button(setup, "配置公众号", () => this.plugin.openWechatSetup(() => {
-      setup.querySelector("p")!.textContent = "公众号配置已保存，请检查连接并刷新预览。";
-      this.invalidate();
-    }));
+    this.button(header, this.plugin.hasWechatCredentials() ? "账号设置" : "连接公众号", () => this.plugin.openWechatSetup(() => this.invalidate())).addClass("epw-account");
     const tools = root.createDiv({ cls: "epw-tools" });
     this.pauseButton = this.button(tools, "暂停刷新", () => {
       this.paused = !this.paused; this.pauseButton.textContent = this.paused ? "恢复刷新" : "暂停刷新";
@@ -164,7 +158,7 @@ export class WechatView extends ItemView {
   }
   private message(text: string, error = false) {
     if (this.closed) return;
-    this.status.textContent = text; this.status.classList.toggle("epw-error", error);
+    this.status.textContent = text; this.status.title = text; this.status.classList.toggle("epw-error", error);
   }
   private updateSyncState() {
     if (this.syncButton) this.syncButton.disabled = this.busy || this.stale || this.dirty || !this.prepared || !this.cover || this.prepared.issues.length > 0;
@@ -262,7 +256,7 @@ export class WechatView extends ItemView {
       this.disposePrepared(); this.prepared = prepared; this.cover = cover; this.article = article;
       installed = true;
       this.snapshot = snapshot; this.snapshotPath = filePath; this.dirty = keepDirty; this.stale = false;
-      this.identity.textContent = filePath;
+      this.identity.textContent = filePath; this.identity.title = filePath;
       this.preview.innerHTML = previewWechatHtml(prepared.html, prepared.images);
       this.preview.scrollTop = scroll;
       this.renderInspector();

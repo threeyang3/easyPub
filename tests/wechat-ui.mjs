@@ -129,6 +129,7 @@ try {
   assert.equal(await page.locator('#unrelated-diff').evaluate(el => getComputedStyle(el).maxHeight), 'none');
   assert.equal(await page.locator('.epw-paper').isVisible(), false);
   assert.equal(await page.locator('.epw-inspector').isVisible(), true);
+  assert.ok(await page.locator('#workbench').evaluate(el => el.querySelector('.epw-inspector').getBoundingClientRect().height >= el.getBoundingClientRect().height * 0.6), 'Article editing owns most of a normal-height workbench');
   await page.getByRole('button', {name:'正文预览',exact:true}).click();
   await page.locator('.epw-paper').evaluate(el => { el.scrollTop = 150; });
   await page.getByRole('button', { name:'刷新预览', exact:true }).click();

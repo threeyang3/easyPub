@@ -1,3 +1,6 @@
+import { runAttachmentImportTests } from "./attachmentImport.test";
+import { runPublishingWorkbenchTests } from "./publishingWorkbench.test";
+import { runHexoFormattingTests } from "./hexoFormatting.test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile, readdir } from "node:fs/promises";
 import os from "node:os";
@@ -42,6 +45,9 @@ import { runStructureTests } from "./structure.test";
 import { runArticlePropertyTests } from "./articleProperties.test";
 
 async function run() {
+  runHexoFormattingTests();
+  await runAttachmentImportTests();
+  await runPublishingWorkbenchTests();
   await runStructureTests();
   await runArticlePropertyTests();
   await runControlRoomLauncherTests();

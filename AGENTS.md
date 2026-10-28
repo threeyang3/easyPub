@@ -19,7 +19,7 @@ Before the build, use `npm test` for core metadata and Hexo URL behavior.
 - Hexo commands must use the blog repository's local Hexo package. Do not use `npx` fallback
   or download a CLI implicitly.
 - Keep `manifest.json` desktop-only (Node/Electron APIs required).
-- Keep `minAppVersion` aligned with any Obsidian APIs in use. Current code requires `1.4.4+` because it uses `app.fileManager.processFrontMatter`.
+- Keep `minAppVersion` aligned with any Obsidian APIs in use. Current code requires `1.5.7+` because attachment imports use `app.fileManager.getAvailablePathForAttachment`.
 - Keep path logic in `utils/platforms.ts`.
 - Preserve front matter fields from existing published files.
 - New platform drafts inherit only their explicit property whitelist. Updates preserve target-owned properties; source refresh is an explicit field selection with preview. Legacy extra properties are removed only when selected.

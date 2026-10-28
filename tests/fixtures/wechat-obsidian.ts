@@ -26,20 +26,22 @@ export class ItemView extends Component {
   constructor(leaf: any) { super(); this.app = leaf.app; this.contentEl = leaf.contentEl; }
   async setState() {}
 }
+export class Notice { constructor(message: string) { console.info(message); } }
 export class TFile { path = ""; extension = ""; basename = ""; }
 export class TFolder {}
-export class FuzzySuggestModal { constructor(_app: any) {} setPlaceholder() {} open() {} }
+export class FuzzySuggestModal { app: any; constructor(app: any) { this.app = app; } setPlaceholder() {} open() {} }
 export class Modal extends Component {
+  app: any;
   contentEl = document.createElement("div");
   modalEl = document.createElement("div");
-  constructor(_app: any) { super(); }
+  constructor(app: any) { super(); this.app = app; }
   onOpen() {} onClose() {}
   open() {
     this.contentEl.setAttribute("role", "dialog");
     this.contentEl.style.cssText = 'padding:24px;overflow:auto';
     this.modalEl.style.cssText = 'position:fixed;top:5vh;left:50%;transform:translateX(-50%);z-index:1000;background:var(--background-primary,white);max-height:90vh;overflow:auto;border-radius:12px;box-shadow:0 12px 60px #0003';
     this.modalEl.appendChild(this.contentEl); document.body.appendChild(this.modalEl); this.onOpen();
-    if (!this.modalEl.classList.contains('easy-pub-layout-modal')) this.modalEl.style.width = 'min(700px,94vw)';
+    if (!this.modalEl.classList.contains('easy-pub-layout-modal') && !this.modalEl.classList.contains('easy-pub-crop-modal') && !this.modalEl.classList.contains('easy-pub-properties-modal')) this.modalEl.style.width = 'min(700px,94vw)';
   }
   close() { this.onClose(); this.modalEl.remove(); }
 }

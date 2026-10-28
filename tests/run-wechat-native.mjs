@@ -20,7 +20,7 @@ try {
   const code = `(async()=>{
     const id=${JSON.stringify(id)}, manager=app.plugins, adapter=app.vault.adapter;
     const read=adapter.read, virtual=id+'/main.js';
-    manager.manifests[id]={id,name:'EasyPub acceptance',version:'0.0.0',minAppVersion:'1.4.4',dir:id};
+    manager.manifests[id]={id,name:'EasyPub acceptance',version:'0.0.0',minAppVersion:'1.5.7',dir:id};
     adapter.read=async function(p,...args){return p===virtual?require('fs').readFileSync(${JSON.stringify(file)},'utf8'):read.call(this,p,...args);};
     try { const plugin=await manager.loadPlugin(id); return JSON.stringify(plugin.result); }
     finally { adapter.read=read; await manager.unloadPlugin(id); delete manager.manifests[id]; }

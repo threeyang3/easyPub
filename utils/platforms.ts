@@ -1,6 +1,6 @@
 import path from "path";
 import { createHash } from "crypto";
-import { normalizePath } from "obsidian";
+import { App, TFile, normalizePath } from "obsidian";
 import { FrontMatterData, Platform, PLATFORMS, PluginSettings } from "../types";
 
 export function getPlatform(id: string): Platform | undefined {
@@ -154,4 +154,15 @@ export function relativeVaultAttachment(targetPath: string, attachmentPath: stri
 export function isWechatDraftPath(filePath: string, settings: PluginSettings): boolean {
   const platform = PLATFORMS.find(p => p.id === "wechat")!;
   return normalizePath(filePath).startsWith(`${getPublishPath(platform, settings)}/`);
+}
+
+/** A just-created attachment may not have reached the metadata cache yet. */
+export function resolveVaultAttachment(app: App, link: string, sourcePath: string): TFile | null {
+  const cached = app.metadataCache.getFirstLinkpathDest(link, sourcePath);
+  if (cached instanceof TFile) return cached;
+  const target = /^(?:\.\/|\.\.\/)/.test(link)
+    ? path.posix.normalize(path.posix.join(path.posix.dirname(sourcePath), link)) : normalizePath(link);
+  if (target === ".." || target.startsWith("../") || path.posix.isAbsolute(target)) return null;
+  const exact = app.vault?.getAbstractFileByPath?.(target);
+  return exact instanceof TFile ? exact : null;
 }

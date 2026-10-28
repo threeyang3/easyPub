@@ -90,3 +90,15 @@ Hexo 原生测试必须先阅读 [tests/hexo-native.ts](../../tests/hexo-native.
 | 只有 Markdown 文档 | 相对链接、标题锚点、命令/默认值核对、Mermaid 语法和渲染检查 |
 
 CI 当前为三系统 Node 20 核心/构建，以及 Linux 浏览器任务。CI 校验已提交产物与构建结果一致。原生测试和真实服务测试不在普通 CI 内。
+
+## 不启动外部浏览器的工作台预览
+
+```bash
+node tests/preview-workbench.mjs
+```
+
+只监听 `127.0.0.1:4197`，使用合成正文与图片，不访问真实公众号。使用应用内浏览器访问终端显示的本机地址；提供 320px、360px 和 920px 的布局切换。停止服务使用 Ctrl+C。
+
+`tests/hexoFormatting.test.ts` 覆盖补空行、幂等、CRLF、Front Matter 和特殊结构；`tests/publishingWorkbench.test.ts` 覆盖空状态快捷入口、固定稿件、旧读取结果丢弃，以及排版取消后的文件与备份字节。它们通过 `npm test` 执行。
+
+`tests/attachmentImport.test.ts` 覆盖附件目录上下文、同名避让、索引延迟、图片字段自动填入、批量部分失败、关闭期间取消和磁盘错误重试；同时通过真实发布编排校验公众号封面相对路径与裁剪重置。预览页的“生成稿件并添加图片”提供本地文件选择器验收入口。

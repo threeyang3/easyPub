@@ -28,7 +28,7 @@ export function platformPropertyFields(platform: string): PropertyField[] {
     case "wechat": return [{ key: "title", label: "公众号标题" },
       { key: "wechat.author", label: "公众号作者" }, { key: "wechat.digest", label: "公众号摘要" },
       { key: "wechat.sourceUrl", label: "阅读原文链接（可选）" },
-      { key: "wechat.cover", label: "封面附件路径或网址" }];
+      { key: "wechat.cover", label: "封面附件路径或网址", kind: "image" }];
     default: throw new Error(`不支持的平台：${platform}`);
   }
 }

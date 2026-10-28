@@ -116,16 +116,12 @@
 .easy-pub-wechat .epw-issues { border-left: 3px solid var(--text-error); padding: 1px 10px; background: var(--background-secondary); margin: 10px 0; }
 .easy-pub-wechat .epw-issues p, .easy-pub-wechat .epw-warning { font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .easy-pub-wechat .epw-warning { color: var(--text-warning); }
-.easy-pub-wechat .epw-body { flex:1 0 180px; min-height:180px; display:grid; grid-template-rows:minmax(0,1fr); gap:10px; }
-.easy-pub-wechat.epw-settings-open .epw-body { grid-template-rows:minmax(0,1fr) minmax(0,1fr); }
-.easy-pub-wechat .epw-inspector { min-height:0; overflow:auto; padding:0 6px 12px; border-top:1px solid var(--background-modifier-border); }
+.easy-pub-wechat .epw-body { display:grid; gap:10px; }
+.easy-pub-wechat .epw-inspector { min-height:0; overflow:auto; padding:0 4px 12px; }
 .easy-pub-wechat .epw-paper { margin: 0 auto; width: 100%; max-width: 390px; min-height:0; overflow-y: auto; padding: 24px 18px; background: #fff; color: #292d32; border: 1px solid #e0e4e1; border-radius: 5px; box-shadow: 0 8px 24px #00000008; overflow-anchor:none; }
 .easy-pub-wechat > .epw-tools, .easy-pub-wechat > .epw-tabs, .easy-pub-wechat > .epw-footer { flex-shrink:0; }
 .easy-pub-wechat > .epw-status { flex-shrink:0; max-height:80px; overflow:auto; }
-@container (min-width: 700px) {
-  .easy-pub-wechat.epw-settings-open .epw-body { grid-template-rows:minmax(0,1fr); grid-template-columns:minmax(0,1fr) minmax(260px,1fr); }
-  .easy-pub-wechat .epw-inspector { border-top:0; border-left:1px solid var(--background-modifier-border); padding-left:14px; }
-}
+
 .easy-pub-wechat .epw-paper section { user-select: text; }
 .easy-pub-wechat .epw-inspector > button { margin-top: 12px; }
 .easy-pub-wechat-dialog .easy-pub-wechat-details { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-height: 420px; overflow: auto; }
@@ -247,3 +243,89 @@
 .easy-pub-properties pre { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .easy-pub-properties [role="alert"] { color: var(--text-error); }
 .easy-pub-properties button { margin-right: 8px; }
+
+/* Unified publishing panel uses the host's visual language and one vertical flow. */
+.easy-pub-panel { padding:16px; overflow:auto; height:100%; }
+.easy-pub-panel .ep-panel-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.easy-pub-panel h2 { font-size:20px; margin:0; }
+.easy-pub-panel h3 { font-size:14px; margin:18px 0 10px; overflow-wrap:anywhere; }
+.easy-pub-panel .ep-panel-article { padding:18px 0; }
+.easy-pub-panel .ep-panel-article > h3 { font-size:18px; margin:8px 0; }
+.ep-panel-path { color:var(--text-muted); font-size:12px; overflow-wrap:anywhere; }
+.ep-panel-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.easy-pub-panel button { height:auto; min-height:32px; white-space:normal; }
+.easy-pub-panel .ep-panel-platform { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:12px 0; border-bottom:1px solid var(--background-modifier-border); }
+.easy-pub-panel .ep-panel-platform strong { width:100%; font-size:13px; }
+.easy-pub-panel .ep-panel-tools { border-top:1px solid var(--background-modifier-border); }
+.easy-pub-panel .ep-panel-tools button { display:block; width:100%; margin:8px 0; text-align:left; }
+.easy-pub-panel button:focus-visible { outline:2px solid var(--interactive-accent); outline-offset:2px; }
+.easy-pub-format-modal { width:min(1100px,94vw); }
+.easy-pub-format-modal .ep-format-comparison { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.easy-pub-format-modal pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:50vh; overflow:auto; padding:12px; background:var(--background-secondary); font-size:12px; }
+
+/* Each narrow workbench page owns the full available height. */
+.easy-pub-wechat .epw-body, .easy-pub-wechat.epw-settings-open .epw-body { flex:1 1 0; min-height:180px; grid-template-rows:minmax(0,1fr); grid-template-columns:minmax(0,1fr); }
+.easy-pub-wechat .epw-inspector [hidden], .easy-pub-wechat .epw-crop-stage [hidden] { display:none; }
+.easy-pub-wechat .epw-cover-thumbnail { display:block; max-width:100%; max-height:180px; object-fit:contain; margin:12px 0; }
+.easy-pub-wechat .epw-header h2 { font:600 18px var(--font-interface); }
+.easy-pub-wechat .epw-header { max-height:none; overflow:visible; }
+.easy-pub-wechat .epw-setup-entry { margin:6px 0; padding:4px 0; border:0; background:transparent; }
+.easy-pub-wechat .epw-tools button, .easy-pub-wechat .epw-footer button { height:auto; min-height:30px; white-space:normal; }
+@container (min-width:850px) {
+  .easy-pub-wechat.epw-expanded.epw-settings-open .epw-body { grid-template-columns:minmax(0,1.2fr) minmax(300px,1fr); }
+  .easy-pub-wechat.epw-expanded.epw-settings-open .epw-paper[hidden] { display:block; }
+  .easy-pub-wechat.epw-expanded .epw-inspector { border-left:1px solid var(--background-modifier-border); padding-left:20px; }
+}
+.easy-pub-crop-modal { width:min(1100px,94vw); max-height:94vh; }
+.easy-pub-crop-modal .easy-pub-wechat { display:block; overflow:auto; height:auto; max-height:85vh; padding:8px; }
+.easy-pub-crop-modal .epw-crop { max-width:760px; max-height:48vh; width:auto; height:auto; object-fit:contain; }
+.easy-pub-crop-modal .epw-zoom { max-width:760px; margin:6px 0; }
+.easy-pub-crop-modal .epw-crop-thumbnails { display:flex; flex-wrap:wrap; align-items:flex-start; gap:24px; margin:16px 0; }
+.easy-pub-crop-modal .epw-crop-thumbnails canvas { display:block; width:auto; max-width:188px; max-height:100px; margin-top:6px; }
+.easy-pub-crop-modal .epw-crop-actions { position:sticky; bottom:0; padding:12px 0; background:var(--background-primary); }
+@media (max-width:600px) {
+  .easy-pub-format-modal .ep-format-comparison { grid-template-columns:minmax(0,1fr); }
+  .easy-pub-crop-modal .epw-crop { max-width:100%; }
+}
+.easy-pub-panel .ep-panel-shortcuts { margin:16px 0 0; }
+.easy-pub-panel .ep-panel-shortcuts button { width:100%; text-align:left; }
+.easy-pub-crop-modal .easy-pub-wechat { display:grid; grid-template-columns:minmax(0,1fr) 200px; gap:8px 24px; }
+.easy-pub-crop-modal .easy-pub-wechat > h2,
+.easy-pub-crop-modal .easy-pub-wechat > p,
+.easy-pub-crop-modal .easy-pub-wechat > .epw-tabs,
+.easy-pub-crop-modal .epw-crop-actions { grid-column:1 / -1; }
+.easy-pub-crop-modal .epw-crop-thumbnails { flex-direction:column; margin:0; }
+.easy-pub-crop-modal .epw-crop-stage { min-width:0; }
+@media (max-width:750px) {
+  .easy-pub-crop-modal .easy-pub-wechat { grid-template-columns:minmax(0,1fr); }
+  .easy-pub-crop-modal .epw-crop-thumbnails { flex-direction:row; }
+}
+.easy-pub-crop-modal .easy-pub-wechat > h2 { margin:0; font-size:20px; }
+.easy-pub-crop-modal .easy-pub-wechat > p { margin:4px 0; }
+.easy-pub-crop-modal .epw-crop-resolution { margin:8px 0; }
+.easy-pub-crop-modal .epw-crop-actions { margin-top:8px; }
+
+.easy-pub-wechat .epw-expand { display:none; }
+@container (min-width:850px) { .easy-pub-wechat .epw-expand { display:inline-block; } }
+/* Keep actions outside the scrollable crop stage, so they never cover the controls. */
+.easy-pub-crop-modal .easy-pub-wechat { height:min(800px,85vh); grid-template-rows:auto auto auto minmax(0,1fr) auto; }
+.easy-pub-crop-modal .epw-crop-stage { overflow:auto; min-height:0; padding-bottom:8px; }
+.easy-pub-crop-modal .epw-crop-thumbnails { overflow:auto; min-height:0; }
+.easy-pub-crop-modal .epw-crop-actions { position:static; margin:0; }
+.easy-pub-crop-modal .easy-pub-wechat > p:empty { display:none; }
+@media (max-width:750px) {
+  .easy-pub-crop-modal .easy-pub-wechat { height:auto; grid-template-rows:none; }
+  .easy-pub-crop-modal .epw-crop-stage { overflow:visible; }
+}
+
+.easy-pub-properties .ep-property-image-actions { flex-basis:100%; display:flex; flex-wrap:wrap; gap:8px; }
+.easy-pub-properties .ep-property-attachments { border-top:1px solid var(--background-modifier-border); margin-top:16px; padding-top:8px; }
+.easy-pub-properties .ep-property-attachments p { color:var(--text-muted); font-size:12px; }
+.easy-pub-properties .ep-property-imported-row { display:flex; flex-wrap:wrap; gap:8px; padding:12px 0; border-bottom:1px solid var(--background-modifier-border); }
+.easy-pub-properties .ep-property-imported-row small { flex-basis:100%; overflow-wrap:anywhere; }
+.easy-pub-properties .ep-property-imported-row input { width:100%; min-width:0; }
+.easy-pub-properties input[type="file"][hidden] { display:none; }
+.easy-pub-properties-modal { width:min(760px,94vw); }
+.easy-pub-properties { height:min(760px,78vh); display:flex; flex-direction:column; min-height:0; overflow:hidden; }
+.easy-pub-properties .ep-property-form { flex:1 1 auto; min-height:0; overflow:auto; padding-right:4px; }
+.easy-pub-properties .ep-property-actions { flex-shrink:0; padding:12px 0; background:var(--background-primary); border-top:1px solid var(--background-modifier-border); z-index:1; }

@@ -4,7 +4,7 @@ import { createHash, randomBytes } from "crypto";
 import { assertPublishUnchanged } from "./publishSafety";
 
 export async function writePublishedFile(target: string, content: string, expected?: string | null,
-  backupDirectory = path.join(path.dirname(target), ".easy-pub-backups")): Promise<void> {
+  backupDirectory = path.join(path.dirname(target), ".easy-pub-backups"), assertActive: () => void = () => {}): Promise<void> {
   const lockPath = path.join(path.dirname(target), `.${path.basename(target)}.easy-pub.lock`);
   let lock;
   try { lock = await fs.open(lockPath, "wx"); }
@@ -47,6 +47,7 @@ export async function writePublishedFile(target: string, content: string, expect
     }
     await fs.writeFile(temporary, content, { encoding: "utf8", flag: "wx" });
     assertPublishUnchanged(current, await readCurrent());
+    assertActive();
     if (current === null) {
       // Exclusive creation also protects against a new same-name file appearing after validation.
       await fs.link(temporary, target);

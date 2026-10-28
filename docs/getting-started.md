@@ -4,7 +4,7 @@
 
 ## 环境要求
 
-- 桌面版 Obsidian，清单声明最低版本为 1.4.4；这不代表最低版本所有功能已实机验收，见[状态说明](status.md)。插件为 desktop-only，不支持 Obsidian 手机端。
+- 桌面版 Obsidian，清单声明最低版本为 1.5.7；这不代表最低版本所有功能已实机验收，见[状态说明](status.md)。插件为 desktop-only，不支持 Obsidian 手机端。
 - 一个可正常编辑笔记的 Vault。首次尝试建议使用单独测试 Vault 与合成文章。
 - 仅生成知乎/小红书稿件或进行本地公众号排版，不需要 Hexo、PicGo 或 AI 服务。
 - 使用 Hexo 构建/部署时，需要系统 Node.js、博客本地依赖，以及部署方式要求的非交互凭据。兼容后台另有[接入条件](control-room.md)。

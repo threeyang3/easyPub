@@ -6,7 +6,8 @@
 
 ## 版本边界
 
-- 本次版本：[1.9.0 Release](https://github.com/threeyang3/easyPub/releases/tag/1.9.0)，对应[发布说明](releases/1.9.0.md)。发布状态及最终提交以 GitHub Release 为准。
+- 本次版本：[1.9.1 Release](https://github.com/threeyang3/easyPub/releases/tag/1.9.1)，对应[发布说明](releases/1.9.1.md)。发布状态及最终提交以 GitHub Release 为准。
+- 1.9.1 改进稿件定位索引、公众号预览复用、AI 排版异步交互和发布面板刷新；修复 Windows 换行的改动视图。最低 Obsidian 1.5.7、桌面端限定保持不变，既有 1.9.0 发布包保留。
 - 1.9.0 新增常驻发布面板、Hexo 一键排版和附件导入，重构公众号工作台与独立双比例封面裁剪。最低 Obsidian 版本提高到 1.5.7（附件路径 API）；已发布 1.8.0 的最低版本仍为 1.4.4，历史映射保留。
 - 1.8.0 新增原稿初始化、平台字段白名单、按字段刷新与旧属性清理、公众号单一标题；详见[属性归属](reference/data-model.md#属性归属)。
 - 发布稿的属性后续独立维护；更新正文不再自动覆盖标题、标签和封面，需通过专门命令选择字段刷新。旧稿额外属性默认保留，不批量迁移文章。
@@ -16,6 +17,7 @@
 
 | 范围 | 证据与结论 | 不能据此推断 |
 | --- | --- | --- |
+| 1.9.1 性能与交互修复 | [PR #8](https://github.com/threeyang3/easyPub/pull/8) 已合并；提交 `559152b` 的三系统构建与两套浏览器测试通过，[CI 40700055167](https://github.com/threeyang3/easyPub/actions/runs/40700055167)；[原生性能记录](verification/performance-native.json)包含真实磁盘和 Obsidian 渲染 | 网络盘性能、长期无内存泄漏或全部微信客户端视觉一致 |
 | 结构优化与排版提交修复 | 代码提交 `e123741` 的核心测试、生产构建和公众号浏览器回归通过；[CI 40169313346](https://github.com/threeyang3/easyPub/actions/runs/40169313346) 四项通过 | 此后任意代码修改自动通过 |
 | 平台构建 | CI 使用 Node 20，覆盖 macOS、Windows、Linux；浏览器交互任务在 Linux 运行 | Windows/Linux 原生 Obsidian 和真实账号已验收 |
 | 原生渲染 | 优化阶段 macOS 原生基线 38 项检查通过；不写 Vault、不请求微信 | 微信后台接受所有输入 |

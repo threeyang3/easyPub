@@ -48,6 +48,7 @@ import { assertPublishUnchanged, completeControlRoomMetadata } from "./utils/pub
 import { writeImmutableAsset } from "./utils/publishFiles";
 import { withTimeout } from "./utils/async";
 import { assertPublishIdentity, PublishIdentityIndex } from "./utils/publishIdentity";
+import { PublishLocator } from "./utils/publishLocator";
 import { PublishStore } from "./utils/publishStore";
 import { PlatformSelectModal } from "./modals/PlatformSelectModal";
 import { chooseArticleProperties } from "./modals/ArticlePropertiesModal";
@@ -105,6 +106,7 @@ export default class EasyPub extends Plugin {
   private wechatApiIdentity = "";
 
   private identityIndex?: PublishIdentityIndex;
+  private publishLocators?: Map<string, PublishLocator>;
 
   async onload() {
     await this.loadSettings();
@@ -124,7 +126,7 @@ export default class EasyPub extends Plugin {
     this.registerView(HEXO_PREVIEW_VIEW, leaf => new HexoPreviewView(leaf));
     this.addCommand({ id: "preview-hexo", name: "预览 Hexo 发布效果", callback: () => void this.previewHexoArticle() });
     this.identityIndex = new PublishIdentityIndex();
-    const invalidateIdentity = (file: unknown) => this.identityIndex?.invalidate(file);
+    const invalidateIdentity = (file: {path: string}, oldPath?: string) => { this.identityIndex?.invalidate(file); this.publishLocators?.forEach(locator => locator.invalidate(file.path, oldPath)); };
     this.registerEvent(this.app.vault.on("create", invalidateIdentity));
     this.registerEvent(this.app.vault.on("modify", invalidateIdentity));
     this.registerEvent(this.app.vault.on("delete", invalidateIdentity));
@@ -242,7 +244,7 @@ export default class EasyPub extends Plugin {
     } finally { this.pubIdBatchInProgress = false; }
   }
 
-  onunload() { clearWechatLayoutCache(); this.wechatAiSessionKey = ""; this.wechatSessionSecret = ""; this.settings.picgoServerSecret = ""; this.wechatApi = undefined; this.identityIndex?.clear(); }
+  onunload() { clearWechatLayoutCache(); this.wechatAiSessionKey = ""; this.wechatSessionSecret = ""; this.settings.picgoServerSecret = ""; this.wechatApi = undefined; this.identityIndex?.clear(); this.publishLocators?.forEach(locator => locator.invalidate()); }
 
   openWechatAiSettings(finished?: () => void) { new WechatAiSettingsModal(this, finished).open(); }
 
@@ -385,6 +387,14 @@ export default class EasyPub extends Plugin {
     const sourceMeta = parseFrontMatter(await this.app.vault.read(source), true).data;
     const id = getFrontMatterString(meta, "pub_id");
     return id && id === getFrontMatterString(sourceMeta, "pub_id") && !sourceMeta.source_file ? source : null;
+  }
+
+  async hasRelatedDraft(source: TFile, platform: Platform): Promise<boolean> {
+    const meta = parseFrontMatter(await this.app.vault.read(source), true).data;
+    const id = getFrontMatterString(meta, "pub_id");
+    if (!id) return false;
+    if (platform.isExternal) await validateHexoBlog(this.settings.hexoRepoPath);
+    return Boolean(await this.findArticleByPubId(platform, id, meta, source.path));
   }
 
   async openRelatedDraft(source: TFile, platform: Platform): Promise<void> {
@@ -786,25 +796,14 @@ export default class EasyPub extends Plugin {
     sourcePath?: string
   ): Promise<string | null> {
     const subFolder = getSubFolder(platform, meta);
-    const matches = new Map<string, string>();
-    const inspected = new Set<string>();
-    const invalid: string[] = [];
-    const inspect = async (file: string) => {
-      if (inspected.has(file)) return;
-      inspected.add(file);
-      const content = await this.readPublishFile(platform, file);
-      let parsed;
-      try { parsed = parseFrontMatter(content, true); }
-      catch { invalid.push(file); return; }
-      if (getFrontMatterString(parsed.data, "pub_id") === pubId) matches.set(file, content);
-    };
+    const candidates = new Set<string>();
 
     // 先检查已知路径
     const title = getFrontMatterString(meta, "title");
     if (title) {
       const expectedPath = getTargetPath(platform, this.settings, title, subFolder);
       if (await this.publishPathExists(platform, expectedPath)) {
-        await inspect(expectedPath);
+        candidates.add(expectedPath);
       }
     }
 
@@ -830,11 +829,17 @@ export default class EasyPub extends Plugin {
         : await this.listPublishFiles(platform, publishPath);
       for (const file of files) {
         if (file.endsWith(".md")) {
-          await inspect(file);
+          candidates.add(file);
         }
       }
     }
-    if (invalid.length) throw new Error(`以下发布稿的 Front Matter 无法解析，不能排除 pub_id 冲突。请修复后重新发布，文件未被修改：\n${invalid.join("\n")}`);
+    const locators = this.publishLocators ??= new Map<string, PublishLocator>();
+    let locator = locators.get(platform.id);
+    if (!locator) { locator = new PublishLocator(); locators.set(platform.id, locator); }
+    const matches = await locator.find([...candidates], pubId, {
+      read: file => this.readPublishFile(platform, file),
+      version: file => this.getPublishStore().publishFileVersion(platform, file),
+    });
     if (sourcePath) await assertPublishIdentity(this.app, sourcePath, pubId,
       [...matches].map(([path, content]) => ({ path, content })),
       PLATFORMS.filter(platform => !platform.isExternal).map(platform => getPublishPath(platform, this.settings)), this.identityIndex);

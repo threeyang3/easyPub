@@ -1,3 +1,4 @@
+import { runPerformanceTests } from "./performance.test";
 import { runAttachmentImportTests } from "./attachmentImport.test";
 import { runPublishingWorkbenchTests } from "./publishingWorkbench.test";
 import { runHexoFormattingTests } from "./hexoFormatting.test";
@@ -45,6 +46,7 @@ import { runStructureTests } from "./structure.test";
 import { runArticlePropertyTests } from "./articleProperties.test";
 
 async function run() {
+  await runPerformanceTests();
   runHexoFormattingTests();
   await runAttachmentImportTests();
   await runPublishingWorkbenchTests();

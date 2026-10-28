@@ -77,7 +77,7 @@ export function digestFromWechatHtml(html: string): string {
   return Array.from(text.replace(/\s+/g, " ").trim()).slice(0, 100).join("");
 }
 
-export async function renderWechatDocument(app: App, body: string, filePath: string, component: Component, allowRemote = () => true, layout?: unknown): Promise<WechatPreparedDocument> {
+export async function renderWechatDocument(app: App, body: string, filePath: string, component: Component, allowRemote = () => true, layout?: unknown, requireMapping = true): Promise<WechatPreparedDocument> {
   const images: WechatImage[] = [];
   const bySource = new Map<string, WechatImage>();
   try {
@@ -112,7 +112,7 @@ export async function renderWechatDocument(app: App, body: string, filePath: str
     const issues = [...prepared.issues, ...sanitizeWechatHtml(container, images)];
     // Raw HTML may have host-side resource effects; never render it a second time
     // to infer source mapping. It remains eligible for safe tag-based themes.
-    const mapped = rawHtml ? {document: {hash: extractWechatBlocks(body, sourceTree).hash, blocks: []}, bindings: []} : await bindWechatBlocks(body, prepared.markdown, container, async (markdown, target) => {
+    const mapped = rawHtml || !requireMapping && layout === undefined ? {document: {hash: extractWechatBlocks(body, sourceTree).hash, blocks: []}, bindings: []} : await bindWechatBlocks(body, prepared.markdown, container, async (markdown, target) => {
       await MarkdownRenderer.render(app, markdown, target, filePath, component);
       return sanitizeWechatHtml(target, images).length === 0;
     }, sourceTree);

@@ -14,6 +14,8 @@ settings.ts             Obsidian settings UI
 types.ts                Settings, platform, metadata, asset, and PicGo types
 modals/PlatformSelectModal.ts  Platform selection UI
 utils/publishStore.ts    Vault/external draft IO and backup notices
+utils/publishLocator.ts  Session-only, version-checked draft identity lookup
+utils/wechatPreviewReuse.ts Byte-checked local body preview reuse after metadata saves
 utils/wechatLimits.ts    Shared field and final HTML size rules
 utils/wechatLayoutPreview.ts  Controlled layout preview transformation
 modals/DiffModal.ts     Update diff and confirmation
@@ -117,6 +119,7 @@ For compatible Blog Control Room repositories:
 - AI requests are explicit per-request actions after destination/payload preview, never refresh side effects. Credentials are system-encrypted or session-only and scoped to endpoint; request keys and article snippets are not persisted in plan caches. Do not modify WechatSync's remote write semantics for layout features.
 - Settings load failure locks ordinary saves and publication until a successful reload or an explicitly confirmed, verified backup/reset. Never overwrite unreadable originals with default settings.
 
+- Ordinary workbench previews defer semantic mapping until layout editing; saved plans still require strict mapping. Metadata-only saves may reuse local body previews only after byte checks; remote body images always rerender. See docs/performance-stabilization.md for validation limits.
 - Native Markdown rendering is normalized once for both preview and submission. All workbench CSS is scoped. Stale render generations are discarded; changes during a render queue another refresh.
 - Body images use uploadimg (JPG/PNG <1 MB); permanent image material is used for covers (<10 MB). GIF is rejected with an explicit replacement message, never silently flattened. Original attachments and local Markdown body are preserved.
 - Cover crop uses current `cover_info.crop_percent_list` with independent 2.35:1 and 1:1 coordinates.

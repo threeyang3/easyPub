@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { runLayoutConcurrencyUi } from './wechat-layout-concurrency-ui.mjs';
 import { runLayoutCommitUi } from './wechat-layout-commit-ui.mjs';
 
 // Runs against the real layout modal, workbench and renderer with a deferred AI transport.
@@ -105,7 +106,10 @@ export async function runLayoutUi(page) {
   await open(); await button('准备 AI 排版请求').click(); await button('确认发送这些片段并生成方案').click();
   await page.waitForFunction(() => window.fixtureAiRequests.length === 2);
   await theme().selectOption('minimal');
-  assert.equal(await button('应用排版到本地稿').isDisabled(), false, 'Manual edits can be applied while an obsolete request is still completing');
+  // The new plan must pass its scheduled preview check before apply is enabled.
+  // Keep the obsolete transport unresolved: availability cannot depend on it.
+  await page.waitForFunction(() => !document.querySelector('.easy-pub-layout button.mod-cta').disabled);
+  assert.equal(await button('应用排版到本地稿').isDisabled(), false, 'Validated manual edits can be applied while an obsolete request is still completing');
   assert.match(await status().innerText(), /旧 AI 响应将被丢弃/);
   await page.evaluate(() => {
     const data = JSON.parse(JSON.parse(window.fixtureAiRequests[1].body).messages[1].content);
@@ -217,11 +221,14 @@ export async function runLayoutUi(page) {
   await runLayoutCommitUi(page);
 
   await reset(prefix + 'x' + image);
+  await page.evaluate(() => window.fixture.view.refresh(false, true));
   const overhead = await page.evaluate(() => Array.from(window.fixture.view.prepared.html).length - 1);
   const nearLimit = prefix + 'x'.repeat(19999 - overhead) + image;
   await reset(nearLimit);
+  await page.evaluate(() => window.fixture.view.refresh(false, true));
   assert.equal(await page.evaluate(() => Array.from(window.fixture.view.prepared.html).length), 19999);
   await open(); await button('使用深夜电台风格').click();
+  await page.waitForFunction(() => document.querySelector('.easy-pub-layout [role=status]').textContent.includes('超过'));
   assert.match(await status().innerText(), /超过/);
   assert.match(await page.locator('.epl-preview').innerText(), /当前方案无法预览/);
   assert.equal(await button('应用排版到本地稿').isDisabled(), true);
@@ -251,5 +258,6 @@ export async function runLayoutUi(page) {
   await page.waitForFunction(() => !document.querySelector('.easy-pub-layout'));
   assert.equal(await page.evaluate(() => window.fixture.view.prepared.issues.length), 0, 'Previously saved oversized layouts must be repairable from the workbench');
   await reset(savedBeforeClose);
+  await runLayoutConcurrencyUi(page);
   console.log('Layout UI: local preview/apply, content fidelity, AI consent, locks, undo, invalid/stale/late responses and close passed');
 }

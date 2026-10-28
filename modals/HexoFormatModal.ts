@@ -1,3 +1,4 @@
+import { formattingChanges } from "../utils/formatChanges";
 import { App, Modal } from "obsidian";
 import { HexoFormatResult } from "../utils/hexoFormatting";
 
@@ -13,9 +14,24 @@ export class HexoFormatModal extends Modal {
     this.contentEl.createEl("p", { text: `增加 ${this.result.addedBreaks} 处段落空行，清理 ${this.result.trimmedLines} 行末尾空格，并清理文末空行。保存前自动备份。` });
     this.contentEl.createEl("p", { text: "换行规则：普通正文的软换行和显式硬换行（两个尾随空格或反斜杠）都会转换为空行分段。请核对下方结果。" });
     const grid = this.contentEl.createDiv({ cls: "ep-format-comparison" });
-    for (const [title, text] of [["当前内容", this.before], ["排版结果", this.result.content]]) {
-      const section = grid.createDiv(); section.createEl("h3", { text: title }); section.createEl("pre", { text });
-    }
+    const changes = this.contentEl.createEl("pre", { text: formattingChanges(this.before, this.result.content) });
+    const toggle = this.contentEl.createEl("button", { text: "查看完整内容" });
+    toggle.setAttribute("aria-pressed", "false");
+    let full = false;
+    const renderFull = () => {
+      if (grid.childElementCount) return;
+      for (const [title, text] of [["当前内容", this.before], ["排版结果", this.result.content]]) {
+        const section = grid.createDiv(); section.createEl("h3", { text: title }); section.createEl("pre", { text });
+      }
+    };
+    grid.hidden = true;
+    toggle.onclick = () => {
+      full = !full;
+      if (full) renderFull();
+      grid.hidden = !full; changes.hidden = full;
+      toggle.textContent = full ? "仅查看改动" : "查看完整内容";
+      toggle.setAttribute("aria-pressed", String(full));
+    };
     const status = this.contentEl.createEl("p", { attr: { role: "status" } });
     const actions = this.contentEl.createDiv({ cls: "ep-panel-actions" });
     actions.createEl("button", { text: "取消" }).onclick = () => this.close();

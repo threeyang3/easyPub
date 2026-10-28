@@ -28,7 +28,14 @@ export async function runLayoutCommitUi(page) {
       button.click(); button.click();
     });
     assert.equal(await page.evaluate(() => window.commitTest.reads.length), 1);
-    await resolveRead();
+    // Lazy mapping adds a snapshot read and a post-render consistency read
+    // before the editor's own freshness check. Drain only the opening reads;
+    // both immediate clicks must still share the same opening slot.
+    for (let step = 0; step < 3; step++) {
+      await resolveRead();
+      await page.waitForFunction(() => document.querySelector('.easy-pub-layout') || window.commitTest.reads.length > 0);
+      if (await page.locator('.easy-pub-layout').count()) break;
+    }
     assert.equal(await page.locator('.easy-pub-layout').count(), 1);
     await button('取消').click();
     await page.evaluate(() => { window.commitTest.gate = false; });

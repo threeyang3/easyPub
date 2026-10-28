@@ -9,11 +9,12 @@ import os from 'node:os';
 // dedicated Sandbox notes and requires a marked disposable blog copy.
 const temp = await mkdtemp(path.join(os.tmpdir(), 'easypub-native-'));
 try {
+  const performance = process.argv.includes('--performance');
   const picker = process.argv.includes('--file-picker');
   const workbench = process.argv.includes('--workbench');
   const hexo = process.argv.includes('--hexo');
   if ((hexo || workbench) && !process.env.EASYPUB_TEST_HEXO_REPO) throw new Error('Set EASYPUB_TEST_HEXO_REPO to a disposable blog copy');
-  const entry = picker ? 'tests/attachment-picker-native.ts' : workbench ? 'tests/workbench-native.ts' : hexo ? 'tests/hexo-native.ts' : process.argv.includes('--download') ? 'tests/wechat-download-native.ts' : 'tests/wechat-native.ts';
+  const entry = performance ? 'tests/performance-native.ts' : picker ? 'tests/attachment-picker-native.ts' : workbench ? 'tests/workbench-native.ts' : hexo ? 'tests/hexo-native.ts' : process.argv.includes('--download') ? 'tests/wechat-download-native.ts' : 'tests/wechat-native.ts';
   const result = await build({ entryPoints: [entry], bundle: true, platform: 'node', format: 'cjs', external: ['obsidian','electron','@electron/remote'], write: false });
   const file = path.join(temp, 'native.cjs');
   const pickerImagePath=picker ? path.join(temp,'easypub-native-picker-test.png') : undefined;
@@ -33,7 +34,7 @@ try {
     finally { adapter.read=read; await manager.unloadPlugin(id); delete manager.manifests[id]; }
   })()`;
   const cli = process.env.OBSIDIAN_CLI ?? (process.platform === 'win32' ? 'C:/Program Files/Obsidian/Obsidian.com' : 'obsidian');
-  const run = spawnSync(cli, [`vault=${process.env.EASYPUB_TEST_VAULT ?? 'Sandbox'}`, 'eval', `code=${code}`], { encoding: 'utf8', timeout: hexo ? 660000 : picker ? 180000 : 60000 });
+  const run = spawnSync(cli, [`vault=${process.env.EASYPUB_TEST_VAULT ?? 'Sandbox'}`, 'eval', `code=${code}`], { encoding: 'utf8', timeout: performance ? 180000 : hexo ? 660000 : picker ? 180000 : 60000 });
   process.stdout.write(run.stdout ?? ''); process.stderr.write(run.stderr ?? '');
   let acceptance;
   for (const line of (run.stdout ?? '').split(/\r?\n/)) {

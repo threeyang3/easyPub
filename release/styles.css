@@ -260,6 +260,7 @@
 .easy-pub-panel .ep-panel-tools button { display:block; width:100%; margin:8px 0; text-align:left; }
 .easy-pub-panel button:focus-visible { outline:2px solid var(--interactive-accent); outline-offset:2px; }
 .easy-pub-format-modal { width:min(1100px,94vw); }
+.easy-pub-format-modal .ep-format-comparison[hidden] { display:none; }
 .easy-pub-format-modal .ep-format-comparison { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
 .easy-pub-format-modal pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:50vh; overflow:auto; padding:12px; background:var(--background-secondary); font-size:12px; }
 

@@ -1,0 +1,344 @@
+{
+  "checks": [
+    "100 files lookup 0 preserves identity and expected reads",
+    "100 files lookup 1 preserves identity and expected reads",
+    "100 files lookup 2 preserves identity and expected reads",
+    "100 files lookup 3 preserves identity and expected reads",
+    "1000 files lookup 0 preserves identity and expected reads",
+    "1000 files lookup 1 preserves identity and expected reads",
+    "1000 files lookup 2 preserves identity and expected reads",
+    "1000 files lookup 3 preserves identity and expected reads",
+    "5000 files lookup 0 preserves identity and expected reads",
+    "5000 files lookup 1 preserves identity and expected reads",
+    "5000 files lookup 2 preserves identity and expected reads",
+    "5000 files lookup 3 preserves identity and expected reads",
+    "20 blocks / 0 images / mapping false",
+    "20 blocks / 0 images / mapping true",
+    "20 blocks / 5 images / mapping false",
+    "20 blocks / 5 images / mapping true",
+    "20 blocks / 20 images / mapping false",
+    "20 blocks / 20 images / mapping true",
+    "100 blocks / 0 images / mapping false",
+    "100 blocks / 0 images / mapping true",
+    "100 blocks / 5 images / mapping false",
+    "100 blocks / 5 images / mapping true",
+    "Saved layout keeps native strict mapping",
+    "100 blocks / 20 images / mapping false",
+    "100 blocks / 20 images / mapping true",
+    "300 blocks / 0 images / mapping false",
+    "300 blocks / 0 images / mapping true",
+    "300 blocks / 5 images / mapping false",
+    "300 blocks / 5 images / mapping true",
+    "300 blocks / 20 images / mapping false",
+    "300 blocks / 20 images / mapping true"
+  ],
+  "environment": {
+    "platform": "darwin",
+    "node": "24.21.0",
+    "electron": "43.7.7",
+    "vault": "Sandbox"
+  },
+  "disk": [
+    {
+      "files": 100,
+      "samples": [
+        {
+          "phase": "cold-index",
+          "durationMs": 25.400000005960464,
+          "reads": 100,
+          "stats": 200
+        },
+        {
+          "phase": "warm",
+          "durationMs": 2.800000011920929,
+          "reads": 1,
+          "stats": 101
+        },
+        {
+          "phase": "warm",
+          "durationMs": 3.5999999940395355,
+          "reads": 1,
+          "stats": 101
+        },
+        {
+          "phase": "warm",
+          "durationMs": 3.7000000178813934,
+          "reads": 1,
+          "stats": 101
+        }
+      ]
+    },
+    {
+      "files": 1000,
+      "samples": [
+        {
+          "phase": "cold-index",
+          "durationMs": 100.2999999821186,
+          "reads": 1000,
+          "stats": 2000
+        },
+        {
+          "phase": "warm",
+          "durationMs": 16.19999998807907,
+          "reads": 1,
+          "stats": 1001
+        },
+        {
+          "phase": "warm",
+          "durationMs": 16.30000001192093,
+          "reads": 1,
+          "stats": 1001
+        },
+        {
+          "phase": "warm",
+          "durationMs": 16.69999998807907,
+          "reads": 1,
+          "stats": 1001
+        }
+      ]
+    },
+    {
+      "files": 5000,
+      "samples": [
+        {
+          "phase": "cold-index",
+          "durationMs": 498,
+          "reads": 5000,
+          "stats": 10000
+        },
+        {
+          "phase": "warm",
+          "durationMs": 78,
+          "reads": 1,
+          "stats": 5001
+        },
+        {
+          "phase": "warm",
+          "durationMs": 78,
+          "reads": 1,
+          "stats": 5001
+        },
+        {
+          "phase": "warm",
+          "durationMs": 77.60000002384186,
+          "reads": 1,
+          "stats": 5001
+        }
+      ]
+    }
+  ],
+  "previews": [
+    {
+      "blocks": 20,
+      "images": 0,
+      "mode": "ordinary",
+      "durationMs": 4.5,
+      "htmlCharacters": 1771,
+      "mappedBlocks": 0,
+      "processedImageBytes": 0,
+      "issues": []
+    },
+    {
+      "blocks": 20,
+      "images": 0,
+      "mode": "strict-mapping",
+      "durationMs": 3.5,
+      "htmlCharacters": 2151,
+      "mappedBlocks": 20,
+      "processedImageBytes": 0,
+      "issues": []
+    },
+    {
+      "blocks": 20,
+      "images": 5,
+      "mode": "ordinary",
+      "durationMs": 46.19999998807907,
+      "htmlCharacters": 2346,
+      "mappedBlocks": 0,
+      "processedImageBytes": 42960,
+      "issues": []
+    },
+    {
+      "blocks": 20,
+      "images": 5,
+      "mode": "strict-mapping",
+      "durationMs": 45.69999998807907,
+      "htmlCharacters": 2726,
+      "mappedBlocks": 20,
+      "processedImageBytes": 42960,
+      "issues": []
+    },
+    {
+      "blocks": 20,
+      "images": 20,
+      "mode": "ordinary",
+      "durationMs": 130,
+      "htmlCharacters": 4091,
+      "mappedBlocks": 0,
+      "processedImageBytes": 171840,
+      "issues": []
+    },
+    {
+      "blocks": 20,
+      "images": 20,
+      "mode": "strict-mapping",
+      "durationMs": 127.2000000178814,
+      "htmlCharacters": 4471,
+      "mappedBlocks": 20,
+      "processedImageBytes": 171840,
+      "issues": []
+    },
+    {
+      "blocks": 100,
+      "images": 0,
+      "mode": "ordinary",
+      "durationMs": 5.0999999940395355,
+      "htmlCharacters": 8411,
+      "mappedBlocks": 0,
+      "processedImageBytes": 0,
+      "issues": []
+    },
+    {
+      "blocks": 100,
+      "images": 0,
+      "mode": "strict-mapping",
+      "durationMs": 11.800000011920929,
+      "htmlCharacters": 10311,
+      "mappedBlocks": 100,
+      "processedImageBytes": 0,
+      "issues": []
+    },
+    {
+      "blocks": 100,
+      "images": 5,
+      "mode": "ordinary",
+      "durationMs": 56.5,
+      "htmlCharacters": 8986,
+      "mappedBlocks": 0,
+      "processedImageBytes": 42960,
+      "issues": []
+    },
+    {
+      "blocks": 100,
+      "images": 5,
+      "mode": "strict-mapping",
+      "durationMs": 47.599999994039536,
+      "htmlCharacters": 10886,
+      "mappedBlocks": 100,
+      "processedImageBytes": 42960,
+      "issues": []
+    },
+    {
+      "blocks": 100,
+      "images": 5,
+      "mode": "saved-layout",
+      "durationMs": 43.400000005960464,
+      "mappedBlocks": 100
+    },
+    {
+      "blocks": 100,
+      "images": 20,
+      "mode": "ordinary",
+      "durationMs": 126.09999999403954,
+      "htmlCharacters": 10721,
+      "mappedBlocks": 0,
+      "processedImageBytes": 171840,
+      "issues": []
+    },
+    {
+      "blocks": 100,
+      "images": 20,
+      "mode": "strict-mapping",
+      "durationMs": 145.30000001192093,
+      "htmlCharacters": 12621,
+      "mappedBlocks": 100,
+      "processedImageBytes": 171840,
+      "issues": []
+    },
+    {
+      "blocks": 300,
+      "images": 0,
+      "mode": "ordinary",
+      "durationMs": 11.899999976158142,
+      "htmlCharacters": 25211,
+      "mappedBlocks": 0,
+      "processedImageBytes": 0,
+      "issues": [
+        "排版后的正文超过 2 万字符或 1 MB，请精简后重试"
+      ]
+    },
+    {
+      "blocks": 300,
+      "images": 0,
+      "mode": "strict-mapping",
+      "durationMs": 25.69999998807907,
+      "htmlCharacters": 30911,
+      "mappedBlocks": 300,
+      "processedImageBytes": 0,
+      "issues": [
+        "排版后的正文超过 2 万字符或 1 MB，请精简后重试"
+      ]
+    },
+    {
+      "blocks": 300,
+      "images": 5,
+      "mode": "ordinary",
+      "durationMs": 43.19999998807907,
+      "htmlCharacters": 25781,
+      "mappedBlocks": 0,
+      "processedImageBytes": 42960,
+      "issues": [
+        "排版后的正文超过 2 万字符或 1 MB，请精简后重试"
+      ]
+    },
+    {
+      "blocks": 300,
+      "images": 5,
+      "mode": "strict-mapping",
+      "durationMs": 56.400000005960464,
+      "htmlCharacters": 31481,
+      "mappedBlocks": 300,
+      "processedImageBytes": 42960,
+      "issues": [
+        "排版后的正文超过 2 万字符或 1 MB，请精简后重试"
+      ]
+    },
+    {
+      "blocks": 300,
+      "images": 20,
+      "mode": "ordinary",
+      "durationMs": 129.2999999821186,
+      "htmlCharacters": 27501,
+      "mappedBlocks": 0,
+      "processedImageBytes": 171840,
+      "issues": [
+        "排版后的正文超过 2 万字符或 1 MB，请精简后重试"
+      ]
+    },
+    {
+      "blocks": 300,
+      "images": 20,
+      "mode": "strict-mapping",
+      "durationMs": 161.90000000596046,
+      "htmlCharacters": 33201,
+      "mappedBlocks": 300,
+      "processedImageBytes": 171840,
+      "issues": [
+        "排版后的正文超过 2 万字符或 1 MB，请精简后重试"
+      ]
+    }
+  ],
+  "observations": {
+    "heapBeforeBytes": 58991604,
+    "heapAfterBytes": 70649920,
+    "heapObservedPeakBytes": 80826788,
+    "maxTimerDelayMs": 13.800000011920929,
+    "longTaskObserverAvailable": true,
+    "longTasksMs": []
+  },
+  "limits": [
+    "Cold means new session index; OS filesystem caches were not flushed.",
+    "Temporary local SSD files; not a network disk or a copied user blog.",
+    "Heap and timer samples include other plugins in the Sandbox renderer; no forced GC and no claim of exact process memory peak."
+  ]
+}

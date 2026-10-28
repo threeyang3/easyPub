@@ -153,6 +153,8 @@ if (document.querySelector("#publishing")) {
   plugin.resolvePublishingSource = () => source;
   plugin.openHexoControlRoom = async () => { document.querySelector("#verification")!.textContent = "Hexo 管理后台入口已触发"; };
   plugin.openRelatedDraft = async () => {};
+  plugin.hasRelatedDraft = async () => false;
+  plugin.preparePublish = async () => { document.querySelector("#verification")!.textContent = "创建稿件入口已触发"; };
   const panel = new PublishingView({app,contentEl:document.querySelector("#publishing")} as any, plugin);
   await panel.onOpen();
 }

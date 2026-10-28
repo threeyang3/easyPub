@@ -121,3 +121,8 @@ EASYPUB_TEST_VAULT=Sandbox node tests/run-wechat-native.mjs --file-picker
 ```
 
 终端显示合成 PNG 路径，并在 Sandbox 打开独立验收窗口。点击“上传封面”，在真实操作系统文件对话框中选取该 PNG，再预览并确认。验收核对附件字节和属性引用并清理测试数据；不确认其他已打开的生成窗口。两分钟无操作会取消测试窗口。Mac 实测记录见 [attachment-picker-native.json](../verification/attachment-picker-native.json)。
+
+
+## 性能回归夹具
+
+`npm test` 包含 100/1,000/5,000 稿件定位、20/100/300 区块、0/5/20 JPEG、预览复用失效和控件保留断言。结果与真实宿主压力测试的区别见 [性能与交互改进记录](../performance-stabilization.md)。当前工作区要求通过应用内浏览器使用上述预览服务器，禁止启动外部 Chrome/Chromium；完整 Playwright 套件在允许的 CI 环境执行。

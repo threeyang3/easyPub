@@ -53,6 +53,23 @@ export async function runPublishingWorkbenchTests() {
     active = files[1]; listeners.get('file-open')!(active); await flush();
     pending!('---\ntitle: stale A\n---\nold'); await flush();
     assert.match(root.textContent, /b.md/); assert.doesNotMatch(root.textContent, /stale A/);
+    let queries = 0, creations = 0;
+    plugin.hasRelatedDraft = async () => {queries++; return false;};
+    plugin.preparePublish = async (_platform: unknown, _refresh: boolean, options: any) => {
+      assert.equal(options.sourceFile, files[1]); creations++;
+    };
+    assert.equal(queries, 0);
+    button('检查稿件').click(); await flush();
+    assert.equal(queries, 1); assert.ok(button('创建稿件'));
+    button('创建稿件').click(); await flush();
+    assert.equal(creations, 1); assert.equal(queries, 1);
+    const retainedButton = button('打开当前文章');
+    retainedButton.focus();
+    listeners.get('modify')!(files[1]); listeners.get('modify')!(files[1]); listeners.get('modify')!(files[1]);
+    assert.equal(button('打开当前文章'), retainedButton);
+    await new Promise(resolve => setTimeout(resolve, 250));
+    assert.equal(button('打开当前文章'), retainedButton, 'Body-only saves retain action elements');
+    assert.equal(dom.window.document.activeElement, retainedButton, 'Body-only saves preserve focus');
     button('固定稿件').click(); await flush();
     active = files[0]; listeners.get('file-open')!(active); await flush();
     assert.equal(view.getState().path, 'b.md');

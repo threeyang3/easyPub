@@ -19,6 +19,10 @@ export interface WechatLayoutContext {
 
 export class WechatLayoutModal extends Modal {
   private selected: WechatLayoutPlan;
+  private blockControls = new Map<string, {select: HTMLSelectElement; lock: HTMLInputElement}>();
+  private savedSelect?: HTMLSelectElement;
+  private candidateNames = "";
+  private previewFrame?: number;
   private candidates: Array<{name: string; plan: WechatLayoutPlan}> = [];
   private undo: WechatLayoutPlan[] = [];
   private requestVersion = 0;
@@ -118,40 +122,54 @@ export class WechatLayoutModal extends Modal {
   }
   private redraw() {
     const root = this.contentEl;
-    const previousDetails = this.controls.querySelector("details");
-    const expanded = previousDetails?.open ?? false;
-    const scroll = previousDetails?.scrollTop ?? 0;
-    const focus = this.controls.contains(document.activeElement) ? document.activeElement?.getAttribute("aria-label") : null;
     const theme = root.querySelector<HTMLSelectElement>('select[aria-label="排版风格"]'); if (theme) theme.value = this.selected.theme;
     const color = root.querySelector<HTMLSelectElement>('select[aria-label="强调色"]'); if (color) color.value = this.selected.accentColor;
     this.gallery.querySelectorAll<HTMLButtonElement>("button[data-theme]").forEach(button => {
       button.setAttribute("aria-pressed", String(button.dataset.theme === this.selected.theme));
     });
     this.undoButton.disabled = !this.undo.length || this.applying;
-    this.controls.empty();
-    const saved = this.controls.createEl("label", {text: "候选与历史", cls: "epl-field"}).createEl("select", {attr: {"aria-label": "候选与历史"}});
-    saved.createEl("option", {value: "", text: "选择已有方案"});
-    this.candidates.forEach((candidate, i) => saved.createEl("option", {value: String(i), text: candidate.name}));
-    saved.onchange = () => { if (saved.value !== "") this.change(mergeLockedLayout(this.candidates[Number(saved.value)].plan, this.selected, this.context.document)); };
-    const details = this.controls.createEl("details"); details.createEl("summary", {text: `逐块调整与锁定 · ${this.context.document.blocks.length} 个区块`});
-    details.open = expanded;
-    const instructions = new Map(this.selected.blocks.map(block => [block.id, block]));
-    for (const block of this.context.document.blocks) {
-      const row = details.createDiv({cls: "epl-block"});
-      const kinds = {paragraph: "段落", heading: "标题", list: "列表", quote: "引用", code: "代码", image: "图片", table: "表格", divider: "分隔线", other: "其他内容"};
-      row.createEl("p", {text: `第 ${block.line} 行 · ${kinds[block.kind]} · ${block.text.slice(0, 90) || "（图片或分隔线）"}`});
-      const instruction = instructions.get(block.id);
-      const select = row.createEl("select", {attr: {"aria-label": `第 ${block.line} 行排版`}});
-      for (const [id, label] of Object.entries(COMPONENT_LABELS)) if (id === "plain" || ["paragraph", "list", "quote"].includes(block.kind)) select.createEl("option", {value: id, text: label});
-      select.value = instruction?.component ?? "plain";
-      select.onchange = () => this.setBlock(block.id, select.value as WechatLayoutComponent, instruction?.locked ?? false);
-      const lock = row.createEl("label", {text: "锁定此区块"}).createEl("input", {type: "checkbox", attr: {"aria-label": `锁定第 ${block.line} 行`}});
-      lock.checked = instruction?.locked === true;
-      lock.onchange = () => this.setBlock(block.id, instruction?.component ?? "plain", lock.checked);
+    if (!this.savedSelect) {
+      const saved = this.controls.createEl("label", {text: "候选与历史", cls: "epl-field"}).createEl("select", {attr: {"aria-label": "候选与历史"}});
+      saved.createEl("option", {value: "", text: "选择已有方案"});
+      this.savedSelect = saved;
+      saved.onchange = () => { if (saved.value !== "") this.change(mergeLockedLayout(this.candidates[Number(saved.value)].plan, this.selected, this.context.document)); };
+      const details = this.controls.createEl("details"); details.createEl("summary", {text: `逐块调整与锁定 · ${this.context.document.blocks.length} 个区块`});
+      details.open = false;
+      const instructions = new Map(this.selected.blocks.map(block => [block.id, block]));
+      for (const block of this.context.document.blocks) {
+        const row = details.createDiv({cls: "epl-block"});
+        const kinds = {paragraph: "段落", heading: "标题", list: "列表", quote: "引用", code: "代码", image: "图片", table: "表格", divider: "分隔线", other: "其他内容"};
+        row.createEl("p", {text: `第 ${block.line} 行 · ${kinds[block.kind]} · ${block.text.slice(0, 90) || "（图片或分隔线）"}`});
+        const instruction = instructions.get(block.id);
+        const select = row.createEl("select", {attr: {"aria-label": `第 ${block.line} 行排版`}});
+        for (const [id, label] of Object.entries(COMPONENT_LABELS)) if (id === "plain" || ["paragraph", "list", "quote"].includes(block.kind)) select.createEl("option", {value: id, text: label});
+        select.value = instruction?.component ?? "plain";
+        select.onchange = () => this.setBlock(block.id, select.value as WechatLayoutComponent, lock.checked);
+        const lock = row.createEl("label", {text: "锁定此区块"}).createEl("input", {type: "checkbox", attr: {"aria-label": `锁定第 ${block.line} 行`}});
+        lock.checked = instruction?.locked === true;
+        lock.onchange = () => this.setBlock(block.id, select.value as WechatLayoutComponent, lock.checked);
+        this.blockControls.set(block.id, {select, lock});
+      }
     }
-    details.scrollTop = scroll;
-    if (focus) Array.from(this.controls.querySelectorAll<HTMLElement>("[aria-label]")).find(el => el.getAttribute("aria-label") === focus)?.focus();
-    this.updatePreview();
+    const names = JSON.stringify(this.candidates.map(candidate => candidate.name));
+    if (names !== this.candidateNames) {
+      this.candidateNames = names;
+      this.savedSelect!.length = 1;
+      this.candidates.forEach((candidate, i) => this.savedSelect!.createEl("option", {value: String(i), text: candidate.name}));
+    }
+    this.savedSelect!.value = "";
+    const instructions = new Map(this.selected.blocks.map(block => [block.id, block]));
+    for (const [id, controls] of this.blockControls) {
+      const instruction = instructions.get(id);
+      controls.select.value = instruction?.component ?? "plain";
+      controls.lock.checked = instruction?.locked === true;
+    }
+    // Disable apply until the coalesced preview has passed the full safety check.
+    this.applyButton.disabled = true;
+    if (this.previewFrame === undefined) this.previewFrame = requestAnimationFrame(() => {
+      this.previewFrame = undefined;
+      if (!this.closed) this.updatePreview();
+    });
   }
   private renderThemeGallery() {
     this.gallery.empty();
@@ -183,7 +201,9 @@ export class WechatLayoutModal extends Modal {
     this.previewLabel.textContent = this.original ? "默认模板 · 仅供对比" : `当前方案 · ${WECHAT_THEMES[this.selected.theme]}`;
     try {
       const plan = this.original ? themePlan(this.context.document, "default") : this.selected;
+      const scroll = this.preview.scrollTop;
       this.preview.innerHTML = previewWechatHtml(layoutPreview(this.context.html, this.context.document, plan), this.context.images);
+      this.preview.scrollTop = scroll;
       if (!this.original) this.selectedRenderable = true;
       this.preview.setAttribute("aria-label", this.original ? "默认模板预览" : "排版方案预览");
       this.applyButton.disabled = this.applying || this.pending && this.pendingVersion === this.requestVersion
@@ -267,6 +287,8 @@ export class WechatLayoutModal extends Modal {
     }
   }
   onClose() {
+    if (this.previewFrame !== undefined) cancelAnimationFrame(this.previewFrame);
+    this.previewFrame = undefined;
     this.closed = true; this.requestVersion++; this.contentEl.empty();
     this.context.onClose?.();
   }

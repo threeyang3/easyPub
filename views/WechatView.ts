@@ -1,3 +1,4 @@
+import { canReuseWechatPreview } from "../utils/wechatPreviewReuse";
 import { Component, FuzzySuggestModal, ItemView, TFile, ViewStateResult, WorkspaceLeaf } from "obsidian";
 import type EasyPub from "../main";
 import { WechatArticleSettings, WechatCrop, WechatImage, WechatPreparedDocument } from "../types";
@@ -23,8 +24,8 @@ export function isWechatDraft(file: TFile, text: string, plugin: EasyPub): boole
     && (isWechatDraftPath(file.path, plugin.settings) || data.wechat && typeof data.wechat === "object"));
 }
 class CoverPicker extends FuzzySuggestModal<TFile> {
-  constructor(private plugin: EasyPub, private selected: (file: TFile) => void) { super(plugin.app); this.setPlaceholder("选择封面图片附件"); }
-  getItems() { return this.plugin.app.vault.getFiles().filter(file => IMAGE_EXTENSIONS.has(file.extension.toLowerCase())); }
+  constructor(private plugin: EasyPub, private selected: (file: TFile) => void) { super(plugin.app); this.setPlaceholder("选择静态图片封面（GIF、SVG 请先导出为 PNG）"); }
+  getItems() { return this.plugin.app.vault.getFiles().filter(file => IMAGE_EXTENSIONS.has(file.extension.toLowerCase()) && !["gif", "svg"].includes(file.extension.toLowerCase())); }
   getItemText(file: TFile) { return file.path; }
   onChooseItem(file: TFile) { this.selected(file); }
 }
@@ -123,10 +124,11 @@ export class WechatView extends ItemView {
       if (file === this.file) this.invalidate();
       else if (this.prepared?.images.some(image => image.localPath === file.path) || this.cover?.localPath === file.path) this.invalidate();
     }));
-    this.registerEvent(this.app.vault.on("rename", file => {
+    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
       if (file === this.file || this.prepared?.images.some(image => image.localPath === file.path) || this.cover?.localPath === file.path) this.invalidate();
-      // Renaming any attachment can invalidate a relative reference.
-      else if (file instanceof TFile && IMAGE_EXTENSIONS.has(file.extension.toLowerCase())) this.invalidate();
+      else if (this.prepared?.images.some(image => image.localPath === oldPath || image.localPath?.startsWith(`${oldPath}/`))
+        || this.cover?.localPath === oldPath || this.cover?.localPath?.startsWith(`${oldPath}/`)
+        || this.prepared?.imageReferences?.some(ref => ref.status === "error")) this.invalidate();
     }));
     this.registerEvent(this.app.vault.on("delete", file => {
       if (file === this.file || this.prepared?.images.some(image => image.localPath === file.path) || this.cover?.localPath === file.path) this.invalidate();
@@ -213,7 +215,7 @@ export class WechatView extends ItemView {
     if (this.cover) releaseWechatImages([this.cover]);
     this.prepared = undefined; this.cover = undefined;
   }
-  async refresh(preserveEdits = false) {
+  async refresh(preserveEdits = false, requireMapping = false, reuseBody = false) {
     if (!this.file || this.closed) return;
     if (this.cropModal) { this.rerenderRequested = true; return; }
     // A queued automatic refresh must never replace unsaved inspector edits.
@@ -236,10 +238,18 @@ export class WechatView extends ItemView {
       author: saved.author ?? this.plugin.settings.wechat.defaultAuthor,
       digest: saved.digest,
     };
-    const component = new Component(); component.load();
     let prepared: WechatPreparedDocument;
-    try { prepared = await renderWechatDocument(this.app, parsed.content, filePath, component, this.allowRemoteImages, article.layout); }
-    finally { component.unload(); }
+    const previous = this.prepared;
+    const reusable = reuseBody && !requireMapping && previous && filePath === this.snapshotPath
+      && parseFrontMatter(this.snapshot).content === parsed.content
+      && JSON.stringify(this.article.layout) === JSON.stringify(article.layout)
+      && await canReuseWechatPreview(this.app, previous, filePath, this.allowRemoteImages);
+    if (reusable) prepared = previous;
+    else {
+      const component = new Component(); component.load();
+      try { prepared = await renderWechatDocument(this.app, parsed.content, filePath, component, this.allowRemoteImages, article.layout, requireMapping); }
+      finally { component.unload(); }
+    }
     let cover: WechatImage | undefined, installed = false;
     try {
       if (article.digest === undefined) article.digest = digestFromWechatHtml(prepared.html);
@@ -260,14 +270,16 @@ export class WechatView extends ItemView {
       const latest = await this.app.vault.read(file);
       if (version !== this.version || this.closed || this.file !== file || file.path !== filePath || latest !== snapshot || imagePolicyRevision !== this.imagePolicyRevision) {
         this.rerenderRequested = !this.closed && imagePolicyRevision === this.imagePolicyRevision;
-        releaseWechatImages(prepared.images); if (cover) releaseWechatImages([cover]); return;
+        if (!reusable) releaseWechatImages(prepared.images); if (cover) releaseWechatImages([cover]); return;
       }
       const scroll = this.preview.scrollTop;
-      this.disposePrepared(); this.prepared = prepared; this.cover = cover; this.article = article;
+      if (!reusable) this.disposePrepared();
+      else if (this.cover) releaseWechatImages([this.cover]);
+      this.prepared = prepared; this.cover = cover; this.article = article;
       installed = true;
       this.snapshot = snapshot; this.snapshotPath = filePath; this.dirty = keepDirty; this.stale = false; this.cropSourceStale = false;
       this.identity.textContent = filePath; this.identity.title = filePath;
-      this.preview.innerHTML = previewWechatHtml(prepared.html, prepared.images);
+      if (!reusable) this.preview.innerHTML = previewWechatHtml(prepared.html, prepared.images);
       this.preview.scrollTop = scroll;
       this.renderInspector();
       if (articleInvalid) this.showPage("article");
@@ -282,7 +294,7 @@ export class WechatView extends ItemView {
         this.preview.empty();
         this.updateSyncState();
       } else {
-        releaseWechatImages(prepared.images);
+        if (!reusable) releaseWechatImages(prepared.images);
         if (cover) releaseWechatImages([cover]);
       }
       throw error;
@@ -337,15 +349,22 @@ export class WechatView extends ItemView {
     const imagesBySource = new Map((this.prepared?.images ?? []).map(image => [image.source, image]));
     images.createEl("summary", { text: `正文图片 · ${references.length} 处引用${failures ? ` · ${failures} 处失败` : ""}` });
     images.open = failures > 0;
-    for (const ref of references) {
-      const image = imagesBySource.get(ref.source);
-      const row = images.createDiv({ cls: "epw-image-row" });
-      if (image) row.createEl("img", { attr: { src: image.previewUrl, alt: ref.source } });
-      const info = row.createDiv(); info.createEl("span", { text: ref.source });
-      if (image) info.createEl("small", { text: `已就绪 · ${image.width} × ${image.height} · ${Math.ceil(image.originalSize / 1024)} → ${Math.ceil(image.bytes.length / 1024)} KB · ${image.mime.split("/")[1].toUpperCase()}` });
-      if (ref.error) info.createEl("small", { text: `处理失败 · ${ref.error}`, cls: "epw-error" });
-      this.button(info, `定位正文第 ${ref.line} 行`, () => this.run(() => this.openImageReference(ref.line)));
-    }
+    let rowsRendered = false;
+    const renderRows = () => {
+      if (rowsRendered || !images.open) return;
+      rowsRendered = true;
+      for (const ref of references) {
+        const image = imagesBySource.get(ref.source);
+        const row = images.createDiv({ cls: "epw-image-row" });
+        if (image) row.createEl("img", { attr: { src: image.previewUrl, alt: ref.source } });
+        const info = row.createDiv(); info.createEl("span", { text: ref.source });
+        if (image) info.createEl("small", { text: `已就绪 · ${image.width} × ${image.height} · ${Math.ceil(image.originalSize / 1024)} → ${Math.ceil(image.bytes.length / 1024)} KB · ${image.mime.split("/")[1].toUpperCase()}` });
+        if (ref.error) info.createEl("small", { text: `处理失败 · ${ref.error}`, cls: "epw-error" });
+        this.button(info, `定位正文第 ${ref.line} 行`, () => this.run(() => this.openImageReference(ref.line)));
+      }
+    };
+    images.addEventListener("toggle", renderRows);
+    renderRows();
     if (this.prepared?.issues.length) {
       const issues = parent.createDiv({ cls: "epw-issues" });
       for (const issue of this.prepared.issues) issues.createEl("p", { text: issue });
@@ -431,7 +450,7 @@ export class WechatView extends ItemView {
       data.wechat = { ...previous, ...settings };
       delete (data.wechat as Record<string, unknown>).title;
     });
-    this.dirty = false; await this.refresh();
+    this.dirty = false; await this.refresh(false, false, true);
   }
   private async openLayout() {
     if (this.layoutOpening || this.layoutModal) return;
@@ -439,6 +458,13 @@ export class WechatView extends ItemView {
     try {
       // Oversized layouts remain repairable; other preflight failures block entry.
       if (this.closed || !this.file || !this.prepared || this.busy || this.stale || this.dirty || this.prepared.issues.some(issue => issue !== WECHAT_HTML_LIMIT_ISSUE)) throw new Error("请先修复问题、保存设置并刷新预览，再调整排版");
+      // Ordinary preview skips the second host render. Build strict bindings only
+      // when the editor actually needs them, under the existing workbench lock.
+      if (!this.article.layout) {
+        await this.run(() => this.refresh(false, true));
+        if (this.closed || !this.prepared || this.stale || this.dirty
+          || this.prepared.issues.some(issue => issue !== WECHAT_HTML_LIMIT_ISSUE)) throw new Error("预览已变化，请刷新后重新打开排版");
+      }
       const doc = this.prepared.layoutDocument;
       if (!doc) throw new Error("排版文档尚未就绪，请刷新预览");
       const file = this.file, snapshot = this.snapshot, version = this.version, policy = this.imagePolicyRevision;

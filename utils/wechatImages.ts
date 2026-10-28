@@ -104,13 +104,15 @@ export async function processWechatImage(source: string, input: Uint8Array, purp
     width = Math.max(1, Math.round(width * scale)); height = Math.max(1, Math.round(height * scale));
     const canvas = document.createElement("canvas");
     canvas.width = width; canvas.height = height;
-    const context = canvas.getContext("2d", { willReadFrequently: true });
+    const context = canvas.getContext("2d", { willReadFrequently: originalMime !== "image/jpeg" });
     if (!context) throw new Error("无法创建图片处理画布");
     // Chromium decodes EXIF orientation before drawImage.
     context.drawImage(image, 0, 0, width, height);
-    const pixels = context.getImageData(0, 0, width, height).data;
     let transparent = false;
-    for (let i = 3; i < pixels.length; i += 4) { if (pixels[i] < 255) { transparent = true; break; } }
+    if (originalMime !== "image/jpeg") {
+      const pixels = context.getImageData(0, 0, width, height).data;
+      for (let i = 3; i < pixels.length; i += 4) { if (pixels[i] < 255) { transparent = true; break; } }
+    }
     mime = transparent ? "image/png" : "image/jpeg";
     for (let attempt = 0; attempt < 7; attempt++) {
       bytes = await encodeCanvas(canvas, mime, Math.max(0.55, 0.9 - attempt * 0.08));

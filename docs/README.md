@@ -56,6 +56,7 @@
 
 | 记录 | 内容 |
 | --- | --- |
+| [性能与交互改进](performance-stabilization.md) | 1.9.0 基线热路径优化、调用次数回归与验证边界 |
 | [结构与交互审查](architecture-review.md) | 当前结构优化、排版异步取消与互斥修复 |
 | [稳定性审查](reliability-review.md) / [后续复核](review-followup.md) | 身份、备份、原子写入和恢复的演进 |
 | [公众号验收](wechat-acceptance.md) | 各轮自动化及真实账号测试 |

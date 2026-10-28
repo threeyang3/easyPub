@@ -14,6 +14,9 @@ export class PublishingView extends ItemView {
   private file: TFile | null = null;
   private pinned = false;
   private generation = 0;
+  private refreshTimer?: ReturnType<typeof setTimeout>;
+  private displayKey?: string;
+  private displayPath?: string;
   private closed = false;
   private article!: HTMLElement;
   private pin!: HTMLButtonElement;
@@ -54,8 +57,8 @@ export class PublishingView extends ItemView {
       if (!this.pinned && file?.extension === "md") { this.file = file; void this.renderArticle(); }
       else if (!this.pinned && !file) { this.file = this.currentFile(); void this.renderArticle(); }
     }));
-    this.registerEvent(this.app.vault.on("modify", file => { if (file === this.file) void this.renderArticle(); }));
-    this.registerEvent(this.app.vault.on("rename", file => { if (file === this.file) void this.renderArticle(); }));
+    this.registerEvent(this.app.vault.on("modify", file => { if (file === this.file) this.scheduleArticle(); }));
+    this.registerEvent(this.app.vault.on("rename", file => { if (file === this.file) this.scheduleArticle(); }));
     this.registerEvent(this.app.vault.on("delete", file => {
       if (file === this.file) { this.file = null; this.pinned = false; void this.renderArticle(); }
     }));
@@ -87,19 +90,30 @@ export class PublishingView extends ItemView {
     };
     return button;
   }
+  private scheduleArticle() {
+    this.generation++; // Invalidate a read immediately, before the debounce fires.
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.refreshTimer = setTimeout(() => { this.refreshTimer = undefined; void this.renderArticle(); }, 200);
+  }
   private async renderArticle() {
     if (!this.article || this.closed) return;
     const generation = ++this.generation, file = this.file;
     this.pin.textContent = this.pinned ? "取消固定" : "固定稿件";
     this.pin.setAttribute("aria-pressed", String(this.pinned)); this.pin.disabled = !file;
-    this.article.empty();
-    if (!file || file.extension !== "md") { this.article.createEl("p", { text: "打开一篇 Markdown 文章，开始准备发布稿。下方工具随时可用。" }); return; }
-    this.article.createEl("p", { text: "正在读取文章…" });
+    if (!file || file.extension !== "md") { this.displayKey = undefined; this.displayPath = undefined; this.article.empty(); this.article.createEl("p", { text: "打开一篇 Markdown 文章，开始准备发布稿。下方工具随时可用。" }); return; }
+    if (this.displayPath !== file.path) {
+      this.displayPath = file.path; this.displayKey = undefined;
+      this.article.empty(); this.article.createEl("p", {text: "正在读取文章…"});
+    }
     try {
       const meta = parseFrontMatter(await this.app.vault.read(file), true).data;
       if (generation !== this.generation || this.closed) return;
       const source = meta.source_file ? await this.plugin.resolvePublishingSource(file, meta) : file;
       if (generation !== this.generation || this.closed) return;
+      const key = JSON.stringify([file.path, getFrontMatterString(meta, "title") || file.basename,
+        meta.pub_id, meta.source_file, source?.path, this.plugin.settings.publishBasePath]);
+      if (key === this.displayKey) return;
+      this.displayKey = key;
       this.article.empty();
       const platform = PLATFORMS.find(p => !p.isExternal && file.path.startsWith(`${getPublishPath(p, this.plugin.settings)}/`));
       this.article.createEl("small", { text: meta.source_file ? `${platform?.name ?? "平台"}发布稿` : "原稿" });
@@ -126,15 +140,25 @@ export class PublishingView extends ItemView {
       // Scan only on explicit action, rather than traversing external repositories on each keystroke.
       for (const target of PLATFORMS) {
         const row = related.createDiv({ cls: "ep-panel-platform" }); row.createEl("strong", { text: target.name });
-        this.button(row, "打开稿件", () => this.plugin.openRelatedDraft(source, target));
+        let exists: boolean | undefined;
+        const draft = this.button(row, "检查稿件", async () => {
+          if (exists === undefined) {
+            exists = await this.plugin.hasRelatedDraft(source, target);
+            draft.textContent = exists ? "打开稿件" : "创建稿件";
+          } else if (exists) await this.plugin.openRelatedDraft(source, target);
+          else {
+            await this.plugin.preparePublish(target, false, {configure: true, sourceFile: source});
+            exists = undefined; draft.textContent = "检查稿件";
+          }
+        });
         if (target.id === "hexo") {
           this.button(row, "预览", () => this.plugin.previewHexoArticle(source));
           this.button(row, "一键排版", () => this.plugin.formatHexoArticle(source));
         }
       }
     } catch (error) {
-      if (generation === this.generation && !this.closed) { this.article.empty(); this.article.createEl("p", { text: (error as Error).message }); }
+      if (generation === this.generation && !this.closed) { this.displayKey = undefined; this.article.empty(); this.article.createEl("p", { text: (error as Error).message }); }
     }
   }
-  async onClose() { this.closed = true; this.generation++; this.contentEl.empty(); }
+  async onClose() { if (this.refreshTimer) clearTimeout(this.refreshTimer); this.displayKey = undefined; this.displayPath = undefined; this.closed = true; this.generation++; this.contentEl.empty(); }
 }

@@ -45,6 +45,15 @@ export class PublishStore {
     }
   }
 
+  async publishFileVersion(platform: Platform, filePath: string): Promise<string | undefined> {
+    if (platform.isExternal) {
+      const stat = await fs.stat(filePath, {bigint: true});
+      return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+    }
+    const file = this.vault().getAbstractFileByPath(filePath);
+    return file instanceof TFile && file.stat ? `${file.stat.mtime}:${file.stat.size}` : undefined;
+  }
+
   async readPublishFile(platform: Platform, filePath: string): Promise<string> {
     if (platform.isExternal) {
       return fs.readFile(filePath, "utf8");

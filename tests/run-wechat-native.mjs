@@ -1,5 +1,5 @@
 import { build } from 'esbuild';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
@@ -9,13 +9,19 @@ import os from 'node:os';
 // dedicated Sandbox notes and requires a marked disposable blog copy.
 const temp = await mkdtemp(path.join(os.tmpdir(), 'easypub-native-'));
 try {
+  const picker = process.argv.includes('--file-picker');
   const workbench = process.argv.includes('--workbench');
   const hexo = process.argv.includes('--hexo');
   if ((hexo || workbench) && !process.env.EASYPUB_TEST_HEXO_REPO) throw new Error('Set EASYPUB_TEST_HEXO_REPO to a disposable blog copy');
-  const entry = workbench ? 'tests/workbench-native.ts' : hexo ? 'tests/hexo-native.ts' : process.argv.includes('--download') ? 'tests/wechat-download-native.ts' : 'tests/wechat-native.ts';
+  const entry = picker ? 'tests/attachment-picker-native.ts' : workbench ? 'tests/workbench-native.ts' : hexo ? 'tests/hexo-native.ts' : process.argv.includes('--download') ? 'tests/wechat-download-native.ts' : 'tests/wechat-native.ts';
   const result = await build({ entryPoints: [entry], bundle: true, platform: 'node', format: 'cjs', external: ['obsidian','electron','@electron/remote'], write: false });
   const file = path.join(temp, 'native.cjs');
-  const options = { imageUrl: process.env.EASYPUB_TEST_IMAGE_URL?.trim() || undefined, blogPath: process.env.EASYPUB_TEST_HEXO_REPO, ...(workbench ? {styles:await (await import("node:fs/promises")).readFile("styles.css","utf8")} : {}) };
+  const pickerImagePath=picker ? path.join(temp,'easypub-native-picker-test.png') : undefined;
+  if(picker) {
+    await writeFile(pickerImagePath,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aC1sAAAAASUVORK5CYII=','base64'));
+    console.log(`Native picker test image: ${pickerImagePath}`);
+  }
+  const options = {pickerImagePath, imageUrl: process.env.EASYPUB_TEST_IMAGE_URL?.trim() || undefined, blogPath: process.env.EASYPUB_TEST_HEXO_REPO, ...(workbench || picker ? {styles:await readFile("styles.css","utf8")} : {}) };
   await writeFile(file, result.outputFiles[0].text + '\nconst runAcceptance=module.exports.run; module.exports=class extends require("obsidian").Plugin { async onload(){this.result=await runAcceptance(this.app,' + JSON.stringify(options) + ');} };');
   const id = `easypub-acceptance-${Date.now()}`;
   const code = `(async()=>{
@@ -27,7 +33,7 @@ try {
     finally { adapter.read=read; await manager.unloadPlugin(id); delete manager.manifests[id]; }
   })()`;
   const cli = process.env.OBSIDIAN_CLI ?? (process.platform === 'win32' ? 'C:/Program Files/Obsidian/Obsidian.com' : 'obsidian');
-  const run = spawnSync(cli, [`vault=${process.env.EASYPUB_TEST_VAULT ?? 'Sandbox'}`, 'eval', `code=${code}`], { encoding: 'utf8', timeout: hexo ? 660000 : 60000 });
+  const run = spawnSync(cli, [`vault=${process.env.EASYPUB_TEST_VAULT ?? 'Sandbox'}`, 'eval', `code=${code}`], { encoding: 'utf8', timeout: hexo ? 660000 : picker ? 180000 : 60000 });
   process.stdout.write(run.stdout ?? ''); process.stderr.write(run.stderr ?? '');
   let acceptance;
   for (const line of (run.stdout ?? '').split(/\r?\n/)) {

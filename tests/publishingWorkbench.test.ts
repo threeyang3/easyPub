@@ -94,12 +94,12 @@ export async function runPublishingWorkbenchTests() {
   const coverBytes = Uint8Array.from([1,2,3]);
   const imageFile = Object.assign(new TFile(),{path:'cover.png',extension:'png'});
   Object.assign(cropView, {cover:{width:1440,height:900,source:'cover.png',localPath:'cover.png',originalHash:wechatHash(coverBytes)}, file:draft, snapshot:'saved body', snapshotPath:draft.path,
-    article:{}, version:1, closed:false, busy:false, stale:false, cropOpening:false,
+    article:{}, version:1, closed:false, busy:false, stale:false, cropSourceStale:false, cropOpening:false,
     plugin:{settings:{wechat:{allowRemoteImages:false}}},
     app:{metadataCache:{getFirstLinkpathDest:()=>imageFile},vault:{read:() => readCrop(),readBinary:async ()=>coverBytes.buffer}}, renderInspector:() => {}});
-  cropView.stale = true;
+  cropView.cropSourceStale = true;
   await assert.rejects(cropView.openCrop(), /预览待更新/);
-  cropView.stale = false;
+  cropView.cropSourceStale = false;
   await assert.rejects(cropView.openCrop(), /已变化/);
   assert.equal(cropView.cropOpening, false); assert.equal(cropView.cropModal, undefined);
   let resolveCrop!: (text: string) => void;
@@ -137,6 +137,7 @@ export async function runPublishingWorkbenchTests() {
     let cropModal: any, applied = 0;
     Modal.prototype.open = function () { cropModal = this; };
     cropView.changed = () => { applied++; };
+    cropView.stale = true; cropView.dirty = true; // Pending settings alone do not make the image stale.
     await cropView.openCrop();
     const crop = {x:0,y:0,width:1,height:1};
     cropView.app.vault.readBinary = async () => Uint8Array.from([9,9,9]).buffer;

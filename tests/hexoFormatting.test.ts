@@ -34,6 +34,7 @@ export function runHexoFormattingTests() {
   const crlf = '---\r\ntitle: x\r\n---\r\n甲  \r\n乙\r\n\r\n';
   assert.equal(formatHexoMarkdown(crlf).content, '---\r\ntitle: x\r\n---\r\n甲\r\n\r\n乙\r\n');
   assert.equal(formatHexoMarkdown('甲\\\n乙').content, '甲\n\n乙\n');
+  assert.equal(formatHexoMarkdown('甲  \n乙\\\n丙\n丁').content, '甲\n\n乙\n\n丙\n\n丁\n');
   assert.equal(formatHexoMarkdown('').content, '');
   const unclosed = '```ts\ncode  \n\n';
   assert.equal(formatHexoMarkdown(unclosed).content, unclosed);

@@ -11,6 +11,7 @@ export class HexoFormatModal extends Modal {
     this.contentEl.createEl("h2", { text: "排版 Hexo 发布稿" });
     this.contentEl.createEl("p", { text: this.target, cls: "ep-panel-path" });
     this.contentEl.createEl("p", { text: `增加 ${this.result.addedBreaks} 处段落空行，清理 ${this.result.trimmedLines} 行末尾空格，并清理文末空行。保存前自动备份。` });
+    this.contentEl.createEl("p", { text: "换行规则：普通正文的软换行和显式硬换行（两个尾随空格或反斜杠）都会转换为空行分段。请核对下方结果。" });
     const grid = this.contentEl.createDiv({ cls: "ep-format-comparison" });
     for (const [title, text] of [["当前内容", this.before], ["排版结果", this.result.content]]) {
       const section = grid.createDiv(); section.createEl("h3", { text: title }); section.createEl("pre", { text });

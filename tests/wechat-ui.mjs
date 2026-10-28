@@ -160,6 +160,9 @@ try {
   await page.getByRole('button', {name:'保存设置并刷新',exact:true}).click();
   await page.waitForFunction(() => !document.querySelector('.epw-footer .mod-cta').disabled);
   await page.getByRole('button', {name:'图片与封面',exact:true}).click();
+  const beforeCoverSave = await page.evaluate(()=>window.fixture.settingsWrites());
+  await page.evaluate(()=>window.fixture.selectNewCover());
+  assert.equal(await page.evaluate(()=>window.fixture.view.dirty && window.fixture.view.stale && !window.fixture.view.cropSourceStale), true);
   await page.getByRole('button', {name:'调整封面裁剪',exact:true}).click();
   await page.getByLabel('横版 2.35:1构图位置').selectOption('top');
   await page.locator('.epw-zoom').first().fill('4');
@@ -171,9 +174,17 @@ try {
   await page.getByRole('button', {name:'应用裁剪',exact:true}).click();
   await page.locator('.easy-pub-crop-modal').waitFor({state:'detached'});
   assert.equal(await page.evaluate(()=>window.fixture.view.article.cropSquare.x), 0);
+  assert.equal(await page.evaluate(()=>window.fixture.settingsWrites()), beforeCoverSave, 'Cover selection and both crops need no intermediate save');
   await page.getByRole('button', {name:'文章信息',exact:true}).click();
   await page.getByRole("button", { name: "保存设置并刷新", exact: true }).click();
   await page.waitForFunction(() => !document.querySelector(".epw-footer .mod-cta").disabled);
+  assert.equal(await page.evaluate(()=>window.fixture.settingsWrites()), beforeCoverSave+1);
+  assert.match(await page.evaluate(()=>window.fixture.read()), /cover: .*alternate\.png/);
+  await page.evaluate(()=>window.fixture.disconnectAccount());
+  await page.getByRole('button', {name:'连接公众号',exact:true}).click();
+  assert.equal(await page.getByRole('button', {name:'账号设置',exact:true}).count(),1);
+  await page.getByRole('button', {name:'刷新预览',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('.epw-footer .mod-cta').disabled);
   // Editing settings while a debounce is pending must cancel the old refresh.
   await page.evaluate(() => {
     window.fixture.modify("等待刷新时的正文修改");

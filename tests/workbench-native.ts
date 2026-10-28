@@ -71,6 +71,9 @@ export async function run(app: App, options: {blogPath?: string; styles?: string
     const rootHeight=view.contentEl.getBoundingClientRect().height;
     if(rootHeight>=700) assert(view.contentEl.querySelector('.epw-inspector')!.getBoundingClientRect().height>=rootHeight*0.6,'native article editor owns most of the available pane');
     assert(getComputedStyle(view.contentEl.querySelector('.epw-paper')!).display==='none','native article page releases preview space');
+    const beforeCoverSelection=await app.vault.read(draft);
+    await internal.selectCover(relativeVaultAttachment(draft.path,second.path));
+    assert(internal.dirty&&internal.stale&&!internal.cropSourceStale,'native pending new cover can proceed directly to crop');
     let decodes=0;
     window.Image=new Proxy(OriginalImage,{construct(target,args){decodes++; return Reflect.construct(target,args,target);}});
     await internal.openCrop();
@@ -83,16 +86,18 @@ export async function run(app: App, options: {blogPath?: string; styles?: string
     apply.click();
     await until(()=>!internal.cropModal,'Native crop application timed out');
     assert(internal.dirty && internal.article.cropWide && internal.article.cropSquare,'native crop applies independent wide and square coordinates');
+    assert(await app.vault.read(draft)===beforeCoverSelection,'native cover selection and dual cropping require no intermediate save');
     await internal.saveArticle();
     const settings=parseFrontMatter(await app.vault.read(draft)).data.wechat as any;
+    assert(settings.cover===relativeVaultAttachment(draft.path,second.path),'native selected cover is saved with both crops in one write');
     assert(settings.cropWide && settings.cropSquare,'native dual-ratio crop persists through Front Matter API');
     window.Image=OriginalImage;
     internal.paused=true;
-    await app.vault.modifyBinary(image,new Uint8Array([...new Uint8Array(bytes),0]).buffer);
+    await app.vault.modifyBinary(second,new Uint8Array([...new Uint8Array(bytes),0]).buffer);
     await until(()=>internal.stale,'Attachment update did not invalidate native preview');
     let blocked=false; try {await internal.openCrop();}catch(error){blocked=/预览待更新/.test((error as Error).message);}
     assert(blocked,'native paused stale preview refuses crop entry');
-    await app.vault.modifyBinary(image,bytes); await internal.refresh();
+    await app.vault.modifyBinary(second,bytes); await internal.refresh();
     await internal.openCrop();
     const cancelled=internal.cropModal, before=JSON.stringify(internal.article);
     const cancelApply=Array.from(cancelled.contentEl.querySelectorAll('button')).find(b=>(b as HTMLElement).textContent==='应用裁剪') as HTMLButtonElement;

@@ -109,6 +109,15 @@ node tests/preview-workbench.mjs
 EASYPUB_TEST_VAULT=Sandbox EASYPUB_TEST_HEXO_REPO=/absolute/disposable-blog node tests/run-wechat-native.mjs --workbench
 ```
 
-必须使用 `Sandbox` 和含 `.easypub-test-copy` 标记的可丢弃博客副本。临时内存加载组件，使用合成笔记与图片，不替换已安装插件或保存账号设置。覆盖附件目录与同名避让、固定面板、裁剪保存/过期/关闭、单图片解码、博客排版、备份字节与恢复；结束后清理本次创建的数据。系统文件选择器在真实 Obsidian 中仍需人工确认。已记录的宿主结果见 [workbench-stability-native.json](../verification/workbench-stability-native.json)。
+必须使用 `Sandbox` 和含 `.easypub-test-copy` 标记的可丢弃博客副本。临时内存加载组件，使用合成笔记与图片，不替换已安装插件或保存账号设置。覆盖附件目录与同名避让、固定面板、裁剪保存/过期/关闭、单图片解码、博客排版、备份字节与恢复；结束后清理本次创建的数据。系统文件选择器需要交互式原生验收，入口见下文。已记录的宿主结果见 [workbench-stability-native.json](../verification/workbench-stability-native.json)。
 
 `node tests/publishing-ui.mjs --bundle-only` 仅验证浏览器模式打包，不启动浏览器；不能替代完整发布管理浏览器测试。本机禁止启动外部 Chrome/Chromium 时使用该入口，完整套件由 GitHub Actions 运行。
+
+
+## 真实系统文件选择器验收
+
+```bash
+EASYPUB_TEST_VAULT=Sandbox node tests/run-wechat-native.mjs --file-picker
+```
+
+终端显示合成 PNG 路径，并在 Sandbox 打开独立验收窗口。点击“上传封面”，在真实操作系统文件对话框中选取该 PNG，再预览并确认。验收核对附件字节和属性引用并清理测试数据；不确认其他已打开的生成窗口。两分钟无操作会取消测试窗口。Mac 实测记录见 [attachment-picker-native.json](../verification/attachment-picker-native.json)。

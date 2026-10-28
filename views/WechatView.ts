@@ -42,6 +42,8 @@ export class WechatView extends ItemView {
   private closed = false;
   private paused = false;
   private stale = true;
+  // Independent of pending article settings: only external content/policy changes block crop.
+  private cropSourceStale = true;
   private dirty = false;
   private busy = false;
   private layoutOpening = false;
@@ -54,6 +56,7 @@ export class WechatView extends ItemView {
   private status!: HTMLElement;
   private identity!: HTMLElement;
   private syncButton!: HTMLButtonElement;
+  private accountButton!: HTMLButtonElement;
   private pauseButton!: HTMLButtonElement;
   private previewTab!: HTMLButtonElement;
   private page: "preview" | "article" | "images" = "preview";
@@ -78,7 +81,10 @@ export class WechatView extends ItemView {
     const header = root.createDiv({ cls: "epw-header" });
     header.createEl("h2", { text: "公众号工作台" });
     this.identity = header.createDiv({ cls: "epw-identity", text: "请从公众号本地稿打开此工作台" });
-    this.button(header, this.plugin.hasWechatCredentials() ? "账号设置" : "连接公众号", () => this.plugin.openWechatSetup(() => this.invalidate())).addClass("epw-account");
+    this.accountButton = this.button(header, this.plugin.hasWechatCredentials() ? "账号设置" : "连接公众号", () => this.plugin.openWechatSetup(() => {
+      this.updateAccountButton(); this.invalidate();
+    }));
+    this.accountButton.addClass("epw-account");
     const tools = root.createDiv({ cls: "epw-tools" });
     this.pauseButton = this.button(tools, "暂停刷新", () => {
       this.paused = !this.paused; this.pauseButton.textContent = this.paused ? "恢复刷新" : "暂停刷新";
@@ -160,18 +166,21 @@ export class WechatView extends ItemView {
     if (this.closed) return;
     this.status.textContent = text; this.status.title = text; this.status.classList.toggle("epw-error", error);
   }
+  private updateAccountButton() {
+    if (this.accountButton) this.accountButton.textContent = this.plugin.hasWechatCredentials() ? "账号设置" : "连接公众号";
+  }
   private updateSyncState() {
     if (this.syncButton) this.syncButton.disabled = this.busy || this.stale || this.dirty || !this.prepared || !this.cover || this.prepared.issues.length > 0;
   }
   private invalidate() {
-    this.version++; this.stale = true; this.updateSyncState(); this.message(this.paused ? "预览待更新 · 已暂停自动刷新，请手动刷新或恢复刷新" : "预览待更新 · 本地稿或附件已变化");
+    this.version++; this.stale = true; this.cropSourceStale = true; this.updateSyncState(); this.message(this.paused ? "预览待更新 · 已暂停自动刷新，请手动刷新或恢复刷新" : "预览待更新 · 本地稿或附件已变化");
     this.rerenderRequested = true;
     if (this.timer) clearTimeout(this.timer);
     if (!this.paused && !this.dirty && !this.busy) this.scheduleRefresh();
   }
   invalidateImagePolicy() {
     if (this.closed) return;
-    this.imagePolicyRevision++; this.version++; this.stale = true;
+    this.imagePolicyRevision++; this.version++; this.stale = true; this.cropSourceStale = true;
     this.rerenderRequested = false; this.manualRefreshRequested = false;
     if (this.timer) { clearTimeout(this.timer); this.timer = undefined; }
     this.disposePrepared();
@@ -195,7 +204,7 @@ export class WechatView extends ItemView {
     if (this.dirty && this.file !== file) {
       if (await wechatChoice(this.app, "切换公众号稿件", "当前设置尚未保存。切换会丢弃这些设置修改，正文不会改变。", [{ label: "丢弃未保存设置并切换", value: "switch" }]) !== "switch") return;
     }
-    this.file = file; this.dirty = false; this.stale = true;
+    this.file = file; this.dirty = false; this.stale = true; this.cropSourceStale = true;
     this.app.workspace.requestSaveLayout?.();
     await this.run(() => this.refresh());
   }
@@ -215,7 +224,8 @@ export class WechatView extends ItemView {
     const version = ++this.version;
     const imagePolicyRevision = this.imagePolicyRevision;
     this.rerenderRequested = false;
-    this.stale = true; this.updateSyncState(); this.message("正在检查排版与图片…");
+    this.updateAccountButton();
+    this.stale = true; this.cropSourceStale = true; this.updateSyncState(); this.message("正在检查排版与图片…");
     const file = this.file, filePath = file.path;
     const snapshot = await this.app.vault.read(file);
     if (!isWechatDraft(file, snapshot, this.plugin)) throw new Error("当前文件已不再是公众号本地稿，请重新打开");
@@ -255,7 +265,7 @@ export class WechatView extends ItemView {
       const scroll = this.preview.scrollTop;
       this.disposePrepared(); this.prepared = prepared; this.cover = cover; this.article = article;
       installed = true;
-      this.snapshot = snapshot; this.snapshotPath = filePath; this.dirty = keepDirty; this.stale = false;
+      this.snapshot = snapshot; this.snapshotPath = filePath; this.dirty = keepDirty; this.stale = false; this.cropSourceStale = false;
       this.identity.textContent = filePath; this.identity.title = filePath;
       this.preview.innerHTML = previewWechatHtml(prepared.html, prepared.images);
       this.preview.scrollTop = scroll;
@@ -268,7 +278,7 @@ export class WechatView extends ItemView {
     } catch (error) {
       if (installed) {
         this.disposePrepared();
-        this.stale = true;
+        this.stale = true; this.cropSourceStale = true;
         this.preview.empty();
         this.updateSyncState();
       } else {
@@ -370,13 +380,13 @@ export class WechatView extends ItemView {
   }
   private async openCrop() {
     if (!this.cover || this.cropModal || this.cropOpening || this.busy || !this.file || this.closed) return;
-    if (this.stale) throw new Error("预览待更新，请先刷新预览后再调整裁剪");
+    if (this.cropSourceStale) throw new Error("预览待更新，请先刷新预览后再调整裁剪");
     this.cropOpening = true;
     try {
       const version = this.version, file = this.file, snapshot = this.snapshot, cover = this.cover;
       const assertFresh = async () => {
         const check = () => {
-          if (this.closed || this.stale || this.version !== version || this.file !== file || this.cover !== cover || file.path !== this.snapshotPath) {
+          if (this.closed || this.cropSourceStale || this.version !== version || this.file !== file || this.cover !== cover || file.path !== this.snapshotPath) {
             throw new Error("稿件或图片已变化，请先刷新预览后再调整裁剪");
           }
         };

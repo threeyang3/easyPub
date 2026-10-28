@@ -2,14 +2,15 @@
 
 [文档首页](README.md) · [测试指南](development/testing.md) · [发布流程](development/releasing.md)
 
-记录日期：2026-10-26。本文区分稳定版本、开发分支和历史验收；一次通过不代表所有环境均已覆盖。
+记录日期：2026-10-28。本文区分稳定版本、开发分支和历史验收；一次通过不代表所有环境均已覆盖。
 
 ## 版本边界
 
-- 本次版本：[1.8.0 Release](https://github.com/threeyang3/easyPub/releases/tag/1.8.0)，对应[发布说明](releases/1.8.0.md)。发布状态及最终提交以 GitHub Release 为准。
+- 本次版本：[1.9.0 Release](https://github.com/threeyang3/easyPub/releases/tag/1.9.0)，对应[发布说明](releases/1.9.0.md)。发布状态及最终提交以 GitHub Release 为准。
+- 1.9.0 新增常驻发布面板、Hexo 一键排版和附件导入，重构公众号工作台与独立双比例封面裁剪。最低 Obsidian 版本提高到 1.5.7（附件路径 API）；已发布 1.8.0 的最低版本仍为 1.4.4，历史映射保留。
 - 1.8.0 新增原稿初始化、平台字段白名单、按字段刷新与旧属性清理、公众号单一标题；详见[属性归属](reference/data-model.md#属性归属)。
 - 发布稿的属性后续独立维护；更新正文不再自动覆盖标题、标签和封面，需通过专门命令选择字段刷新。旧稿额外属性默认保留，不批量迁移文章。
-- 安装时使用同一 Release 的三个附件；1.7.3 不包含本轮属性改进。
+- 安装时使用同一 Release 的三个附件；1.8.0 不包含本轮工作台、排版与附件导入改进。
 
 ## 已有验证证据
 
@@ -25,6 +26,8 @@
 | 1.8.0 属性改进 | 核心测试、类型检查、生产构建和两套浏览器回归通过；覆盖平台字段隔离、独立维护、选择性刷新、旧属性清理、初始化取消与并发校验、公众号标题迁移 | 本轮真实账号同步或最低宿主版本验收 |
 
 原生环境记录包含 Obsidian 1.14.4 / Electron 43.7.7。当前开发分支 manifest 的最低版本 1.5.7 是 API 兼容声明，不是已完整测试的最低宿主环境。
+
+本轮 macOS Sandbox 原生验收见[工作台记录](verification/workbench-stability-native.json)（20 项）和[系统文件选择器记录](verification/attachment-picker-native.json)（4 项），覆盖附件路径与字节、双比例裁剪、保存与取消、Hexo 排版及备份恢复。自动测试和最终发布附件以对应提交的 CI 与 Release 为准。
 
 ## 仍需独立验收的事项
 

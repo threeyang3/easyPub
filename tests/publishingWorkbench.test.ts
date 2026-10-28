@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import EasyPub from "../main";
+import fs from "node:fs/promises";
+import { HexoFormatModal } from "../modals/HexoFormatModal";
+import { wechatHash } from "../utils/wechatHash";
 import { PLATFORMS } from "../types";
 import { WechatView, WECHAT_VIEW } from "../views/WechatView";
 import { Modal } from "obsidian";
@@ -88,8 +91,15 @@ export async function runPublishingWorkbenchTests() {
   // Opening crop must reject a stale snapshot and release its lock after failed rendering.
   const cropView = Object.create(WechatView.prototype) as any;
   let readCrop = async () => 'changed body';
-  Object.assign(cropView, {cover:{width:1440,height:900}, file:draft, snapshot:'saved body', snapshotPath:draft.path,
-    article:{}, version:1, closed:false, busy:false, cropOpening:false, app:{vault:{read:() => readCrop()}}, renderInspector:() => {}});
+  const coverBytes = Uint8Array.from([1,2,3]);
+  const imageFile = Object.assign(new TFile(),{path:'cover.png',extension:'png'});
+  Object.assign(cropView, {cover:{width:1440,height:900,source:'cover.png',localPath:'cover.png',originalHash:wechatHash(coverBytes)}, file:draft, snapshot:'saved body', snapshotPath:draft.path,
+    article:{}, version:1, closed:false, busy:false, stale:false, cropOpening:false,
+    plugin:{settings:{wechat:{allowRemoteImages:false}}},
+    app:{metadataCache:{getFirstLinkpathDest:()=>imageFile},vault:{read:() => readCrop(),readBinary:async ()=>coverBytes.buffer}}, renderInspector:() => {}});
+  cropView.stale = true;
+  await assert.rejects(cropView.openCrop(), /预览待更新/);
+  cropView.stale = false;
   await assert.rejects(cropView.openCrop(), /已变化/);
   assert.equal(cropView.cropOpening, false); assert.equal(cropView.cropModal, undefined);
   let resolveCrop!: (text: string) => void;
@@ -120,7 +130,24 @@ export async function runPublishingWorkbenchTests() {
     Modal.prototype.open = () => { throw new Error('render failed'); };
     Modal.prototype.close = function () { Object.assign(this, {contentEl:{empty:() => {}}}); this.onClose(); };
     readCrop = async () => 'saved body';
+    cropView.app.vault.readBinary = async () => Uint8Array.from([9,9,9]).buffer;
+    await assert.rejects(cropView.openCrop(), /封面图片内容已变化/);
+    cropView.app.vault.readBinary = async () => coverBytes.buffer;
     await assert.rejects(cropView.openCrop(), /render failed/);
+    let cropModal: any, applied = 0;
+    Modal.prototype.open = function () { cropModal = this; };
+    cropView.changed = () => { applied++; };
+    await cropView.openCrop();
+    const crop = {x:0,y:0,width:1,height:1};
+    cropView.app.vault.readBinary = async () => Uint8Array.from([9,9,9]).buffer;
+    await assert.rejects(cropModal.apply(crop,crop,()=>{}), /封面图片内容已变化/);
+    assert.equal(applied,0);
+    cropView.app.vault.readBinary = async () => coverBytes.buffer;
+    await assert.rejects(cropModal.apply(crop,crop,()=>{throw new Error('closed');}), /closed/);
+    assert.equal(applied,0);
+    await cropModal.apply(crop,crop,()=>{}); assert.equal(applied,1);
+    cropModal.close();
+
     assert.equal(cropView.cropOpening, false); assert.equal(cropView.cropModal, undefined);
   } finally { Modal.prototype.open = openOriginal; Modal.prototype.close = closeOriginal; }
 
@@ -138,5 +165,34 @@ export async function runPublishingWorkbenchTests() {
     await assert.rejects(writePublishedFile(target, 'after', 'stale', backups), /修改|changed/i);
     assert.equal(await readFile(target, 'utf8'), 'before');
   } finally { await rm(directory, { recursive:true, force:true }); }
+  // Fault injection: mutate the source only after the backup is durable.
+  // Exercise formatHexoArticle -> PublishStore -> the real atomic writer.
+  const blog = await mkdtemp(path.join(os.tmpdir(),'easypub-source-race-'));
+  const originalLink = fs.link, formatOpen = HexoFormatModal.prototype.open;
+  try {
+    await writeFile(path.join(blog,'_config.yml'),'title: Test\n');
+    const target = path.join(blog,'post.md');
+    const original = '---\npub_id: source-race\n---\n甲\n乙\n';
+    await writeFile(target,original);
+    let text = '---\npub_id: source-race\n---\nSource';
+    const file = Object.assign(new TFile(),{path:'source.md',extension:'md'});
+    const plugin = Object.create(EasyPub.prototype) as EasyPub;
+    plugin.settings = normalizeSettings({hexoRepoPath:blog});
+    Object.assign(plugin,{app:{vault:{read:async()=>text,on:()=>({}),offref:()=>{}},workspace:{getActiveFile:()=>file}}});
+    plugin.findArticleByPubId = async () => target;
+    let modal: any;
+    HexoFormatModal.prototype.open = function () {modal=this;};
+    await plugin.formatHexoArticle(file);
+    fs.link = async (...args: Parameters<typeof fs.link>) => {
+      await originalLink(...args);
+      if (String(args[1]).endsWith('.bak')) text += '\nEdited during backup';
+    };
+    await assert.rejects(modal.apply(()=>{}), /原稿内容已变化/);
+    assert.equal(await readFile(target,'utf8'),original);
+    const backups = await readdir(path.join(blog,'.easy-pub-backups'));
+    assert.equal(backups.length,1);
+    assert.equal(await readFile(path.join(blog,'.easy-pub-backups',backups[0]),'utf8'),original);
+    assert.equal((await readdir(blog)).some(name=>name.endsWith('.tmp')||name.endsWith('.lock')),false);
+  } finally { fs.link=originalLink; HexoFormatModal.prototype.open=formatOpen; await rm(blog,{recursive:true,force:true}); }
   console.log('Publishing workbench: context restore, source identity, selector target, crop lifecycle and formatting cancellation passed');
 }

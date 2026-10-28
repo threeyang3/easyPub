@@ -156,6 +156,8 @@ try {
   await page.setViewportSize({ width:1000, height:1000 });
   await page.getByRole('button', {name:'从正文重新提取摘要',exact:true}).click();
   assert.doesNotMatch(await page.locator('.epw-field textarea').inputValue(), /const message|发布之前|交给工具/);
+  await page.getByRole('button', {name:'保存设置并刷新',exact:true}).click();
+  await page.waitForFunction(() => !document.querySelector('.epw-footer .mod-cta').disabled);
   await page.getByRole('button', {name:'图片与封面',exact:true}).click();
   await page.getByRole('button', {name:'调整封面裁剪',exact:true}).click();
   await page.getByLabel('横版 2.35:1构图位置').selectOption('top');
@@ -166,6 +168,7 @@ try {
   await page.getByRole('button', {name:'方形 1:1',exact:true}).click();
   await page.getByLabel('方形 1:1构图位置').selectOption('top-left');
   await page.getByRole('button', {name:'应用裁剪',exact:true}).click();
+  await page.locator('.easy-pub-crop-modal').waitFor({state:'detached'});
   assert.equal(await page.evaluate(()=>window.fixture.view.article.cropSquare.x), 0);
   await page.getByRole('button', {name:'文章信息',exact:true}).click();
   await page.getByRole("button", { name: "保存设置并刷新", exact: true }).click();
@@ -201,12 +204,15 @@ try {
   await page.evaluate(() => window.fixture.setDelay(0));
   await page.getByRole("button", { name: "刷新预览", exact: true }).click();
   await page.waitForFunction(() => document.querySelector(".epw-status").textContent.includes("未保存设置已保留"));
+  await page.getByRole('button', {name:'保存设置并刷新',exact:true}).click();
+  await page.waitForFunction(() => !document.querySelector('.epw-footer .mod-cta').disabled);
   await page.getByRole('button', {name:'图片与封面',exact:true}).click();
   await page.getByRole('button', {name:'调整封面裁剪',exact:true}).click();
   const crop = page.locator(".epw-crop").first();
   await crop.scrollIntoViewIfNeeded();
   await crop.focus(); await page.keyboard.press("ArrowRight");
   await page.getByRole('button', {name:'应用裁剪',exact:true}).click();
+  await page.locator('.easy-pub-crop-modal').waitFor({state:'detached'});
   await page.getByRole('button', {name:'文章信息',exact:true}).click();
   assert.match(await page.locator(".epw-status").innerText(), /设置待保存/);
   assert.equal(await page.getByRole("button", { name: "同步草稿箱", exact: true }).isDisabled(), true);

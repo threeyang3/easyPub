@@ -102,3 +102,13 @@ node tests/preview-workbench.mjs
 `tests/hexoFormatting.test.ts` 覆盖补空行、幂等、CRLF、Front Matter 和特殊结构；`tests/publishingWorkbench.test.ts` 覆盖空状态快捷入口、固定稿件、旧读取结果丢弃，以及排版取消后的文件与备份字节。它们通过 `npm test` 执行。
 
 `tests/attachmentImport.test.ts` 覆盖附件目录上下文、同名避让、索引延迟、图片字段自动填入、批量部分失败、关闭期间取消和磁盘错误重试；同时通过真实发布编排校验公众号封面相对路径与裁剪重置。预览页的“生成稿件并添加图片”提供本地文件选择器验收入口。
+
+## 常驻面板稳定性原生验收
+
+```bash
+EASYPUB_TEST_VAULT=Sandbox EASYPUB_TEST_HEXO_REPO=/absolute/disposable-blog node tests/run-wechat-native.mjs --workbench
+```
+
+必须使用 `Sandbox` 和含 `.easypub-test-copy` 标记的可丢弃博客副本。临时内存加载组件，使用合成笔记与图片，不替换已安装插件或保存账号设置。覆盖附件目录与同名避让、固定面板、裁剪保存/过期/关闭、单图片解码、博客排版、备份字节与恢复；结束后清理本次创建的数据。系统文件选择器在真实 Obsidian 中仍需人工确认。已记录的宿主结果见 [workbench-stability-native.json](../verification/workbench-stability-native.json)。
+
+`node tests/publishing-ui.mjs --bundle-only` 仅验证浏览器模式打包，不启动浏览器；不能替代完整发布管理浏览器测试。本机禁止启动外部 Chrome/Chromium 时使用该入口，完整套件由 GitHub Actions 运行。

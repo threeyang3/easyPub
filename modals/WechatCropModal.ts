@@ -6,12 +6,16 @@ export class WechatCropModal extends Modal {
   private article: WechatArticleSettings;
   private thumbnails: Array<{ canvas: HTMLCanvasElement; key: "cropWide" | "cropSquare" }> = [];
   private closed = false;
+  private bitmap?: HTMLImageElement;
+  private frame?: number;
+  private redraws: Array<() => void> = [];
   constructor(app: App, private cover: WechatImage, article: WechatArticleSettings,
-    private apply: (wide: WechatCrop, square: WechatCrop) => void, private finished: () => void) {
+    private apply: (wide: WechatCrop, square: WechatCrop, assertActive: () => void) => Promise<void>, private finished: () => void) {
     super(app); this.article = structuredClone(article);
   }
   onOpen() {
     this.closed = false;
+    this.bitmap = new Image();
     this.modalEl.addClass("easy-pub-crop-modal");
     this.contentEl.addClass("easy-pub-wechat");
     this.contentEl.createEl("h2", { text: "调整封面裁剪" });
@@ -32,25 +36,35 @@ export class WechatCropModal extends Modal {
       const canvas = box.createEl("canvas"); canvas.width = 188; canvas.height = Math.round(188 / ratio);
       this.thumbnails.push({ canvas, key });
     }
-    this.drawThumbnails();
     const actions = this.contentEl.createDiv({ cls: "ep-panel-actions epw-crop-actions" });
     actions.createEl("button", { text: "取消" }).onclick = () => this.close();
-    actions.createEl("button", { text: "应用裁剪", cls: "mod-cta" }).onclick = () => {
-      if (this.closed) return;
-      try { this.apply(this.article.cropWide!, this.article.cropSquare!); this.close(); }
-      catch (error) { status.textContent = (error as Error).message; }
+    const apply = actions.createEl("button", { text: "应用裁剪", cls: "mod-cta" });
+    apply.onclick = async () => {
+      if (this.closed || apply.disabled) return;
+      apply.disabled = true;
+      try {
+        const assertActive = () => { if (this.closed) throw new Error("裁剪窗口已关闭，已取消应用"); };
+        await this.apply({...this.article.cropWide!}, {...this.article.cropSquare!}, assertActive);
+        if (!this.closed) this.close();
+      } catch (error) { if (!this.closed) { status.textContent = (error as Error).message; apply.disabled = false; } }
     };
     const status = this.contentEl.createEl("p", { attr: { role: "status" } });
+    this.bitmap.onload = () => this.scheduleDraw();
+    this.bitmap.onerror = () => { if (!this.closed) status.textContent = "封面图片加载失败，请关闭并刷新预览"; };
+    this.bitmap.src = this.cover.previewUrl;
   }
-  private drawThumbnails() {
-    const bitmap = new Image(); bitmap.onload = () => {
-      if (this.closed) return;
-      for (const { canvas, key } of this.thumbnails) {
+  private scheduleDraw() {
+    if (this.closed || this.frame !== undefined) return;
+    this.frame = requestAnimationFrame(() => {
+      this.frame = undefined;
+      if (this.closed || !this.bitmap?.complete || !this.bitmap.naturalWidth) return;
+      this.redraws.forEach(draw => draw());
+      for (const {canvas,key} of this.thumbnails) {
         const crop = this.article[key]; if (!crop) continue;
-        canvas.getContext("2d")?.drawImage(bitmap, crop.x * this.cover.width, crop.y * this.cover.height,
+        canvas.getContext("2d")?.drawImage(this.bitmap, crop.x * this.cover.width, crop.y * this.cover.height,
           crop.width * this.cover.width, crop.height * this.cover.height, 0, 0, canvas.width, canvas.height);
       }
-    }; bitmap.src = this.cover.previewUrl;
+    });
   }
   private cropEditor(parent: HTMLElement, key: "cropWide" | "cropSquare", ratio: number, label: string) {
     const image = this.cover!;
@@ -73,7 +87,7 @@ export class WechatCropModal extends Modal {
       resolution.classList.toggle("epw-warning", low);
     };
     updateResolution();
-    const bitmap = new Image(); bitmap.src = image.previewUrl;
+    const bitmap = this.bitmap!;
     const draw = () => {
       const context = canvas.getContext("2d"); if (!context || !bitmap.complete) return;
       context.clearRect(0, 0, canvas.width, canvas.height);
@@ -81,10 +95,10 @@ export class WechatCropModal extends Modal {
       context.save(); context.strokeStyle = "rgba(255,255,255,.9)"; context.lineWidth = 2; context.setLineDash([6,5]);
       context.strokeRect(canvas.width * 0.08, canvas.height * 0.08, canvas.width * 0.84, canvas.height * 0.84); context.restore();
     };
-    bitmap.onload = () => { draw(); this.drawThumbnails(); }; draw();
+    this.redraws.push(draw);
     const zoom = parent.createEl("input", { type: "range", cls: "epw-zoom", attr: { min: "1", max: "4", step: "0.01", "aria-label": `${label}缩放` } });
     zoom.value = String(centeredCrop(image.width, image.height, ratio).width / crop.width);
-    const commit = () => { this.article[key] = { ...crop }; updateResolution(); draw(); this.drawThumbnails(); };
+    const commit = () => { this.article[key] = { ...crop }; updateResolution(); this.scheduleDraw(); };
     const position = parent.createEl("select", { attr: { "aria-label": `${label}构图位置` } });
     for (const [value, text] of [["", "快速调整构图"], ["center", "居中"], ["top", "顶部居中"], ["top-left", "左上对齐"], ["bottom", "底部居中"]]) position.createEl("option", { value, text });
     position.onchange = () => {
@@ -113,5 +127,11 @@ export class WechatCropModal extends Modal {
       crop.y = Math.max(0, Math.min(1 - crop.height, crop.y + (event.key === "ArrowDown" ? delta : event.key === "ArrowUp" ? -delta : 0))); commit();
     });
   }
-  onClose() { this.closed = true; this.thumbnails = []; this.contentEl.empty(); this.finished(); }
+  onClose() {
+    this.closed = true;
+    if (this.frame !== undefined) cancelAnimationFrame(this.frame);
+    this.frame = undefined;
+    if (this.bitmap) { this.bitmap.onload = null; this.bitmap.onerror = null; this.bitmap = undefined; }
+    this.redraws = []; this.thumbnails = []; this.contentEl.empty(); this.finished();
+  }
 }

@@ -427,17 +427,26 @@ export default class EasyPub extends Plugin {
     new HexoFormatModal(this.app, target, before, result, async assertActive => {
       if (this.publishInProgress || this.publishConfirmationOpen || this.deployInProgress) throw new Error("已有发布任务正在进行，请稍候");
       this.publishInProgress = true;
+      let sourceInvalidated = false;
+      const sourceEvents: ReturnType<typeof this.app.vault.on>[] = [];
       try {
+        const invalidate = (file: unknown) => { if (file === source) sourceInvalidated = true; };
+        sourceEvents.push(this.app.vault.on("modify", invalidate), this.app.vault.on("rename", invalidate), this.app.vault.on("delete", invalidate));
         if (repository !== this.settings.hexoRepoPath || sourceText !== await this.app.vault.read(source)) throw new Error("原稿或博客配置已变化，请重新排版");
         if (target !== await this.findArticleByPubId(hexo, id, meta, source.path)) throw new Error("发布稿已移动，请重新排版");
         const guard = () => {
           assertActive(); this.assertSettingsWritable();
+          if (sourceInvalidated) throw new Error("原稿内容或状态已变化，请重新排版");
           if (repository !== this.settings.hexoRepoPath || source.path !== sourcePath) throw new Error("原稿路径或博客配置已变化，请重新排版");
         };
         guard();
-        await this.getPublishStore().writePublishFile(hexo, target, result.content, before, guard);
+        await this.getPublishStore().writePublishFile(hexo, target, result.content, before, guard, async () => {
+          guard();
+          if (sourceText !== await this.app.vault.read(source)) throw new Error("原稿内容已变化，请重新排版");
+          guard();
+        });
         new Notice("Hexo 排版已保存；需要恢复时可在设置中查看发布稿备份并手动恢复");
-      } finally { this.publishInProgress = false; }
+      } finally { sourceEvents.forEach(event => this.app.vault.offref(event)); this.publishInProgress = false; }
     }).open();
   }
 

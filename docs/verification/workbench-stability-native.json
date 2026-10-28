@@ -1,0 +1,27 @@
+{
+  "date": "2026-10-28",
+  "environment": {"platform": "darwin", "electron": "43.7.7", "vault": "Sandbox"},
+  "method": "Temporary in-memory plugin loading, actual Obsidian APIs and components; synthetic notes and images; marked disposable Hexo repository",
+  "checks": [
+    "Host attachment API avoids duplicate filenames",
+    "Attachment bytes are preserved in the configured directory",
+    "Panel restores pinned article context",
+    "Always-available management shortcut renders",
+    "Pinned panel ignores another article",
+    "Native WeChat renderer and local-cover preflight pass",
+    "Dual-ratio crop creates one bitmap across 30 repeated adjustments",
+    "Crop applies independent wide and square coordinates",
+    "Both crops persist through the Front Matter API",
+    "Paused stale preview refuses crop entry",
+    "Closing during asynchronous Apply leaves crop settings unchanged",
+    "Hexo formatting confirmation renders",
+    "Hexo formatting keeps a byte-identical backup",
+    "Formatting preserves target metadata and draft location",
+    "Disposable blog restores backup with an expected-content guard"
+  ],
+  "attachmentLocation": "vault root (current Sandbox attachment setting)",
+  "cleanup": "Temporary views, notes, attachments, target draft and test-owned backups removed; installed plugin unchanged",
+  "deployments": 0,
+  "remoteWrites": 0,
+  "limits": ["OS file chooser in real Obsidian remains a manual check; file chooser was previously tested in the in-app browser fixture", "No real WeChat draft or AI service acceptance"]
+}

@@ -30,12 +30,18 @@ const bundle = await build({
   bundle: true, platform: 'browser', format: 'esm', write: false,
   plugins: [{ name: 'publishing-ui-fixtures', setup(builder) {
     builder.onResolve({ filter: /^obsidian$/ }, () => ({ path: path.resolve('tests/fixtures/wechat-obsidian.ts') }));
-    builder.onResolve({ filter: /utils\/(publishBackups|platforms)$/ }, args => ({ path: args.path, namespace: 'fixture' }));
+    builder.onResolve({ filter: /(?:^|\/)(publishBackups|platforms)(?:\.ts)?$/ }, args => {
+      const target = path.resolve(args.resolveDir, args.path.replace(/\.ts$/, '') + '.ts');
+      for (const name of ['publishBackups', 'platforms']) {
+        if (target === path.resolve(`utils/${name}.ts`)) return {path:name,namespace:'fixture'};
+      }
+    });
     builder.onLoad({ filter: /.*/, namespace: 'fixture' }, args => ({ contents: args.path.endsWith('platforms')
-      ? `export const getPublishBackupDirectory = () => '/blog/.easy-pub-backups';`
+      ? `export const getPublishBackupDirectory = () => '/blog/.easy-pub-backups'; export const sanitizeFileName = name => name.replaceAll('/', '-').replaceAll('\\\\', '-');`
       : `export const listPublishBackups = (...args) => window.defer('list', args); export const readPublishBackup = (...args) => window.defer('read', args);` }));
   } }],
 });
+if (process.argv.includes('--bundle-only')) { console.log('Publishing UI browser bundle passed'); process.exit(0); }
 const browser = await chromium.launch({ executablePath: process.env.EASYPUB_CHROME_PATH, headless: true });
 try {
   const page = await browser.newPage();

@@ -60,7 +60,7 @@ export class PublishStore {
 
   private backupNoticeRoots?: Set<string>;
 
-  async writePublishFile(platform: Platform, filePath: string, content: string, expected?: string | null, assertActive: () => void = () => {}): Promise<void> {
+  async writePublishFile(platform: Platform, filePath: string, content: string, expected?: string | null, assertActive: () => void = () => {}, beforeCommit: () => Promise<void> = async () => {}): Promise<void> {
     if (platform.isExternal) {
       const backupDirectory = getPublishBackupDirectory(this.repository());
       const notified = this.backupNoticeRoots ??= new Set();
@@ -72,10 +72,11 @@ export class PublishStore {
         notified.add(backupDirectory);
       }
       await writePublishedFile(filePath, content, expected,
-        backupDirectory, assertActive);
+        backupDirectory, assertActive, beforeCommit);
       return;
     }
 
+    await beforeCommit();
     const file = this.vault().getAbstractFileByPath(filePath);
     if (file instanceof TFile) {
       await this.vault().process(file, current => {

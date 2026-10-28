@@ -376,15 +376,27 @@ export class WechatView extends ItemView {
   }
   private async openCrop() {
     if (!this.cover || this.cropModal || this.cropOpening || this.busy || !this.file || this.closed) return;
+    if (this.stale) throw new Error("预览待更新，请先刷新预览后再调整裁剪");
     this.cropOpening = true;
     try {
       const version = this.version, file = this.file, snapshot = this.snapshot, cover = this.cover;
-      const latest = await this.app.vault.read(file);
-      if (this.closed || this.version !== version || this.file !== file || file.path !== this.snapshotPath || latest !== snapshot) {
-        throw new Error("稿件或图片已变化，请先刷新预览后再调整裁剪");
-      }
-      const modal = new WechatCropModal(this.app, cover, this.article, (wide, square) => {
-        if (this.closed || this.version !== version || this.file !== file) throw new Error("稿件或图片已变化，请关闭裁剪窗口，刷新后重试");
+      const assertFresh = async () => {
+        const check = () => {
+          if (this.closed || this.stale || this.version !== version || this.file !== file || this.cover !== cover || file.path !== this.snapshotPath) {
+            throw new Error("稿件或图片已变化，请先刷新预览后再调整裁剪");
+          }
+        };
+        check();
+        if (await this.app.vault.read(file) !== snapshot) throw new Error("稿件或图片已变化，请先刷新预览后再调整裁剪");
+        const raw = await readWechatImage(this.app, cover.source, file.path, undefined, this.allowRemoteImages);
+        check();
+        if (wechatHash(raw.bytes) !== cover.originalHash || raw.localPath !== cover.localPath) {
+          throw new Error("封面图片内容已变化，请先刷新预览后再调整裁剪");
+        }
+      };
+      await assertFresh();
+      const modal = new WechatCropModal(this.app, cover, this.article, async (wide, square, assertActive) => {
+        await assertFresh(); assertActive();
         this.article.cropWide = wide; this.article.cropSquare = square; this.changed();
       }, () => {
         if (this.cropModal === modal) this.cropModal = undefined;

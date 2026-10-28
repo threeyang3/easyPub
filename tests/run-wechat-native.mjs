@@ -9,12 +9,13 @@ import os from 'node:os';
 // dedicated Sandbox notes and requires a marked disposable blog copy.
 const temp = await mkdtemp(path.join(os.tmpdir(), 'easypub-native-'));
 try {
+  const workbench = process.argv.includes('--workbench');
   const hexo = process.argv.includes('--hexo');
-  if (hexo && !process.env.EASYPUB_TEST_HEXO_REPO) throw new Error('Set EASYPUB_TEST_HEXO_REPO to a disposable blog copy');
-  const entry = hexo ? 'tests/hexo-native.ts' : process.argv.includes('--download') ? 'tests/wechat-download-native.ts' : 'tests/wechat-native.ts';
+  if ((hexo || workbench) && !process.env.EASYPUB_TEST_HEXO_REPO) throw new Error('Set EASYPUB_TEST_HEXO_REPO to a disposable blog copy');
+  const entry = workbench ? 'tests/workbench-native.ts' : hexo ? 'tests/hexo-native.ts' : process.argv.includes('--download') ? 'tests/wechat-download-native.ts' : 'tests/wechat-native.ts';
   const result = await build({ entryPoints: [entry], bundle: true, platform: 'node', format: 'cjs', external: ['obsidian','electron','@electron/remote'], write: false });
   const file = path.join(temp, 'native.cjs');
-  const options = { imageUrl: process.env.EASYPUB_TEST_IMAGE_URL?.trim() || undefined, blogPath: process.env.EASYPUB_TEST_HEXO_REPO };
+  const options = { imageUrl: process.env.EASYPUB_TEST_IMAGE_URL?.trim() || undefined, blogPath: process.env.EASYPUB_TEST_HEXO_REPO, ...(workbench ? {styles:await (await import("node:fs/promises")).readFile("styles.css","utf8")} : {}) };
   await writeFile(file, result.outputFiles[0].text + '\nconst runAcceptance=module.exports.run; module.exports=class extends require("obsidian").Plugin { async onload(){this.result=await runAcceptance(this.app,' + JSON.stringify(options) + ');} };');
   const id = `easypub-acceptance-${Date.now()}`;
   const code = `(async()=>{

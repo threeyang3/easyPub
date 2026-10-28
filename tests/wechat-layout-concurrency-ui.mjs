@@ -21,10 +21,12 @@ export async function runLayoutConcurrencyUi(page) {
   await send(1);
   await theme().selectOption('minimal'); await ready();
   await send(2); // The first transport is still unresolved.
+  await page.evaluate(() => { window.obsoletePreviewNode = document.querySelector('.epl-preview').firstElementChild; });
   await resolve(0);
   await page.waitForFunction(() => window.fixture.view.layoutModal.requests.size === 1);
   assert.equal(await button('应用排版到本地稿').isDisabled(), true, 'Old completion cannot clear a newer request');
   assert.equal(await theme().inputValue(), 'minimal');
+  assert.equal(await page.evaluate(() => window.obsoletePreviewNode === document.querySelector('.epl-preview').firstElementChild), true, 'Obsolete completion retains preview DOM');
   await theme().selectOption('research'); await ready();
   await send(3);
   await theme().selectOption('event'); await ready();

@@ -40,6 +40,7 @@ export class WechatLayoutModal extends Modal {
   private requestButton!: HTMLButtonElement;
   private original = false;
   private selectedRenderable = true;
+  private previewReady = false;
   private applying = false;
   private compareButton!: HTMLButtonElement;
   private undoButton!: HTMLButtonElement;
@@ -197,9 +198,13 @@ export class WechatLayoutModal extends Modal {
   private setBlock(id: string, component: WechatLayoutComponent, locked: boolean) {
     this.change({...this.selected, blocks: [...this.selected.blocks.filter(b => b.id !== id), {id, role: LAYOUT_COMPONENT_ROLES[component], component, ...(locked ? {locked: true} : {})}]});
   }
-  private updatePreview() {
+  private updateActionState() {
     this.requestButton.disabled = !this.canRequest() || this.applying || !this.context.document.blocks.length;
     this.requestButton.title = this.requests.size >= 2 ? "仍有两个 AI 请求等待结束；可继续手工调整并应用，释放名额后可再次请求。" : "";
+    this.applyButton.disabled = this.applying || this.pending || !this.selectedRenderable
+      || !this.previewReady || this.previewFrame !== undefined;
+  }
+  private updatePreview() {
     this.compareButton.setAttribute("aria-pressed", String(this.original));
     this.previewLabel.textContent = this.original ? "默认模板 · 仅供对比" : `当前方案 · ${WECHAT_THEMES[this.selected.theme]}`;
     try {
@@ -209,17 +214,17 @@ export class WechatLayoutModal extends Modal {
       this.preview.scrollTop = scroll;
       if (!this.original) this.selectedRenderable = true;
       this.preview.setAttribute("aria-label", this.original ? "默认模板预览" : "排版方案预览");
-      this.applyButton.disabled = this.applying || this.pending
-        || !this.selectedRenderable;
+      this.previewReady = true;
     } catch (error) {
       this.status.textContent = (error as Error).message;
-      this.applyButton.disabled = true;
+      this.previewReady = false;
       if (!this.original) {
         this.selectedRenderable = false;
         this.preview.empty();
         this.preview.createEl("p", {text: "当前方案无法预览，请调整风格或减少重点组件。也可切换默认模板对比。"});
       }
     }
+    this.updateActionState();
   }
   private async prepareRequest() {
     if (!this.canRequest() || this.applying || this.closed) return;
@@ -242,7 +247,7 @@ export class WechatLayoutModal extends Modal {
   }
   private async generate(messages: ReturnType<typeof plannerMessages>, config: ReturnType<EasyPub["getWechatAiConfiguration"]>, version: number) {
     if (!this.canRequest() || this.applying || this.closed || version !== this.requestVersion) return;
-    this.requests.add(version); this.updatePreview();
+    this.requests.add(version); this.updateActionState();
     this.status.textContent = "AI 正在规划，可继续查看；修改方案或关闭窗口会丢弃旧响应。";
     try {
       await this.context.assertFresh();
@@ -258,7 +263,7 @@ export class WechatLayoutModal extends Modal {
       if (this.closed || version !== this.requestVersion) return;
       this.change(themePlan(this.context.document, "default"));
       this.status.textContent = `${(error as Error).message}。预览已回退默认模板；本地已保存的排版未变化。`;
-    } finally { this.requests.delete(version); if (!this.closed) this.updatePreview(); }
+    } finally { this.requests.delete(version); if (!this.closed) this.updateActionState(); }
   }
   private async apply() {
     if (this.applying || this.pending || this.closed || this.applyButton.disabled) return;

@@ -48,6 +48,11 @@ export async function runPerformanceTests() {
     console.log(`Locator fixture ${size}: cold ${cold.toFixed(1)} ms / ${size} reads; warm ${warm.toFixed(1)} ms / 1 read`);
   }
   assert.equal(formattingChanges('same', 'same'), '内容无变更');
+  assert.equal(formattingChanges('甲\r\n乙', '甲\r\n\r\n乙'), formattingChanges('甲\n乙', '甲\n\n乙'));
+  assert.match(formattingChanges('甲\r\n乙', '甲\r\n\r\n乙'), /\+ （空行）/);
+  assert.doesNotMatch(formattingChanges('甲\r\n乙', '甲\r\n\r\n乙'), /\r/);
+  assert.match(formattingChanges('甲\r\n\r\n', '甲\r\n'), /- （空行）/);
+  assert.equal(formattingChanges('甲\r\n乙\r\n', '甲\n乙\n'), '内容无变更');
   const changes = formattingChanges('first\nsecond\n\nunchanged\nlast  ', 'first\n\nsecond\n\nunchanged\nlast');
   assert.match(changes, /\+ （空行）/);
   assert.match(changes, /- last  /);
@@ -169,13 +174,25 @@ export async function runPerformanceTests() {
         const second = editor.generate([], config, editor.requestVersion);
         assert.equal(editor.requests.size, 2);
         assert.equal(editor.canRequest(), false);
+        const preview = root.querySelector<HTMLElement>('.epl-preview')!;
+        const previewNode = preview.firstElementChild;
+        preview.scrollTop = 12;
+        const selectedText = preview.querySelector('p')!.firstChild!;
+        const range = document.createRange(); range.setStart(selectedText, 0); range.setEnd(selectedText, 3);
+        const selection = dom.window.getSelection()!; selection.removeAllRanges(); selection.addRange(range);
+        const textBeforeCompletion = selection.toString();
         reads.shift()!(); await first;
+        assert.equal(preview.firstElementChild, previewNode, 'Obsolete AI completion must not rebuild preview DOM');
+        assert.equal(selection.toString(), textBeforeCompletion, 'Obsolete completion preserves text selection');
+        assert.equal(preview.scrollTop, 12);
         assert.equal(editor.pending, true, 'An old finally must not clear a newer active request');
         assert.equal(root.querySelector<HTMLButtonElement>('.epl-footer .mod-cta')!.disabled, true);
         editor.change(themePlan(mapped.layoutDocument!, 'minimal')); flush();
         assert.equal(editor.pending, false);
         assert.equal(editor.canRequest(), true);
+        const latestPreviewNode = preview.firstElementChild;
         reads.shift()!(); await second;
+        assert.equal(preview.firstElementChild, latestPreviewNode);
         assert.equal(editor.requests.size, 0);
         assert.equal(editor.selected.theme, 'minimal');
       }

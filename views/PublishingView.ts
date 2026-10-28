@@ -140,15 +140,24 @@ export class PublishingView extends ItemView {
       // Scan only on explicit action, rather than traversing external repositories on each keystroke.
       for (const target of PLATFORMS) {
         const row = related.createDiv({ cls: "ep-panel-platform" }); row.createEl("strong", { text: target.name });
-        let exists: boolean | undefined;
+        let state: "unknown" | "checking" | "exists" | "missing" = "unknown";
+        const reset = () => { state = "unknown"; draft.textContent = "检查稿件"; };
         const draft = this.button(row, "检查稿件", async () => {
-          if (exists === undefined) {
-            exists = await this.plugin.hasRelatedDraft(source, target);
-            draft.textContent = exists ? "打开稿件" : "创建稿件";
-          } else if (exists) await this.plugin.openRelatedDraft(source, target);
-          else {
-            await this.plugin.preparePublish(target, false, {configure: true, sourceFile: source});
-            exists = undefined; draft.textContent = "检查稿件";
+          try {
+            if (state === "unknown") {
+              state = "checking"; draft.textContent = "正在检查…";
+              const exists = await this.plugin.hasRelatedDraft(source, target);
+              state = exists ? "exists" : "missing";
+              draft.textContent = exists ? "打开稿件" : "创建稿件";
+            } else if (state === "exists") await this.plugin.openRelatedDraft(source, target);
+            else if (state === "missing") {
+              await this.plugin.preparePublish(target, false, {configure: true, sourceFile: source});
+              reset();
+            }
+          } catch (error) {
+            // A target may move or disappear after a successful explicit check.
+            // Keep the failure notice and make the next click a fresh query.
+            reset(); throw error;
           }
         });
         if (target.id === "hexo") {

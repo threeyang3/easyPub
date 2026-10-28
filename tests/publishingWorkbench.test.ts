@@ -63,6 +63,22 @@ export async function runPublishingWorkbenchTests() {
     assert.equal(queries, 1); assert.ok(button('创建稿件'));
     button('创建稿件').click(); await flush();
     assert.equal(creations, 1); assert.equal(queries, 1);
+    // A move/delete after checking must recover on the same rendered row.
+    plugin.hasRelatedDraft = async () => true;
+    plugin.openRelatedDraft = async () => {throw new Error('发布稿已移动');};
+    button('检查稿件').click(); await flush();
+    const staleDraftButton = button('打开稿件');
+    staleDraftButton.click(); await flush();
+    assert.equal(staleDraftButton.textContent, '检查稿件');
+    plugin.hasRelatedDraft = async () => false;
+    staleDraftButton.click(); await flush();
+    assert.equal(staleDraftButton.textContent, '创建稿件');
+    plugin.preparePublish = async () => {throw new Error('创建失败');};
+    staleDraftButton.click(); await flush();
+    assert.equal(staleDraftButton.textContent, '检查稿件');
+    plugin.hasRelatedDraft = async () => {throw new Error('检查失败');};
+    staleDraftButton.click(); await flush();
+    assert.equal(staleDraftButton.textContent, '检查稿件');
     const retainedButton = button('打开当前文章');
     retainedButton.focus();
     listeners.get('modify')!(files[1]); listeners.get('modify')!(files[1]); listeners.get('modify')!(files[1]);

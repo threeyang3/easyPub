@@ -81,7 +81,9 @@ globals.fixture = { view,
   selectNewCover: () => (view as any).selectCover("../../assets/alternate.png"),
   settingsWrites: () => settingsWrites,
   disconnectAccount: async () => {connected=false; await view.refresh();},
-  layoutHarness: () => {
+  layoutHarness: async () => {
+    // This harness represents opening the editor, so request strict mapping.
+    await view.refresh(false, true);
     globals.layoutReads = [];
     globals.layoutSaves = [];
     const prepared = (view as any).prepared;
@@ -98,8 +100,11 @@ globals.fixture = { view,
   clearAiCache: () => clearWechatLayoutCache(),
   ai: () => {
     globals.fixtureAiRequests = [];
-    globals.fixtureRequest = (request: any) => { globals.fixtureAiRequests.push(request); return new Promise(resolve => {
-      globals.fixtureAiResolve = (content: unknown) => resolve({status: 200, arrayBuffer: new TextEncoder().encode(JSON.stringify({choices: [{finish_reason: 'stop', message: {content: typeof content === 'string' ? content : JSON.stringify(content)}}]})).buffer});
+    globals.fixtureAiResolvers = [];
+    globals.fixtureRequest = (request: any) => { const index = globals.fixtureAiRequests.length; globals.fixtureAiRequests.push(request); return new Promise(resolve => {
+      const finish = (content: unknown) => resolve({status: 200, arrayBuffer: new TextEncoder().encode(JSON.stringify({choices: [{finish_reason: 'stop', message: {content: typeof content === 'string' ? content : JSON.stringify(content)}}]})).buffer});
+      globals.fixtureAiResolvers[index] = finish;
+      globals.fixtureAiResolve = finish;
     }); };
   },
   localOnly: (value: boolean) => { plugin.settings.wechat.allowRemoteImages = !value; view.invalidateImagePolicy(); },

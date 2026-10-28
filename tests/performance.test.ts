@@ -154,6 +154,31 @@ export async function runPerformanceTests() {
       assert.equal((modal as any).selected.blocks[0].locked, true);
       flush();
       assert.equal(root.querySelector<HTMLButtonElement>('.epl-footer .mod-cta')!.disabled, count === 300, 'Oversized layouts retain the apply guard');
+      if (count === 20) {
+        const editor = modal as any;
+        const reads: Array<() => void> = [];
+        editor.context.assertFresh = () => new Promise<void>(resolve => reads.push(resolve));
+        const config = {settings: {endpoint:'https://ai.example/v1/chat/completions', model:'fixture', jsonMode:true, encryptedKey:''}, key:''};
+        const first = editor.generate([], config, editor.requestVersion);
+        assert.equal(editor.pending, true);
+        editor.change(themePlan(mapped.layoutDocument!, 'essay'));
+        assert.equal(root.querySelector<HTMLButtonElement>('.epl-footer .mod-cta')!.disabled, true, 'Manual edits wait for their scheduled validation');
+        flush();
+        assert.equal(root.querySelector<HTMLButtonElement>('.epl-footer .mod-cta')!.disabled, false, 'Validated manual edits do not wait for obsolete AI');
+        assert.equal(editor.canRequest(), true, 'One obsolete request leaves room for a new explicit request');
+        const second = editor.generate([], config, editor.requestVersion);
+        assert.equal(editor.requests.size, 2);
+        assert.equal(editor.canRequest(), false);
+        reads.shift()!(); await first;
+        assert.equal(editor.pending, true, 'An old finally must not clear a newer active request');
+        assert.equal(root.querySelector<HTMLButtonElement>('.epl-footer .mod-cta')!.disabled, true);
+        editor.change(themePlan(mapped.layoutDocument!, 'minimal')); flush();
+        assert.equal(editor.pending, false);
+        assert.equal(editor.canRequest(), true);
+        reads.shift()!(); await second;
+        assert.equal(editor.requests.size, 0);
+        assert.equal(editor.selected.theme, 'minimal');
+      }
       (modal as any).setBlock(mapped.layoutDocument!.blocks[0].id, 'plain', false);
       modal.onClose(); assert.equal(frames.size, 0, 'Closing cancels pending preview work');
       root.remove();

@@ -7,6 +7,8 @@ export async function runLayoutConcurrencyUi(page) {
   await button('智能排版').click();
   await page.locator('.epl-ai-section > summary').click();
   const send = async expected => {
+    // Distinct payloads test transport concurrency rather than session-cache hits.
+    await page.getByRole('combobox', {name:'AI 风格偏好', exact:true}).selectOption(['essay', 'research', 'event'][expected - 1]);
     await button('准备 AI 排版请求').click();
     await button('确认发送这些片段并生成方案').click();
     await page.waitForFunction(count => window.fixtureAiRequests.length === count, expected);

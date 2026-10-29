@@ -1,3 +1,5 @@
+import { WechatHexoModal } from "../../modals/WechatHexoModal";
+import { exportWechatHexoContent } from "../../utils/wechatHexoContent";
 import { ArticlePropertiesModal } from "../../modals/ArticlePropertiesModal";
 import { platformPropertyFields } from "../../utils/articleProperties";
 import { PublishingView } from "../../views/PublishingView";
@@ -69,8 +71,16 @@ const app: any = {
   } },
   workspace: { on: (event: string, listener: (...args: any[]) => void) => { if (!listeners.has(event)) listeners.set(event, new Set()); listeners.get(event)!.add(listener); return () => listeners.get(event)?.delete(listener); }, getActiveFile: () => file, requestSaveLayout: () => {}, getLeaf: () => ({ openFile: async (file: TFile, options: unknown) => { globals.fixtureOpened = { path: file.path, options }; } }) },
 };
+let hexoGenerated = "", hexoCommitted = 0;
 let sourceUrlResult: {url?:string; reason?:string} = {};
 const plugin: any = { resolveWechatSourceUrl: async () => sourceUrlResult, app, settings: normalizeSettings(null), wechatSyncInProgress: false, wechatCredentialRevision: 0,
+  generateHexoFromWechat: async (_file: TFile, input: any) => {
+    await input.assertFresh();
+    const output = exportWechatHexoContent(input.document, image => `/picture/${image.hash}.png`);
+    const diff: any = {isNew:true,targetPath:"/blog/source/_drafts/current-wechat.md",sourceContent:output.body,targetContent:null,meta:{title:input.article.title}};
+    return new Promise<boolean>(resolve => new WechatHexoModal(app,diff,exportWechatHexoContent(input.document,image=>image.previewUrl).html,
+      async guard => {guard();await input.assertFresh();guard();hexoGenerated=output.body;hexoCommitted++;},resolve).open());
+  },
   getWechatAiConfiguration: () => ({settings: {endpoint: 'https://ai.example/v1/chat/completions', model: 'test-model', encryptedKey: '', jsonMode: true}, key: 'test-ai-key'}),
   openWechatAiSettings: () => {},
   hasWechatCredentials: () => connected, openWechatSetup: (done?:()=>void) => {connected=true; done?.();},
@@ -92,6 +102,7 @@ plugin.settings.hexoRepoPath = "/blog";
 const view = new WechatView({ app, contentEl: document.querySelector("#workbench") } as any, plugin);
 await view.onOpen(); await view.bind(file);
 globals.fixture = { view,
+  hexoGenerated: () => hexoGenerated, hexoCommitted: () => hexoCommitted,
   originalLink: (value: {url?:string; reason?:string}) => {sourceUrlResult=value;},
   associationFiles,
   associationFailure: (value:boolean) => {associationFailure=value;},

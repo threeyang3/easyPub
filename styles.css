@@ -349,3 +349,6 @@
 .easy-pub-draft-sync input[type="checkbox"] { margin-right: 6px; }
 .easy-pub-draft-sync details { margin-top: 8px; }
 .easy-pub-draft-sync pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow-y: auto; padding: 10px; background: var(--background-secondary); border-radius: 6px; }
+
+/* Current WeChat layout in the Hexo draft confirmation. */
+.ep-wechat-hexo-preview { max-width: 390px; max-height: 50vh; overflow: auto; margin: 16px auto; padding: 18px; background: #fff; color: #292d32; border: 1px solid var(--background-modifier-border); }

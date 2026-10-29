@@ -106,6 +106,7 @@ export class WechatView extends ItemView {
       else void this.run(() => this.refresh(true));
     });
     this.button(tools, "打开本地稿", () => this.run(async () => { if (this.file) await this.app.workspace.getLeaf(false).openFile(this.file); }));
+    this.button(tools, "生成 Hexo 稿（保留排版）", () => this.run(() => this.generateHexo()));
     this.button(tools,"同步正文到其他稿",()=>{if(this.file)void this.plugin.syncDraftBody(this.file).catch(error=>this.message((error as Error).message,true));});
     this.button(tools, "智能排版", () => { void this.openLayout().catch(error => this.message((error as Error).message, true)); });
     this.status = root.createDiv({ cls: "epw-status", text: "等待选择公众号本地稿", attr: { role: "status", "aria-live": "polite" } });
@@ -505,6 +506,21 @@ export class WechatView extends ItemView {
       catch (error) { this.cropModal = undefined; modal.close(); throw error; }
     } finally { this.cropOpening = false; }
   }
+  private async generateHexo() {
+    if (this.closed || !this.file || !this.prepared || this.stale || this.dirty || this.layoutModal || this.cropModal) throw new Error("请先保存设置并刷新公众号预览，再生成 Hexo 稿");
+    const file = this.file, snapshot = this.snapshot, version = this.version, filePath = file.path;
+    const assertFresh = async () => {
+      if (this.closed || this.file !== file || file.path !== filePath || version !== this.version || this.stale || this.dirty
+        || await this.app.vault.read(file) !== snapshot) throw new Error("公众号预览已变化，请刷新后重新生成");
+    };
+    const saved = await this.plugin.generateHexoFromWechat(file, {snapshot, document:this.prepared,
+      article:this.article, cover:this.cover, assertFresh});
+    if (saved && !this.closed) {
+      await this.refresh();
+      this.message("Hexo 稿已保存并保留公众号排版；请在博客中预览确认后发布");
+    }
+  }
+
   private async saveArticle(article?: WechatArticleSettings, assertActive: () => void = () => {}) {
     const file = this.file, snapshot = this.snapshot, snapshotPath = this.snapshotPath;
     if (!file) return;

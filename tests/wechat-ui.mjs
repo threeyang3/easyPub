@@ -1,3 +1,4 @@
+import { runWechatHexoUi } from "./wechat-hexo-ui.mjs";
 import { runAssociationUi } from "./wechat-association-ui.mjs";
 import { chromium } from "playwright-core";
 import { build } from "esbuild";
@@ -299,6 +300,7 @@ try {
   await page.evaluate(() => document.body.classList.remove('theme-dark'));
   await page.screenshot({ path: screenshot.replace(/\.png$/, "-cover.png"), fullPage: true });
   await runLayoutUi(page);
+  await runWechatHexoUi(page);
   await runAssociationUi(page);
   await page.evaluate(async () => {
     window.fixture.setDelay(75);

@@ -75,6 +75,13 @@ export function getTargetPath(
     : normalizePath(`${publishPath}/${sanitizeFileName(title)}.md`);
 }
 
+/** New drafts derived from a WeChat draft stay unpublished until the blog workflow promotes them. */
+export function getHexoDraftTargetPath(settings: PluginSettings, title: string): string {
+  const platform = PLATFORMS.find(item => item.id === "hexo")!;
+  return path.join(settings.hexoRepoPath, "source", "_drafts",
+    path.relative(path.join(settings.hexoRepoPath, "source", "_posts"), getTargetPath(platform, settings, title)));
+}
+
 export function getHexoAssetTargetPath(
   settings: PluginSettings,
   pubId: string,

@@ -133,6 +133,8 @@ export interface ArticleDiff {
 }
 
 export interface PublishAsset {
+  /** Precomputed image or stylesheet bytes, frozen with the approved preview. */
+  bytes?: Uint8Array;
   sourcePath: string;
   targetPath: string;
   contentHash?: string;

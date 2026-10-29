@@ -1,9 +1,10 @@
+import {HexoLocatorIO,locateHexoArticles} from "./hexoLocator";
 import path from "path";
 import { FrontMatterData, Platform, PLATFORMS } from "../types";
 import { getFrontMatterString, parseFrontMatter, stringifyFrontMatter } from "./frontMatter";
 import { validateWechatArticleUrl } from "./wechatArticleUrl";
 
-export interface AssociationIO {
+export interface AssociationIO extends HexoLocatorIO {
   publishDirectoryExists(platform: Platform, directory: string): Promise<boolean>;
   listPublishFiles(platform: Platform, directory: string): Promise<string[]>;
   readPublishFile(platform: Platform, file: string): Promise<string>;
@@ -48,19 +49,11 @@ export async function prepareAssociation(io: AssociationIO, repository: string, 
   value = {...value};
   if (value.publishedUrl) value.publishedUrl = validateWechatArticleUrl(value.publishedUrl);
   const platform = PLATFORMS.find(p => p.id === "hexo")!;
-  const find = async () => {
-    const matches: Array<{path: string; raw: string}> = [];
-    for (const folder of ["_posts", "_drafts"]) {
-      const directory = path.join(repository, "source", folder);
-      if (!await io.publishDirectoryExists(platform, directory)) continue;
-      for (const file of await io.listPublishFiles(platform, directory)) {
-        if (!file.toLowerCase().endsWith(".md")) continue;
-        const raw = await io.readPublishFile(platform, file);
-        if (getFrontMatterString(parseFrontMatter(raw, true).data, "pub_id") === pubId) matches.push({path:file, raw});
-      }
-    }
-    if (matches.length !== 1) throw new Error(matches.length ? "pub_id 有多个 Hexo 匹配，已停止修改" : "未找到对应 pub_id 的 Hexo 发布稿");
-    return matches[0];
+  const find = async (strict=false) => {
+    const matches=await locateHexoArticles(io,repository,pubId,strict);
+    const entry=matches.entries().next().value;
+    if(!entry)throw new Error("未找到对应 pub_id 的 Hexo 发布稿");
+    return {path:entry[0],raw:entry[1]};
   };
   const target = await find();
   const data = parseFrontMatter(target.raw, true).data;
@@ -71,9 +64,24 @@ export async function prepareAssociation(io: AssociationIO, repository: string, 
     async commit(guard: () => void, checkLocal: () => Promise<void>) {
       await io.writePublishFile(platform, target.path, next, target.raw, guard, async () => {
         await checkLocal();
-        const latest = await find();
+        const latest = await find(true);
         if (latest.path !== target.path || latest.raw !== target.raw) throw new Error("Hexo 稿件或匹配关系已变化，请重新预览关联");
       });
     }
   };
+}
+
+/** Read-only UI state; missing targets are normal until a blog draft is created. */
+export async function readAssociationStatus(io:HexoLocatorIO,repository:string,pubId:string,value:Association):Promise<string> {
+  if(!repository)return value.publishedUrl?"目标不存在：请配置 Hexo 仓库":"尚未关联：未配置 Hexo 仓库";
+  try {
+    if(value.publishedUrl)validateWechatArticleUrl(value.publishedUrl);
+    const matches=await locateHexoArticles(io,repository,pubId);
+    const entry=matches.entries().next().value;
+    if(!entry)return value.publishedUrl?"目标不存在：请生成对应 Hexo 稿件":"尚未关联：尚无 Hexo 稿件";
+    const current=associationFields(parseFrontMatter(entry[1],true).data);
+    if(!current.publishedUrl&&!value.publishedUrl)return "未关联";
+    if(current.publishedUrl===value.publishedUrl&&current.commentsEnabled===value.commentsEnabled)return "已关联";
+    return "关联待同步";
+  } catch(error){return `关联冲突：${(error as Error).message}`;}
 }

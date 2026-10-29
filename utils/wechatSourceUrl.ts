@@ -1,10 +1,10 @@
 import path from "path";
 import { FrontMatterData, PLATFORMS } from "../types";
 import { getFrontMatterString, parseFrontMatter } from "./frontMatter";
-import type { AssociationIO } from "./wechatAssociation";
+import { HexoLocatorIO, locateHexoArticles } from "./hexoLocator";
 
 export interface WechatSourceUrl { url?: string; reason?: string }
-type SourceIO = Pick<AssociationIO, "publishDirectoryExists" | "listPublishFiles" | "readPublishFile">;
+type SourceIO = HexoLocatorIO;
 
 /** Read only: calculate from current Hexo configuration, never trust stale publish_url. */
 export async function resolveWechatSourceUrl(io: SourceIO, repository: string, pubId: string,
@@ -13,19 +13,10 @@ export async function resolveWechatSourceUrl(io: SourceIO, repository: string, p
   try {
     if (!path.isAbsolute(repository)) throw new Error("Hexo 仓库路径必须为绝对路径");
     const platform = PLATFORMS.find(item => item.id === "hexo")!;
-    const matches: Array<{ file: string; raw: string; data: FrontMatterData }> = [];
-    for (const folder of ["_posts", "_drafts"]) {
-      const directory = path.join(repository, "source", folder);
-      if (!await io.publishDirectoryExists(platform, directory)) continue;
-      for (const file of await io.listPublishFiles(platform, directory)) {
-        if (!file.toLowerCase().endsWith(".md")) continue;
-        const raw = await io.readPublishFile(platform, file);
-        const data = parseFrontMatter(raw, true).data;
-        if (getFrontMatterString(data, "pub_id") === pubId) matches.push({ file, raw, data });
-      }
-    }
-    if (matches.length !== 1) throw new Error(matches.length ? "同一 pub_id 有多个 Hexo 稿件，请先解决冲突" : "请先生成同一原稿的 Hexo 稿件，再刷新工作台");
-    const target = matches[0];
+    const matches = await locateHexoArticles(io,repository,pubId);
+    const entry = matches.entries().next().value;
+    if (!entry) throw new Error("请先生成同一原稿的 Hexo 稿件，再刷新工作台");
+    const target = {file:entry[0],raw:entry[1],data:parseFrontMatter(entry[1],true).data};
     const url = await generate(repository, target.data, target.file);
     if (await io.readPublishFile(platform, target.file) !== target.raw) throw new Error("Hexo 稿件已变化，请刷新重试");
     if (!url) throw new Error("Hexo 网址尚不能确定，请检查博客配置和稿件固定链接");

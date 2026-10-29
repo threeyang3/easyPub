@@ -1,4 +1,4 @@
-import { Association, prepareAssociation, patchWechatDraftAssociation } from "../utils/wechatAssociation";
+import { Association, readAssociationStatus, prepareAssociation, patchWechatDraftAssociation } from "../utils/wechatAssociation";
 import { validateWechatArticleUrl } from "../utils/wechatArticleUrl";
 import { WechatAssociationModal } from "../modals/WechatAssociationModal";
 import { canReuseWechatPreview } from "../utils/wechatPreviewReuse";
@@ -40,6 +40,9 @@ export class WechatView extends ItemView {
   private file: TFile | null = null;
   private snapshot = "";
   private sourceUrlNotice = "";
+  private associationStatus = "正在检查关联状态…";
+  private associationStatusKey = "";
+  private associationStatusNode?:HTMLElement;
   private snapshotPath = "";
   private prepared?: WechatPreparedDocument;
   private cover?: WechatImage;
@@ -245,6 +248,8 @@ export class WechatView extends ItemView {
       author: saved.author ?? this.plugin.settings.wechat.defaultAuthor,
       digest: saved.digest,
     };
+    const associationPromise=readAssociationStatus(this.plugin,this.plugin.settings.hexoRepoPath,
+      getFrontMatterString(parsed.data,"pub_id")??"",{publishedUrl:article.publishedUrl||undefined,commentsEnabled:article.commentsEnabled});
     let sourceUrlNotice = "";
     if (article.sourceUrl === undefined) {
       const sourceLink = await this.plugin.resolveWechatSourceUrl(getFrontMatterString(parsed.data, "pub_id") ?? "");
@@ -296,7 +301,14 @@ export class WechatView extends ItemView {
       this.identity.textContent = filePath; this.identity.title = filePath;
       if (!reusable) this.preview.innerHTML = previewWechatHtml(prepared.html, prepared.images);
       this.preview.scrollTop = scroll;
+      this.associationStatusKey=JSON.stringify([filePath,snapshot,this.plugin.settings.hexoRepoPath]);
+      const associationKey=this.associationStatusKey;
+      this.associationStatus="正在检查关联状态…";
       this.renderInspector();
+      void associationPromise.then(text=>{
+        if(this.closed||this.associationStatusKey!==associationKey)return;
+        this.associationStatus=text;if(this.associationStatusNode)this.associationStatusNode.textContent=text;
+      });
       if (articleInvalid) this.showPage("article");
       else if (prepared.issues.length || !cover) this.showSettings(true);
       this.message(keepDirty ? "正文预览已更新 · 未保存设置已保留，请保存设置并刷新后同步" : prepared.issues.length ? `预检发现 ${prepared.issues.length} 个问题，请修复后刷新` : !cover ? "请选择封面，保存设置后即可同步" : "预检通过 · 同步以此本地成稿为准");
@@ -341,15 +353,12 @@ export class WechatView extends ItemView {
     }
     const association = parent.createEl("details", {cls:"epw-section"}); association.open = true; association.dataset.page = "article";
     association.createEl("summary", {text:"公众号文章关联"});
-    const status = association.createEl("p", {text:"正在检查关联状态…"});
+    const status = association.createEl("p", {text:this.associationStatus});
+    this.associationStatusNode=status;
     const value: Association = {publishedUrl:this.article.publishedUrl || undefined, commentsEnabled:this.article.commentsEnabled};
     if (this.associationFeedback?.path === this.snapshotPath) association.createEl("p", {
       text:this.associationFeedback.text, cls:this.associationFeedback.error ? "epw-error" : "", attr:{role:"status"},
     });
-    const version = this.snapshot;
-    void prepareAssociation(this.plugin, this.plugin.settings.hexoRepoPath, getFrontMatterString(parseFrontMatter(version).data,"pub_id") ?? "", value)
-      .then(plan => { if (this.snapshot === version) status.textContent = plan.synced ? value.publishedUrl ? "已关联" : "未关联" : "关联待同步"; })
-      .catch(error => { if (this.snapshot === version) status.textContent = `关联冲突或异常：${(error as Error).message}`; });
     this.button(association, value.publishedUrl ? "修改关联" : "关联已发布文章", () => {
       new WechatAssociationModal(this.app, value, next => this.linkArticle(next)).open();
     });

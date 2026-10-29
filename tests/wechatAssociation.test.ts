@@ -1,3 +1,4 @@
+import {readAssociationStatus} from "../utils/wechatAssociation";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, rename } from "node:fs/promises";
 import os from "node:os";
@@ -56,6 +57,10 @@ export async function runWechatAssociationTests() {
       } return result;
     };
     const io:AssociationIO={publishDirectoryExists:async()=>true,listPublishFiles:async(_,dir)=>list(dir),readPublishFile:async(_,file)=>readFile(file,"utf8"),writePublishFile:async(_,file,content,expected,guard,before)=>writePublishedFile(file,content,expected,path.join(root,"backups"),guard,before)};
+    assert.match(await readAssociationStatus(io,root,"missing",{}),/尚未关联/);
+    assert.match(await readAssociationStatus(io,root,"missing",{publishedUrl:url}),/目标不存在/);
+    assert.match(await readAssociationStatus(io,root,"stable",{}),/^未关联$/);
+    assert.match(await readAssociationStatus(io,root,"stable",{publishedUrl:url}),/关联待同步/);
     const plan=await prepareAssociation(io,root,"stable",{publishedUrl:url});assert.equal(plan.path,target);
     await plan.commit(()=>{},async()=>{});
     assert.equal(parseFrontMatter(await readFile(target,"utf8")).data.wechat_article_url,url);
@@ -64,6 +69,7 @@ export async function runWechatAssociationTests() {
     await assert.rejects(()=>prepareAssociation(io,root,"missing",{}),/未找到/);
     await writeFile(path.join(posts,"duplicate.md"),original);
     await assert.rejects(()=>prepareAssociation(io,root,"stable",{}),/多个/);
+    assert.match(await readAssociationStatus(io,root,"stable",{}),/关联冲突/);
     await rm(path.join(posts,"duplicate.md"));
     const stale=await prepareAssociation(io,root,"stable",{});await writeFile(target,linked+"concurrent");
     await assert.rejects(()=>stale.commit(()=>{},async()=>{}),/变化|修改/);

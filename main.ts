@@ -934,7 +934,7 @@ export default class EasyPub extends Plugin {
         || repository !== this.settings.hexoRepoPath || fingerprint !== publishSettingsFingerprint(this.settings, "hexo")
         || configuration !== await fs.readFile(path.join(repository, "_config.yml"), "utf8")) throw new Error("公众号稿或博客配置已变化，请重新生成");
       await this.validatePublishSource(diff, source);
-      const actual = await this.findArticleByPubId(hexo, id, sourceData, source.path);
+      const actual = await this.findArticleByPubId(hexo, id, sourceData, source.path, true);
       if (actual !== existingPath) throw new Error("Hexo 稿件匹配关系已变化，请重新生成");
       await input.assertFresh();
     };

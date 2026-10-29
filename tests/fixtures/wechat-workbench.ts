@@ -88,11 +88,12 @@ const plugin: any = { resolveWechatSourceUrl: async () => sourceUrlResult, app, 
   getWechatApi: () => ({ listDrafts: async () => [{ media_id: "recovered", content: { news_item: [{ title: "恢复测试草稿" }] } }],
     getDraft: async () => [{ title: "恢复测试草稿", content: "<p>远端正文</p>" }] }) };
 const associationFiles = new Map<string,string>([["/blog/source/_drafts/nested/renamed.md", "---\npub_id: local-id\ntitle: Blog title\nabbrlink: ab12\n---\nBlog body"]]);
-let associationFailure = false;
+let associationFailure = false, associationReads = 0;
 Object.assign(plugin, {
   publishDirectoryExists: async () => true,
   listPublishFiles: async (_platform: unknown, directory: string) => [...associationFiles.keys()].filter(file => file.startsWith(directory+"/")),
-  readPublishFile: async (_platform: unknown, file: string) => associationFiles.get(file),
+  readPublishFile: async (_platform: unknown, file: string) => {associationReads++;return associationFiles.get(file);},
+  publishFileVersion: async (_platform:unknown,file:string) => associationFiles.get(file),
   writePublishFile: async (_platform:unknown, file:string, next:string, expected:string, guard:()=>void, before:()=>Promise<void>) => {
     await before();guard();if(associationFailure)throw new Error("fixture write failure");
     if(associationFiles.get(file)!==expected)throw new Error("concurrent edit");associationFiles.set(file,next);
@@ -105,6 +106,7 @@ globals.fixture = { view,
   hexoGenerated: () => hexoGenerated, hexoCommitted: () => hexoCommitted,
   originalLink: (value: {url?:string; reason?:string}) => {sourceUrlResult=value;},
   associationFiles,
+  associationReads:()=>associationReads,
   associationFailure: (value:boolean) => {associationFailure=value;},
   selectNewCover: () => (view as any).selectCover("../../assets/alternate.png"),
   settingsWrites: () => settingsWrites,

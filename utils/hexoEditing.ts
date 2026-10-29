@@ -13,15 +13,26 @@ async function assertDraft(repository: string, target: string) {
   }
 }
 
-function externalFile(app: App, absolute: string): TFile | null {
-  const file = app.vault.getFileByPath?.(`file:${absolute.replace(/\\/g, "/")}`);
-  if (file instanceof TFile) return file;
-  const adapter = app.vault.adapter as unknown as {getFullPath?(p: string): string};
-  return app.vault.getFiles().find(candidate => {
-    try { return adapter.getFullPath && path.resolve(adapter.getFullPath(candidate.path)) === path.resolve(absolute); }
-    catch { return false; }
-  }) ?? null;
+/** One lazy path index per Vault; typing never enumerates all Vault files. */
+class ExternalFiles {
+  private paths?:Map<string,TFile>;
+  constructor(private app:App){}
+  invalidate(){this.paths=undefined;}
+  find(absolute:string):TFile|null {
+    const native=this.app.vault.getFileByPath?.(`file:${absolute.replace(/\\/g,"/")}`);
+    if(native instanceof TFile)return native;
+    const adapter=this.app.vault.adapter as unknown as {getFullPath?(p:string):string};
+    if(!adapter.getFullPath)return null;
+    if(!this.paths) {
+      this.paths=new Map();
+      for(const file of this.app.vault.getFiles())try{this.paths.set(path.resolve(adapter.getFullPath(file.path)),file);}catch{/* Unmapped files have no external path. */}
+    }
+    const file=this.paths.get(path.resolve(absolute));
+    try{return file&&path.resolve(adapter.getFullPath(file.path))===path.resolve(absolute)?file:null;}catch{return null;}
+  }
 }
+const externalFiles=new WeakMap<App,ExternalFiles>();
+function filesFor(app:App){let files=externalFiles.get(app);if(!files){files=new ExternalFiles(app);externalFiles.set(app,files);}return files;}
 
 export async function openHexoInObsidian(app: App, repository: string, target: string): Promise<void> {
   if (!hexoEditorPath(app, repository, target)) throw new Error("请选择博客文章目录中的 Markdown 发布稿");
@@ -29,7 +40,7 @@ export async function openHexoInObsidian(app: App, repository: string, target: s
   const existing = app.workspace.getLeavesOfType("markdown").find(leaf =>
     (leaf.view as MarkdownView).file && hexoEditorPath(app, repository, (leaf.view as MarkdownView).file!.path) === path.resolve(target));
   if (existing) { await app.workspace.revealLeaf(existing); return; }
-  const file = externalFile(app, target);
+  const file = filesFor(app).find(target);
   if (!file) throw new Error("当前 Obsidian 无法打开外部文件，请升级 Obsidian，或通过 FolderBridge 挂载博客文章目录");
   const leaf = app.workspace.getLeaf("tab");
   await leaf.openFile(file, { state: { mode: "source", source: false } });
@@ -122,23 +133,36 @@ export async function pasteHexoImages(app: App, repository: () => string, event:
   } finally { app.workspace.offref(ref); }
 }
 
-/** Resolve blog-root image URLs in both rendered Markdown and live-preview image widgets. */
+/** Resolve only newly inserted images or changed src attributes, with a lazy Vault path index. */
 export function registerHexoEditing(plugin: Plugin, repository: () => string) {
-  const app = plugin.app;
+  const app = plugin.app, files=filesFor(app);
   plugin.registerEvent(app.workspace.on("editor-paste", (event, editor, info) => {
     void pasteHexoImages(app, repository, event, editor, info).catch(error => new Notice((error as Error).message));
   }));
+  plugin.registerEvent(app.vault.on("create",()=>files.invalidate()));
+  plugin.registerEvent(app.vault.on("rename",()=>files.invalidate()));
+  plugin.registerEvent(app.vault.on("delete",()=>files.invalidate()));
+  let context:{repo:string;version:string;value:Promise<{root:string;realRoot:string}>}|undefined;
+  const configuration=async(repo:string)=>{
+    const stat=await fs.stat(path.join(repo,"_config.yml"),{bigint:true});
+    const version=`${stat.ino}:${stat.ctimeNs}:${stat.mtimeNs}:${stat.size}`;
+    if(!context||context.repo!==repo||context.version!==version)context={repo,version,value:Promise.all([getHexoRootPath(repo),fs.realpath(repo)]).then(([root,realRoot])=>({root,realRoot}))};
+    try{return await context.value;}catch(error){context=undefined;throw error;}
+  };
+  const selector="img, .internal-embed[src]";
   const fixImages = async (container: HTMLElement, source: string) => {
     const repo = repository();
-    const draft = hexoEditorPath(app, repo, source);
-    if (!draft) return;
-    const images = Array.from(container.querySelectorAll<HTMLElement>("img, .internal-embed[src]"));
-    if (container.matches("img, .internal-embed[src]")) images.unshift(container);
-    if (!images.length) return;
-    const root = await getHexoRootPath(repo), realRoot = await fs.realpath(repo);
-    for (const image of images) {
+    if (!hexoEditorPath(app, repo, source)) return;
+    const images = Array.from(container.querySelectorAll<HTMLElement>(selector));
+    if (container.matches(selector)) images.unshift(container);
+    const pending=images.filter(image=>{
+      const src=image.getAttribute("src")??"";
+      return (src.startsWith("/")||src.startsWith("app://"))&&!(image.dataset.easyPubImage===src&&image.querySelector("img"));
+    });
+    if(!pending.length)return;
+    const {root,realRoot}=await configuration(repo);
+    for (const image of pending) {
       const original = image.getAttribute("src") || "";
-      if (image.dataset.easyPubImage === original && image.querySelector("img")) continue;
       let url = original;
       if (url.startsWith("app://")) { try { url = new URL(url).pathname; } catch { continue; } }
       if (!url.startsWith(root)) continue;
@@ -149,41 +173,62 @@ export function registerHexoEditing(plugin: Plugin, repository: () => string) {
       if (!isWithinPath(path.join(repo, "source"), absolute)) continue;
       try {
         if (!isWithinPath(path.join(realRoot, "source"), await fs.realpath(absolute))) continue;
-        const file = externalFile(app, absolute);
-        if (file && image.getAttribute("src") === original && repo === repository()) {
+        const file = files.find(absolute);
+        if (file && image.getAttribute("src") === original && repo === repository() && hexoEditorPath(app,repo,source)) {
           const resource = app.vault.getResourcePath(file);
           if (image.tagName === "IMG") (image as HTMLImageElement).src = resource;
           else {
             const img = image.ownerDocument.createElement("img");
             img.src = resource; img.alt = image.getAttribute("alt") || "图片";
             image.classList.remove("file-embed", "mod-empty-attachment");
-            image.classList.add("image-embed");
-            image.dataset.easyPubImage = original;
-            image.replaceChildren(img);
+            image.classList.add("image-embed");image.dataset.easyPubImage = original;image.replaceChildren(img);
           }
         }
       } catch { /* A missing image remains visible as a broken reference. */ }
     }
   };
   plugin.registerMarkdownPostProcessor((element, context) => fixImages(element, context.sourcePath));
-  const watched = new Map<MarkdownView, MutationObserver>();
+  const watched = new Map<MarkdownView,{observers:MutationObserver[];source:string;repo:string;roots:HTMLElement[]}>();
   const refresh = () => {
     const views = app.workspace.getLeavesOfType("markdown").map(leaf => leaf.view as MarkdownView);
-    for (const [view, observer] of watched) {
-      if (!views.includes(view) || !view.file || !hexoEditorPath(app, repository(), view.file.path)) {
-        observer.disconnect(); watched.delete(view);
+    for (const [view, entry] of watched) {
+      if (!views.includes(view)||!view.file||view.file.path!==entry.source||repository()!==entry.repo
+        ||entry.roots.some(root=>!view.contentEl.contains(root))) {
+        entry.observers.forEach(observer=>observer.disconnect());watched.delete(view);
       }
     }
     for (const view of views) {
-      if (watched.has(view) || !view.file || !hexoEditorPath(app, repository(), view.file.path)) continue;
-      const run = () => { if (view.file) void fixImages(view.contentEl, view.file.path).catch(() => {}); };
-      const observer = new MutationObserver(run);
-      observer.observe(view.contentEl, {subtree: true, childList: true, attributes: true, attributeFilter: ["src"]});
-      watched.set(view, observer); run();
+      if (watched.has(view)||!view.file||!hexoEditorPath(app,repository(),view.file.path)) continue;
+      const roots=Array.from(view.contentEl.querySelectorAll<HTMLElement>(".cm-content, .markdown-preview-view"));
+      if(!roots.length){const source=view.contentEl.querySelector<HTMLElement>(".markdown-source-view");if(source)roots.push(source);}
+      if(!roots.length)continue;
+      const entry={source:view.file.path,repo:repository(),roots,observers:[] as MutationObserver[]};
+      watched.set(view,entry);
+      const pending=new Set<HTMLElement>();let scheduled=false;
+      const enqueue=(node:HTMLElement)=>{
+        if(!node.matches(selector)&&!node.querySelector(selector))return;
+        pending.add(node);
+        if(scheduled)return;scheduled=true;
+        queueMicrotask(()=>{
+          scheduled=false;const nodes=[...pending];pending.clear();
+          if(watched.get(view)!==entry||view.file?.path!==entry.source||repository()!==entry.repo)return;
+          for(const element of nodes)void fixImages(element,entry.source).catch(()=>{});
+        });
+      };
+      for(const root of roots){
+        const observer=new MutationObserver(records=>{
+          for(const record of records){
+            if(record.type==="attributes")enqueue(record.target as HTMLElement);
+            else for(const node of Array.from(record.addedNodes))if(node.nodeType===1)enqueue(node as HTMLElement);
+          }
+        });
+        observer.observe(root,{subtree:true,childList:true,attributes:true,attributeFilter:["src"]});entry.observers.push(observer);
+        void fixImages(root,entry.source).catch(()=>{});
+      }
     }
   };
-  plugin.registerEvent(app.workspace.on("layout-change", refresh));
-  plugin.registerEvent(app.workspace.on("file-open", refresh));
+  plugin.registerEvent(app.workspace.on("layout-change",refresh));
+  plugin.registerEvent(app.workspace.on("file-open",refresh));
   app.workspace.onLayoutReady(refresh);
-  plugin.register(() => { watched.forEach(observer => observer.disconnect()); watched.clear(); });
+  plugin.register(()=>{watched.forEach(entry=>entry.observers.forEach(observer=>observer.disconnect()));watched.clear();files.invalidate();context=undefined;});
 }

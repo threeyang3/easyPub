@@ -1,3 +1,4 @@
+import { applySyncChangesWithOrigins, SyncChange } from "./draftSyncDiff";
 import fs from "fs/promises";
 import path from "path";
 import { createHash } from "crypto";
@@ -9,7 +10,8 @@ import { getHexoRootPath } from "./linkUtils";
 
 export interface SyncLocation { path: string; platform?: Platform }
 export interface SyncAsset { path: string; bytes: Buffer; hash: string; external: boolean; name: string }
-export interface CanonicalBody { body: string; originals: Map<string,string> }
+export interface ImageReference { canonical:string; raw:string; image?:SyncImage }
+export interface CanonicalBody { body: string; originals: Map<number,ImageReference> }
 interface SyncImage { bytes: Buffer; hash: string; extension: string; vaultPath?: string; read: () => Promise<Buffer> }
 export const syncHash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 const altText = (value: string) => value.replace(/[\[\]\\]/g,"\\$&");
@@ -33,6 +35,7 @@ export function syncAttachmentPath(configuration: string | null, target: string,
 
 export class DraftSyncImages {
   private images = new Map<string,SyncImage>();
+  private originals = new Set<SyncImage>();
   constructor(private app: App, private settings: PluginSettings, private pubId: string) {}
 
   private async localImage(source: string, location: SyncLocation): Promise<SyncImage> {
@@ -64,11 +67,14 @@ export class DraftSyncImages {
     if (!IMAGE_EXTENSIONS.has(extension)) throw new Error(`不支持的图片附件：${source}`);
     const bytes = await read();
     if (!bytes.length || bytes.length > 50*1024*1024) throw new Error("图片为空或超过 50 MB");
-    return {bytes,hash:syncHash(bytes),extension,vaultPath,read};
+    const image = {bytes,hash:syncHash(bytes),extension,vaultPath,read};
+    this.originals.add(image);
+    return image;
   }
 
   async canonical(body: string, location: SyncLocation): Promise<CanonicalBody> {
-    const originals = new Map<string,string>(), definitions = new Map<string,string>();
+    body = body.replace(/\r\n/g,"\n");
+    const originals = new Map<number,ImageReference>(), definitions = new Map<string,string>();
     const replacements: Array<{start:number;end:number;source:string;alt:string}> = [], blocked: Array<[number,number]> = [];
     const tree = parseWechatMarkdown(body);
     const visit = (node: MarkdownNode) => {
@@ -94,27 +100,47 @@ export class DraftSyncImages {
       if(!IMAGE_EXTENSIONS.has(source.split(".").pop()?.toLowerCase()??""))continue;
       replacements.push({start:match.index,end:wiki.lastIndex,source,alt:alias&&!/^\d+(x\d+)?$/.test(alias)?alias:path.basename(source,path.extname(source))});
     }
-    for(const replacement of replacements.sort((a,b)=>b.start-a.start)) {
-      let url=replacement.source;
+    let result="", last=0;
+    for(const replacement of replacements.sort((a,b)=>a.start-b.start)) {
+      let url=replacement.source, referenceImage:SyncImage|undefined;
       if(!/^https?:\/\//i.test(url)) {
         const image=await this.localImage(url,location),key=`easy-pub-sync-image://${image.hash}.${image.extension}`;
-        const known=this.images.get(key);if(!known||image.vaultPath)this.images.set(key,image);
+        if(!this.images.has(key))this.images.set(key,image);referenceImage=image;
         url=key;
       } else {
         const parsed=new URL(url);if(parsed.username||parsed.password)throw new Error("图片网址不能包含账号或密码");
         // A verified local PicGo cache bridges URL-vs-local references without downloading remote images.
         const cached=Object.entries(this.settings.picgoImageCache).find(([,entry])=>entry.url===url);
-        if(cached){try{const image=await this.localImage(cached[0],{path:""});if(image.hash===cached[1].hash){const key=`easy-pub-sync-image://${image.hash}.${image.extension}`;this.images.set(key,image);url=key;}}catch{/* An unavailable or changed local original is not equivalent to the remote URL. */}}
+        if(cached){try{const image=await this.localImage(cached[0],{path:""});if(image.hash===cached[1].hash){const key=`easy-pub-sync-image://${image.hash}.${image.extension}`;if(!this.images.has(key))this.images.set(key,image);referenceImage=image;url=key;}}catch{/* An unavailable or changed local original is not equivalent to the remote URL. */}}
       }
       const canonical=imageMarkdown(replacement.alt,url);
-      originals.set(canonical,body.slice(replacement.start,replacement.end));
-      body=body.slice(0,replacement.start)+canonical+body.slice(replacement.end);
+      result+=body.slice(last,replacement.start);
+      originals.set(result.length,{canonical,raw:body.slice(replacement.start,replacement.end),image:referenceImage});
+      result+=canonical;last=replacement.end;
     }
-    return {body:body.replace(/\r\n/g,"\n"),originals};
+    return {body:result+body.slice(last),originals};
   }
 
-  async materialize(canonical: string, target: SyncLocation, original: CanonicalBody, configuration: string|null): Promise<{body:string;assets:SyncAsset[]}> {
+  async materialize(canonical: string, target: SyncLocation, original: CanonicalBody, configuration: string|null, changes?:SyncChange[], sender?:CanonicalBody): Promise<{body:string;assets:SyncAsset[]}> {
     const assets=new Map<string,SyncAsset>();
+    const references=new Map<number,{reference:ImageReference;reuse:boolean}>();
+    if(changes&&sender) {
+      const applied=applySyncChangesWithOrigins(original.body,changes);
+      if(applied.body!==canonical)throw new Error("图片引用位置与预览不一致，请重新预览");
+      const offsets=(body:string)=>{let offset=0;return body.split("\n").map(line=>{const start=offset;offset+=line.length+1;return start;});};
+      const starts={target:offsets(original.body),sender:offsets(sender.body)};
+      const byLine=(document:CanonicalBody,starts:number[])=>{
+        const lines=new Map<number,Array<[number,ImageReference]>>();let line=0;
+        for(const [offset,reference]of document.originals){while(line+1<starts.length&&starts[line+1]<=offset)line++;const row=lines.get(line)??[];row.push([offset-starts[line],reference]);lines.set(line,row);}return lines;
+      };
+      const rows={target:byLine(original,starts.target),sender:byLine(sender,starts.sender)};
+      let offset=0;
+      for(const [index,line]of canonical.split("\n").entries()) {
+        const origin=applied.origins[index];
+        if(origin)for(const [column,reference]of rows[origin.side].get(origin.line)??[])references.set(offset+column,{reference,reuse:origin.side==="target"});
+        offset+=line.length+1;
+      }
+    } else if(original.body===canonical) for(const [offset,reference]of original.originals) references.set(offset,{reference,reuse:true});
     const blocked:Array<[number,number]>=[];
     const visit=(node:MarkdownNode)=>{if(["code","inlineCode","html"].includes(node.type)){if(node.position?.start.offset!==undefined&&node.position.end.offset!==undefined)blocked.push([node.position.start.offset,node.position.end.offset]);return;}node.children?.forEach(visit);};
     visit(parseWechatMarkdown(canonical));
@@ -123,10 +149,11 @@ export class DraftSyncImages {
     while((match=pattern.exec(canonical))) {
       if(blocked.some(([start,end])=>match!.index>=start&&match!.index<end))continue;
       result+=canonical.slice(last,match.index);
-      const raw=original.originals.get(match[0]);
-      if(raw!==undefined)result+=raw;
+      const binding=references.get(match.index);
+      const reference=binding?.reference.canonical===match[0]?binding:undefined;
+      if(reference?.reuse)result+=reference.reference.raw;
       else if(match[2].startsWith("easy-pub-sync-image://")) {
-        const image=this.images.get(match[2]);if(!image)throw new Error("同步图片已失效，请重新预览");
+        const image=reference?.reference.image??this.images.get(match[2]);if(!image)throw new Error("同步图片已失效，请重新预览");
         let url:string;
         if(target.platform?.id==="hexo") {
           const destination=getHexoAssetTargetPath(this.settings,this.pubId,`sync.${image.extension}`,image.hash);
@@ -153,6 +180,6 @@ export class DraftSyncImages {
   }
 
   async verify():Promise<void> {
-    for(const image of this.images.values())if(syncHash(await image.read())!==image.hash)throw new Error("图片在预览后发生变化，请重新预览");
+    for(const image of this.originals)if(syncHash(await image.read())!==image.hash)throw new Error("图片在预览后发生变化，请重新预览");
   }
 }

@@ -51,6 +51,7 @@ import { assertPublishUnchanged, completeControlRoomMetadata } from "./utils/pub
 import { writeImmutableAsset } from "./utils/publishFiles";
 import { withTimeout } from "./utils/async";
 import { assertPublishIdentity, PublishIdentityIndex } from "./utils/publishIdentity";
+import { locateHexoArticles, invalidateHexoLocator } from "./utils/hexoLocator";
 import { PublishLocator } from "./utils/publishLocator";
 import { PublishStore } from "./utils/publishStore";
 import { PlatformSelectModal } from "./modals/PlatformSelectModal";
@@ -133,7 +134,7 @@ export default class EasyPub extends Plugin {
     this.registerView(HEXO_PREVIEW_VIEW, leaf => new HexoPreviewView(leaf));
     this.addCommand({ id: "preview-hexo", name: "预览 Hexo 发布效果", callback: () => void this.previewHexoArticle() });
     this.identityIndex = new PublishIdentityIndex();
-    const invalidateIdentity = (file: {path: string}, oldPath?: string) => { this.identityIndex?.invalidate(file); this.publishLocators?.forEach(locator => locator.invalidate(file.path, oldPath)); };
+    const invalidateIdentity = (file: {path: string}, oldPath?: string) => { this.identityIndex?.invalidate(file); invalidateHexoLocator(this,file.path,oldPath); this.publishLocators?.forEach(locator => locator.invalidate(file.path, oldPath)); };
     this.registerEvent(this.app.vault.on("create", invalidateIdentity));
     this.registerEvent(this.app.vault.on("modify", invalidateIdentity));
     this.registerEvent(this.app.vault.on("delete", invalidateIdentity));
@@ -251,7 +252,7 @@ export default class EasyPub extends Plugin {
     } finally { this.pubIdBatchInProgress = false; }
   }
 
-  onunload() { clearWechatLayoutCache(); this.wechatAiSessionKey = ""; this.wechatSessionSecret = ""; this.settings.picgoServerSecret = ""; this.wechatApi = undefined; this.identityIndex?.clear(); this.publishLocators?.forEach(locator => locator.invalidate()); }
+  onunload() { clearWechatLayoutCache(); this.wechatAiSessionKey = ""; this.wechatSessionSecret = ""; this.settings.picgoServerSecret = ""; this.wechatApi = undefined; this.identityIndex?.clear(); invalidateHexoLocator(this); this.publishLocators?.forEach(locator => locator.invalidate()); }
 
   openWechatAiSettings(finished?: () => void) { new WechatAiSettingsModal(this, finished).open(); }
 
@@ -803,8 +804,15 @@ export default class EasyPub extends Plugin {
     platform: Platform,
     pubId: string,
     meta: FrontMatterData,
-    sourcePath?: string
+    sourcePath?: string,
+    strict = false
   ): Promise<string | null> {
+    if(platform.id==="hexo") {
+      const matches=await locateHexoArticles(this,this.settings.hexoRepoPath,pubId,strict);
+      if(sourcePath)await assertPublishIdentity(this.app,sourcePath,pubId,[...matches].map(([path,content])=>({path,content})),
+        PLATFORMS.filter(platform=>!platform.isExternal).map(platform=>getPublishPath(platform,this.settings)),this.identityIndex);
+      return matches.keys().next().value??null;
+    }
     const subFolder = getSubFolder(platform, meta);
     const candidates = new Set<string>();
 
@@ -959,7 +967,7 @@ export default class EasyPub extends Plugin {
         ? await this.readPublishFile(platform, diff.targetPath) : null;
       assertPublishUnchanged(diff.targetContent, current);
       {
-        const actualPath = await this.findArticleByPubId(platform, diff.pub_id, diff.meta, sourceFile.path);
+        const actualPath = await this.findArticleByPubId(platform, diff.pub_id, diff.meta, sourceFile.path, true);
         if (actualPath && path.resolve(actualPath) !== path.resolve(diff.targetPath)) {
           throw new Error("文章已移动到其他位置，请重新发布以保留其状态");
         }
@@ -1153,6 +1161,10 @@ export default class EasyPub extends Plugin {
 
   publishDirectoryExists(platform: Platform, directoryPath: string): Promise<boolean> {
     return this.getPublishStore().publishDirectoryExists(platform, directoryPath);
+  }
+
+  publishFileVersion(platform:Platform,filePath:string):Promise<string|undefined> {
+    return this.getPublishStore().publishFileVersion(platform,filePath);
   }
 
   readPublishFile(platform: Platform, filePath: string): Promise<string> {

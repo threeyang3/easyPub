@@ -1,6 +1,6 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
-export interface BodyChange { start: number; end: number; before: string[]; after: string[]; imagesOnly: boolean; order?:number; imageRows?:boolean[] }
-export interface SyncChange extends BodyChange { status: "ready" | "conflict" | "already"; targetStart: number; targetEnd: number; targetText: string[]; replacement: string[] }
+export interface BodyChange { start: number; end: number; before: string[]; after: string[]; imagesOnly: boolean; order?:number; imageRows?:boolean[]; afterStart?:number }
+export interface SyncChange extends BodyChange { status: "ready" | "conflict" | "already"; targetStart: number; targetEnd: number; targetText: string[]; replacement: string[]; replacementOrigins?:Array<number|null> }
 
 /** Exact line diff, bounded so a pasted/generated document cannot stall the workbench. */
 export function bodyChanges(before: string, after: string): BodyChange[] {
@@ -32,7 +32,7 @@ export function bodyChanges(before: string, after: string): BodyChange[] {
     if(start===end&&from===to)continue;
     const old=allA.slice(start,end),next=allB.slice(from,to);
     const imageRows=next.map((line,index)=>actualImages.has(from+index)&&/^!\[[^\n]*\]\([^\n]+\)\s*$/.test(line.trim()));
-    changes.push({start, end, before: old, after: next, imageRows,
+    changes.push({start, end, before: old, after: next, afterStart:from, imageRows,
       imagesOnly: old.every(line => !line.trim()) && imageRows.some(Boolean)
         && next.every((line,index) => !line.trim() || imageRows[index])});
   }
@@ -45,9 +45,9 @@ export function bodyChanges(before: string, after: string): BodyChange[] {
     while(end>start&&(!change.after[end-1].trim()||change.imageRows?.[end-1]))end--;
     if(!change.imageRows?.slice(end).some(Boolean))end=change.after.length;
     return [
-      ...(start?[{start:change.start,end:change.start,before:[],after:change.after.slice(0,start),imagesOnly:true}]:[]),
-      {...change,after:change.after.slice(start,end)},
-      ...(end<change.after.length?[{start:change.end,end:change.end,before:[],after:change.after.slice(end),imagesOnly:true}]:[]),
+      ...(start?[{start:change.start,end:change.start,before:[],after:change.after.slice(0,start),afterStart:change.afterStart,imagesOnly:true}]:[]),
+      {...change,after:change.after.slice(start,end),afterStart:(change.afterStart??0)+start},
+      ...(end<change.after.length?[{start:change.end,end:change.end,before:[],after:change.after.slice(end),afterStart:(change.afterStart??0)+end,imagesOnly:true}]:[]),
     ];
   });
   return separated.map((change,order)=>({...change,order}));
@@ -71,16 +71,25 @@ export function reconcileChanges(base: string, sender: string, target: string): 
     const targetStart = offset(start, false), targetEnd = offset(end, true);
     // An overlapping target edit is shown as a whole replaceable region, including unchanged surrounding base lines.
     const baseLines = base.split("\n");
-    return {...change, replacement: [...baseLines.slice(start, change.start), ...change.after, ...baseLines.slice(change.end, end)],
+    return {...change, replacementOrigins:[...Array(change.start-start).fill(null), ...change.after.map((_,index)=>(change.afterStart??0)+index), ...Array(end-change.end).fill(null)], replacement: [...baseLines.slice(start, change.start), ...change.after, ...baseLines.slice(change.end, end)],
       status: identical ? "already" : overlaps.length ? "conflict" : "ready",
       targetStart, targetEnd, targetText: targetLines.slice(targetStart, targetEnd)};
   });
 }
 
 export function applySyncChanges(target: string, changes: SyncChange[]): string {
+  return applySyncChangesWithOrigins(target,changes).body;
+}
+export function applySyncChangesWithOrigins(target: string, changes: SyncChange[]) {
   const lines = target.split("\n");
+  const origins:Array<{side:"target"|"sender";line:number}|null> = lines.map((_,line)=>({side:"target",line}));
   const sorted = changes.filter(change => change.status !== "already").sort((a,b) => b.targetStart - a.targetStart || b.targetEnd - a.targetEnd || (b.order??0)-(a.order??0));
   for (let i=1;i<sorted.length;i++) if (sorted[i].targetEnd > sorted[i-1].targetStart) throw new Error("所选改动重叠，请分次同步并重新预览");
-  for (const change of sorted) lines.splice(change.targetStart, change.targetEnd-change.targetStart, ...change.replacement);
-  return lines.join("\n");
+  for (const change of sorted) {
+    lines.splice(change.targetStart, change.targetEnd-change.targetStart, ...change.replacement);
+    origins.splice(change.targetStart,change.targetEnd-change.targetStart,...change.replacement.map((_,index)=>{
+      const line=change.replacementOrigins?.[index];return line===undefined||line===null?null:{side:"sender" as const,line};
+    }));
+  }
+  return {body:lines.join("\n"),origins};
 }

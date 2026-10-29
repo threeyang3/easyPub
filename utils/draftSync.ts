@@ -36,6 +36,32 @@ async function adapterWrite(app:App,target:string,content:string) {
   await adapter.write(target,content);
 }
 
+interface BaselineRecovery {
+  schemaVersion:1; pubId:string; sender:string; target:string;
+  previousTargetHash:string; nextTargetHash:string; previousBaseline:string|null; nextBaseline:string;
+}
+async function recoverBaseline(app:App, file:string, targetSnapshot:string, pubId:string, sender:string, target:string) {
+  const journal=`${file}.pending`;
+  if(!await app.vault.adapter.exists(journal))return;
+  const raw=await app.vault.adapter.read(journal);
+  let record:BaselineRecovery;
+  try {
+    record=JSON.parse(raw);
+    if(record.schemaVersion!==1||record.pubId!==pubId||record.sender!==sender||record.target!==target
+      ||typeof record.previousTargetHash!=="string"||typeof record.nextTargetHash!=="string"
+      ||!(record.previousBaseline===null||typeof record.previousBaseline==="string")||typeof record.nextBaseline!=="string")throw new Error();
+    const next=JSON.parse(record.nextBaseline);
+    if(next.pubId!==pubId||next.sender!==sender||next.target!==target||typeof next.body!=="string"||syncHash(next.body)!==next.hash)throw new Error();
+  } catch {throw new Error(`同步恢复记录无效，请保留记录并核对备份：${journal}`);}
+  const hash=syncHash(targetSnapshot);
+  const baseline=hash===record.nextTargetHash?record.nextBaseline:hash===record.previousTargetHash?record.previousBaseline:undefined;
+  if(baseline===undefined)throw new Error(`稿件在同步中断后发生变化，请先核对稿件备份和恢复记录：${journal}`);
+  if(baseline===null) {if(await app.vault.adapter.exists(file))await app.vault.adapter.remove(file);}
+  else {await adapterWrite(app,file,baseline);if(await app.vault.adapter.read(file)!==baseline)throw new Error(`同步基准恢复未完成：${journal}`);}
+  if(await app.vault.adapter.read(journal)!==raw)throw new Error("同步恢复记录已变化，请重新打开同步窗口");
+  await app.vault.adapter.remove(journal);
+}
+
 export class DraftSyncSession {
   readonly targets:SyncTarget[]=[];
   private images!:DraftSyncImages;
@@ -103,6 +129,7 @@ export class DraftSyncSession {
       const location={platform:target,path:targetPath};
       const canonical=await this.images.canonical(parsed.content,location);
       const baselinePath=`${this.storage}/baselines/${syncHash(JSON.stringify([this.pubId,this.sender,target.id,targetPath]))}.json`;
+      await recoverBaseline(app,baselinePath,snapshot,this.pubId,this.sender.path,targetPath);
       const baselineSnapshot=await app.vault.adapter.exists(baselinePath)?await app.vault.adapter.read(baselinePath):null;
       let baseline=sourceBody.body;
       if(baselineSnapshot!==null) {
@@ -122,7 +149,7 @@ export class DraftSyncSession {
     const selected=target.changes.filter((change,i)=>indices.has(i)&&change.status!=="already");
     if(!selected.length)throw new Error("请至少选择一项尚未同步的改动");
     const canonical=applySyncChanges(target.canonical.body,selected);
-    const prepared=await this.images.materialize(canonical,target.location,target.canonical,this.configuration);
+    const prepared=await this.images.materialize(canonical,target.location,target.canonical,this.configuration,selected,this.senderCanonical);
     const parsed=parseFrontMatter(target.snapshot,true);
     const body=target.snapshot.includes("\r\n")?prepared.body.replace(/\r?\n/g,"\r\n"):prepared.body;
     const layout=target.location.platform.id==="wechat"?preserveSyncedWechatLayout(parsed.content,body,parsed.data):{data:parsed.data,notice:undefined};
@@ -184,14 +211,26 @@ export class DraftSyncSession {
         await this.images.verify();
         const guard=()=>{assertActive();if(this.changed||this.settingsKey()!==this.settingsSnapshot||this.file.path!==this.filePath||this.source.path!==this.sourcePath)throw new Error("原稿、当前稿或设置在写入前发生变化，已停止同步");
           for(const leaf of app.workspace.getLeavesOfType("markdown")){const view=leaf.view as MarkdownView;if(view.file&&[this.sender.path,this.sourcePath].includes(this.editorPath(view.file))&&view.getViewData()!==(this.editorPath(view.file)===this.sender.path?this.senderSnapshot:this.sourceSnapshot))throw new Error("原稿或当前稿有新的编辑，已停止同步");}};
-        await this.plugin.writePublishFile(preview.target.location.platform,preview.target.location.path,preview.content,preview.target.snapshot,guard,
-          async()=>{await checkTarget(preview);await this.images.verify();});
-        completed.push(preview.target.location.platform.name);
-        // Advance only selected deltas; unchecked changes remain available on the next run.
+        // Save a recovery record before the target: a failed baseline write must not
+        // leave a truncated baseline or make the next session guess what committed.
         const baseline=preview.target.baseline.split("\n");
         for(const change of [...preview.selected].sort((a,b)=>b.start-a.start||b.end-a.end||(b.order??0)-(a.order??0)))baseline.splice(change.start,change.end-change.start,...change.after);
         const body=baseline.join("\n");
-        await adapterWrite(app,preview.target.baselinePath,JSON.stringify({schemaVersion:1,pubId:this.pubId,sender:this.sender.path,target:preview.target.location.path,body,hash:syncHash(body)}));
+        const nextBaseline=JSON.stringify({schemaVersion:1,pubId:this.pubId,sender:this.sender.path,target:preview.target.location.path,body,hash:syncHash(body)});
+        const journal=`${preview.target.baselinePath}.pending`;
+        if(await app.vault.adapter.exists(journal))throw new Error("有待恢复的同步记录，请重新打开同步窗口");
+        const record=JSON.stringify({schemaVersion:1,pubId:this.pubId,sender:this.sender.path,target:preview.target.location.path,
+          previousTargetHash:syncHash(preview.target.snapshot),nextTargetHash:syncHash(preview.content),previousBaseline:preview.target.baselineSnapshot,nextBaseline});
+        await adapterWrite(app,journal,record);
+        if(await app.vault.adapter.read(journal)!==record)throw new Error("同步恢复记录写入失败，目标稿未被修改");
+        await this.plugin.writePublishFile(preview.target.location.platform,preview.target.location.path,preview.content,preview.target.snapshot,guard,
+          async()=>{await checkTarget(preview);await this.images.verify();if(await app.vault.adapter.read(journal)!==record)throw new Error("同步恢复记录已变化，已停止写入");});
+        completed.push(preview.target.location.platform.name);
+        try {
+          await adapterWrite(app,preview.target.baselinePath,nextBaseline);
+          if(await app.vault.adapter.read(preview.target.baselinePath)!==nextBaseline)throw new Error("基准校验失败");
+          await app.vault.adapter.remove(journal);
+        } catch(error) {throw new Error(`稿件正文已保存，同步基准未完成；重新打开同步窗口会依据当前稿件恢复基准。记录：${journal}。${(error as Error).message}`);}
       }
       return completed;
     } catch(error) {throw new Error(`${(error as Error).message}${completed.length?`。已完成：${completed.join("、")}；其余稿件未完成，请重新检查后继续。`:"。未完成的稿件保留原文，已导入图片予以保留。"}`);}

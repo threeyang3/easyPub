@@ -1,3 +1,5 @@
+import { runHexoLocatorTests } from "./hexoLocator.test";
+import { runHexoPreviewPerformanceTests } from "./hexoPreviewPerformance.test";
 import { runPerformanceTests } from "./performance.test";
 import { runHexoEditingTests } from "./hexoEditing.test";
 import { runDraftSyncTests } from "./draftSync.test";
@@ -49,6 +51,8 @@ import { runArticlePropertyTests } from "./articleProperties.test";
 
 async function run() {
   await runPerformanceTests();
+  await runHexoPreviewPerformanceTests();
+  await runHexoLocatorTests();
   runHexoFormattingTests();
   await runAttachmentImportTests();
   await runPublishingWorkbenchTests();

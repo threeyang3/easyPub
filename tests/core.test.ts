@@ -1,4 +1,9 @@
+import {runSyncImageMemoryTests} from "./syncImageMemory.test";
+import { runHexoLocatorTests } from "./hexoLocator.test";
+import { runHexoPreviewPerformanceTests } from "./hexoPreviewPerformance.test";
 import { runPerformanceTests } from "./performance.test";
+import { runHexoEditingTests } from "./hexoEditing.test";
+import { runDraftSyncTests } from "./draftSync.test";
 import { runAttachmentImportTests } from "./attachmentImport.test";
 import { runPublishingWorkbenchTests } from "./publishingWorkbench.test";
 import { runHexoFormattingTests } from "./hexoFormatting.test";
@@ -47,9 +52,14 @@ import { runArticlePropertyTests } from "./articleProperties.test";
 
 async function run() {
   await runPerformanceTests();
+  await runHexoPreviewPerformanceTests();
+  await runHexoLocatorTests();
   runHexoFormattingTests();
   await runAttachmentImportTests();
   await runPublishingWorkbenchTests();
+  await runHexoEditingTests();
+  await runDraftSyncTests();
+  await runSyncImageMemoryTests();
   await runStructureTests();
   await runArticlePropertyTests();
   await runControlRoomLauncherTests();

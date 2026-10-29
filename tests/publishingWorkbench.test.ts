@@ -114,10 +114,14 @@ export async function runPublishingWorkbenchTests() {
   const draft = Object.assign(new TFile(), {path:'发布/draft.md',extension:'md'});
   let sourceBody = '---\npub_id: other-id\n---\nWrong source';
   const pluginResolver = Object.create(EasyPub.prototype) as EasyPub;
-  Object.assign(pluginResolver, {app: {metadataCache: {getFirstLinkpathDest:() => source}, vault: {read:async () => sourceBody}}});
+  let metadataFound=true;
+  Object.assign(pluginResolver, {app: {metadataCache: {getFirstLinkpathDest:() => metadataFound?source:null}, vault: {read:async () => sourceBody,getAbstractFileByPath:(p:string)=>p===source.path?source:null}}});
   assert.equal(await pluginResolver.resolvePublishingSource(draft, {pub_id:'draft-id',source_file:'[[source]]'}), null);
   sourceBody = '---\npub_id: draft-id\n---\nOriginal';
   assert.equal(await pluginResolver.resolvePublishingSource(draft, {pub_id:'draft-id',source_file:'[[source]]'}), source);
+  metadataFound=false;
+  assert.equal(await pluginResolver.resolvePublishingSource(Object.assign(new TFile(),{path:'file:/blog/source/_posts/post.md'}),{pub_id:'draft-id',source_file:'[[source]]'}),source,'Native external drafts resolve Vault-root source associations');
+  metadataFound=true;
   sourceBody = '---\npub_id: draft-id\nsource_file: "[[another]]"\n---\nA platform draft';
   assert.equal(await pluginResolver.resolvePublishingSource(draft, {pub_id:'draft-id',source_file:'[[source]]'}), null);
 

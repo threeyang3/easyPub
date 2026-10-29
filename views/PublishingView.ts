@@ -5,7 +5,7 @@ import { PublishDirectoryModal } from "../modals/PublishDirectoryModal";
 import type EasyPub from "../main";
 import { PLATFORMS } from "../types";
 import { parseFrontMatter, getFrontMatterString } from "../utils/frontMatter";
-import { getPublishPath } from "../utils/platforms";
+import { getPublishPath, hexoEditorPath } from "../utils/platforms";
 
 export const PUBLISHING_VIEW = "easy-pub-publishing";
 
@@ -115,13 +115,15 @@ export class PublishingView extends ItemView {
       if (key === this.displayKey) return;
       this.displayKey = key;
       this.article.empty();
-      const platform = PLATFORMS.find(p => !p.isExternal && file.path.startsWith(`${getPublishPath(p, this.plugin.settings)}/`));
+      const platform = PLATFORMS.find(p => p.id === "hexo" ? !!hexoEditorPath(this.app, this.plugin.settings.hexoRepoPath, file.path)
+        : !p.isExternal && file.path.startsWith(`${getPublishPath(p, this.plugin.settings)}/`));
       this.article.createEl("small", { text: meta.source_file ? `${platform?.name ?? "平台"}发布稿` : "原稿" });
       this.article.createEl("h3", { text: getFrontMatterString(meta, "title") || file.basename });
       this.article.createEl("p", { text: file.path, cls: "ep-panel-path" });
       const actions = this.article.createDiv({ cls: "ep-panel-actions" });
       this.button(actions, "打开当前文章", () => this.app.workspace.getLeaf(false).openFile(file));
       if (meta.source_file) {
+        this.button(actions,"同步正文改动到其他稿",()=>this.plugin.syncDraftBody(file));
         if (source) this.button(actions, "返回原稿", () => this.app.workspace.getLeaf(false).openFile(source));
         else this.article.createEl("p", { text: "原稿关联无效，请检查 source_file 和 pub_id。" });
       }

@@ -14,7 +14,7 @@
 | `abbrlink` | Hexo 页面路径标识 | 不等同 pub_id；历史值不应强制改成新格式 |
 | `publish_url` | 已解析的博客页面 URL | 不代表本次已经成功部署上线 |
 | 微信 `mediaId` | 远端图文草稿或素材的 ID | 不等同源稿身份；须连同账号与用途判断 |
-| `documentHash` | 排版绑定的精确 Markdown 内容 hash | 正文改变后不能沿用旧方案 |
+| `documentHash` | 排版绑定的精确 Markdown 内容 hash | 正文改变后须重新匹配并验证组件，主题与配色可保留 |
 
 新 `pub_id` 使用 8 字节密码学随机值的十六进制表示。旧 ID 保持兼容，不因格式不同自动迁移。同一平台多份稿件使用相同 ID 会触发冲突；不同平台共享同一源 ID 是正常关系。
 
@@ -97,7 +97,7 @@ wechat:
 
 ## LayoutPlan
 
-结构为 `{schemaVersion, documentHash, theme, accentColor, blocks}`。当前 schemaVersion 为 1；不接受未知字段。每个 blocks 项包含 `id`、`role`、`component` 和可选 `locked`。
+结构为 `{schemaVersion, documentHash, theme, accentColor, blocks}`，可附带本地生成的 `sourceBlocks: [{id, kind}]`。当前 schemaVersion 为 1；不接受未知字段。每个 blocks 项包含 `id`、`role`、`component` 和可选 `locked`。`sourceBlocks` 记录应用时完整区块身份，用于正文修改后的唯一内容匹配，不能由 AI 写入。
 
 | component | role | 允许对象 |
 | --- | --- | --- |
@@ -109,7 +109,7 @@ wechat:
 
 主题及颜色枚举见[排版指南](../wechat-layout.md)和 [wechatThemes.ts](../../utils/wechatThemes.ts)。区块 ID 由源位置与内容 hash 生成；标题、代码、表格、图片等不允许变为强调组件。用户锁定在本地合并，AI 返回锁定字段会被拒绝。映射不可靠或超过 300 区块时只提供本地主题，不猜测组件位置。
 
-不要手写伪 hash 让方案“通过”：方案必须匹配当前正文和实际区块。没有有效方案时渲染可安全回退，旧历史项会经过当前文档校验。
+不要手写伪 hash 让方案“通过”：应用前必须生成匹配当前正文和实际区块的新方案。旧方案的主题与配色可保留，组件只对前后均唯一的原文区块重新匹配，其他区块提示重新确认。没有有效方案时渲染可安全回退，旧历史项仍经过当前文档校验。
 
 ## 持久化与内存状态
 
@@ -121,6 +121,7 @@ wechat:
 | 博客复制图片 | `source/picture/easy-pub/<pub_id>/` | 不覆盖同名内容地址资源 |
 | 微信访问令牌 | 内存 | 不写入配置 |
 | AI 方案缓存 | 内存，最多 16 项 | 插件会话内；无请求正文或原始密钥 |
+| 跨稿同步比较基准、目标原文备份 | 插件目录 `draft-sync/baselines/`、`draft-sync/backups/` | 本地正文快照；按来源/目标分别记录，不自动清理 |
 | 源身份索引 | 内存 | 按 Vault 事件失效，不作为永久身份数据库 |
 | 图片 bytes/blob URL | 内存 | 预览刷新或关闭时释放 |
 

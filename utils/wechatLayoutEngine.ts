@@ -13,7 +13,7 @@ function keys(value: Record<string, unknown>, allowed: string[]) {
   if (Object.keys(value).some(k => !allowed.includes(k))) throw new Error("排版方案包含不支持的字段");
 }
 export function readWechatLayoutPlan(input: unknown): WechatLayoutPlan {
-  const data = obj(input); keys(data, ["schemaVersion", "documentHash", "theme", "accentColor", "blocks"]);
+  const data = obj(input); keys(data, ["schemaVersion", "documentHash", "theme", "accentColor", "blocks", "sourceBlocks"]);
   if (data.schemaVersion !== 1 || typeof data.documentHash !== "string" || !/^[a-f0-9]{64}$/.test(data.documentHash)
     || !Object.prototype.hasOwnProperty.call(WECHAT_THEMES, String(data.theme)) || !Object.prototype.hasOwnProperty.call(WECHAT_ACCENTS, String(data.accentColor))
     || !Array.isArray(data.blocks) || data.blocks.length > 300) throw new Error("排版方案版本、主题或文章标识无效");
@@ -26,7 +26,42 @@ export function readWechatLayoutPlan(input: unknown): WechatLayoutPlan {
     seen.add(entry.id);
     return { id: entry.id, role: entry.role, component: entry.component, ...(entry.locked === true ? { locked: true } : {}) } as WechatLayoutInstruction;
   });
-  return { schemaVersion: 1, documentHash: data.documentHash, theme: data.theme as WechatThemeId, accentColor: data.accentColor as WechatAccent, blocks };
+  let sourceBlocks: WechatLayoutPlan["sourceBlocks"];
+  if (data.sourceBlocks !== undefined) {
+    if (!Array.isArray(data.sourceBlocks) || data.sourceBlocks.length > 300) throw new Error("原排版区块记录无效");
+    const seen = new Set<string>();
+    sourceBlocks = data.sourceBlocks.map(raw => {
+      const block = obj(raw); keys(block, ["id", "kind"]);
+      if (typeof block.id !== "string" || !/^b-\d+-[a-f0-9]{16}$/.test(block.id) || seen.has(block.id)
+        || !["paragraph","heading","list","quote","code","image","table","divider","other"].includes(String(block.kind))) throw new Error("原排版区块记录无效");
+      seen.add(block.id); return {id: block.id, kind: block.kind as import("../types").WechatBlockKind};
+    });
+  }
+  return { schemaVersion: 1, documentHash: data.documentHash, theme: data.theme as WechatThemeId, accentColor: data.accentColor as WechatAccent, blocks,
+    ...(sourceBlocks ? {sourceBlocks} : {}) };
+}
+
+export function anchorWechatLayout(plan: WechatLayoutPlan, doc: WechatLayoutDocument): WechatLayoutPlan {
+  return {...validateWechatLayout(plan, doc), sourceBlocks: doc.blocks.length<=300?doc.blocks.map(({id,kind}) => ({id,kind})):[]};
+}
+
+/** Only exact, unique content matches carry component styles across changed documents. */
+export function rebaseWechatLayout(input: unknown, doc: WechatLayoutDocument, previous?: WechatLayoutDocument): {plan: WechatLayoutPlan; notice?: string} {
+  const old = readWechatLayoutPlan(input);
+  if (old.documentHash === doc.hash) return {plan: anchorWechatLayout(old, doc)};
+  const oldBlocks = previous?.hash === old.documentHash ? previous.blocks : old.sourceBlocks ?? [];
+  const suffix = (id: string) => id.slice(id.lastIndexOf("-")+1);
+  const oldCount = new Map<string,number>(), candidates = new Map<string, typeof doc.blocks>();
+  for (const block of oldBlocks) oldCount.set(suffix(block.id), (oldCount.get(suffix(block.id)) ?? 0)+1);
+  for (const block of doc.blocks) candidates.set(suffix(block.id), [...(candidates.get(suffix(block.id)) ?? []), block]);
+  const blocks = old.blocks.flatMap(instruction => {
+    const fingerprint = suffix(instruction.id), matches = candidates.get(fingerprint) ?? [];
+    if (!oldBlocks.some(block => block.id === instruction.id) || oldCount.get(fingerprint) !== 1 || matches.length !== 1
+      || !["paragraph","list","quote"].includes(matches[0].kind) && instruction.component !== "plain") return [];
+    return [{...instruction, id: matches[0].id}];
+  });
+  const plan = anchorWechatLayout({...old, documentHash: doc.hash, blocks, sourceBlocks: undefined}, doc);
+  return {plan, notice: `正文已变化，已保留主题和配色、${blocks.length} 个区块样式；${old.blocks.length-blocks.length} 个区块需重新确认。`};
 }
 export function validateWechatLayout(input: unknown, doc: WechatLayoutDocument): WechatLayoutPlan {
   const plan = readWechatLayoutPlan(input);
@@ -54,7 +89,10 @@ export function applyWechatLayout(root: HTMLElement, doc: WechatLayoutDocument, 
   let plan = themePlan(doc, "default"), notice: string | undefined;
   if (input !== undefined) {
     try { plan = validateWechatLayout(input, doc); }
-    catch (error) { notice = `${(error as Error).message}；本次使用默认排版，请重新规划并确认。`; }
+    catch (error) {
+      try { const rebased = rebaseWechatLayout(input, doc); plan = rebased.plan; notice = rebased.notice; }
+      catch { notice = `${(error as Error).message}；本次使用默认排版，请重新规划并确认。`; }
+    }
   }
   const before = contentFingerprint(root);
   const styles = themeStyles(plan.theme, plan.accentColor);

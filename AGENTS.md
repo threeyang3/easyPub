@@ -29,6 +29,7 @@ Before the build, use `npm test` for core metadata and Hexo URL behavior.
 - Validate Hexo configuration and deployment prerequisites before running `clean`.
 - Hexo image embeds are copied to `source/picture/easy-pub/{pub_id}` with content-addressed filenames. Preserve source Vault
   attachments and avoid rewriting embeds inside code.
+- Hexo drafts open inside Obsidian. Image paste in external or mapped Hexo posts/drafts saves directly under the blog's `source/img/uploads/YYYY/MM`, preventing the default Vault attachment handler for that event only. Never change the global attachment folder setting.
 - Check the confirmed target content again before writing. Search both posts and drafts by pub_id and preserve their status.
 - Optional PicGo uploads use the local PicGo Server API. Defer external uploads until publish
   confirmation and reuse URLs only when the attachment content hash still matches.

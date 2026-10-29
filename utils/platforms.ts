@@ -2,6 +2,35 @@ import path from "path";
 import { createHash } from "crypto";
 import { App, TFile, normalizePath } from "obsidian";
 import { FrontMatterData, Platform, PLATFORMS, PluginSettings } from "../types";
+import { fileURLToPath } from "url";
+
+export function isWithinPath(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative !== "" && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+/** Resolve native external files and FolderBridge/Vault paths without treating source notes as Hexo drafts. */
+export function hexoEditorPath(app: App, repository: string, filePath: string): string | null {
+  if (!path.isAbsolute(repository)) return null;
+  let absolute: string;
+  try {
+    if (filePath.startsWith("file:")) absolute = fileURLToPath(filePath);
+    else if (path.isAbsolute(filePath)) absolute = filePath;
+    else {
+      const adapter = app.vault.adapter as unknown as { getFullPath?(value: string): string };
+      if (!adapter.getFullPath) return null;
+      absolute = adapter.getFullPath(filePath);
+    }
+    absolute = path.resolve(absolute);
+    return path.extname(absolute).toLowerCase() === ".md"
+      && ["_posts", "_drafts"].some(folder => isWithinPath(path.join(repository, "source", folder), absolute)) ? absolute : null;
+  } catch { return null; }
+}
+
+export function hexoPastedImagePath(repository: string, hash: string, extension: string, now = new Date()): string {
+  return path.join(repository, "source", "img", "uploads", String(now.getFullYear()),
+    String(now.getMonth() + 1).padStart(2, "0"), `pasted-${hash}.${extension}`);
+}
 
 export function getPlatform(id: string): Platform | undefined {
   return PLATFORMS.find((p) => p.id === id);

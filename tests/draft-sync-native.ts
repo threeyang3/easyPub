@@ -1,0 +1,95 @@
+import { App, Plugin, Component, WorkspaceLeaf, MarkdownView } from "obsidian";
+import fs from "fs/promises";
+import os from "os";
+import path from "path";
+import EasyPub from "../main";
+import { PLATFORMS } from "../types";
+import { normalizeSettings } from "../utils/settings";
+import { getPublishPath } from "../utils/platforms";
+import { parseFrontMatter, stringifyFrontMatter } from "../utils/frontMatter";
+import { DraftSyncSession } from "../utils/draftSync";
+import { DraftSyncModal } from "../modals/DraftSyncModal";
+import { extractWechatBlocks } from "../utils/wechatLayoutAst";
+import { anchorWechatLayout } from "../utils/wechatLayoutEngine";
+import { renderWechatDocument } from "../utils/wechatRenderer";
+import { releaseWechatImages } from "../utils/wechatImages";
+import { openHexoInObsidian } from "../utils/hexoEditing";
+
+export async function run(this:Plugin,app:App){
+  if(app.vault.getName()!=="Sandbox")throw new Error("Requires Sandbox");
+  const checks:string[]=[];const assert=(value:unknown,label:string)=>{if(!value)throw new Error(label);checks.push(label);};
+  const wait=async(fn:()=>boolean)=>{for(let i=0;i<100;i++){if(fn())return;await new Promise(r=>setTimeout(r,40));}throw new Error("Native sync condition timed out");};
+  const id=`easypub-sync-${Date.now()}`,repo=await fs.mkdtemp(path.join(os.tmpdir(),"easypub-sync-native-")),storage=`${app.vault.configDir}/plugins/${id}`;
+  const beforeFiles=new Set(app.vault.getFiles().map(file=>file.path)),configPath=`${app.vault.configDir}/app.json`;
+  const beforeConfig=await app.vault.adapter.exists(configPath)?await app.vault.adapter.read(configPath):null;
+  let modal:DraftSyncModal|undefined,session:DraftSyncSession|undefined;
+  const originalLeaf=app.workspace.activeLeaf,leaves:WorkspaceLeaf[]=[];
+  try{
+    await fs.mkdir(path.join(repo,"source/_posts"),{recursive:true});await fs.mkdir(path.join(repo,"source/img"));
+    await fs.writeFile(path.join(repo,"_config.yml"),"url: https://example.com/\nroot: /\n");
+    await app.vault.createFolder(id);
+    const originalBody="第一段\n\n重点段\n\n结尾\n";
+    const source=await app.vault.create(`${id}/source.md`,stringifyFrontMatter(originalBody,{title:id,pub_id:id}));
+    const settings=normalizeSettings({hexoRepoPath:repo,publishBasePath:`${id}/发布`});
+    const wechat=PLATFORMS.find(p=>p.id==="wechat")!,zhihu=PLATFORMS.find(p=>p.id==="zhihu")!;
+    const createDirectories=async(directory:string)=>{let current="";for(const part of directory.split("/")){current=current?`${current}/${part}`:part;if(!await app.vault.adapter.exists(current))await app.vault.createFolder(current);}};
+    const wechatPath=`${getPublishPath(wechat,settings)}/post.md`,zhihuPath=`${getPublishPath(zhihu,settings,"文章")}/post.md`;
+    await createDirectories(path.posix.dirname(wechatPath));await createDirectories(path.posix.dirname(zhihuPath));
+    const raw=extractWechatBlocks(originalBody),doc={hash:raw.hash,blocks:raw.blocks.map(block=>({...block,text:block.markdown,planningText:""}))};
+    const plan=anchorWechatLayout({schemaVersion:1,documentHash:doc.hash,theme:"editorial",accentColor:"preset",blocks:[{id:doc.blocks[1].id,role:"key-point",component:"highlight-card",locked:true}]},doc);
+    const target=await app.vault.create(wechatPath,stringifyFrontMatter(originalBody.replace("结尾","公众号独立结尾"),{title:"微信独立标题",pub_id:id,source_file:`[[${source.path}]]`,custom:"keep",wechat:{author:"测试",layout:plan}}));
+    const zhihuTarget=await app.vault.create(zhihuPath,stringifyFrontMatter(originalBody.replace("重点段","知乎独立改写"),{title:"知乎独立标题",pub_id:id,source_file:`[[${source.path}]]`}));
+    const zhihuBefore=await app.vault.read(zhihuTarget);
+    const canvas=document.createElement("canvas");canvas.width=80;canvas.height=40;canvas.getContext("2d")!.fillStyle="#29734b";canvas.getContext("2d")!.fillRect(0,0,80,40);
+    const blob=await new Promise<Blob>(resolve=>canvas.toBlob(b=>resolve(b!),"image/png")),bytes=Buffer.from(await blob.arrayBuffer());
+    await fs.writeFile(path.join(repo,"source/img/new.png"),bytes);
+    const senderBody=originalBody.replace("第一段\n\n","第一段\n\n![新增配图](/img/new.png)\n\n").replace("重点段","修改后的重点");
+    const senderPath=path.join(repo,"source/_posts/post.md"),senderText=stringifyFrontMatter(senderBody,{title:id,pub_id:id,source_file:`[[${source.path}]]`});
+    await fs.writeFile(senderPath,senderText);
+    const sender=app.vault.getFileByPath(`file:${senderPath}`);if(!sender)throw new Error("Native external files unavailable");
+    const plugin=Object.create(EasyPub.prototype) as EasyPub;Object.assign(plugin,{app,settings,manifest:{id:"easy-pub",dir:storage}});
+    const targetLeaf=app.workspace.getLeaf("tab");leaves.push(targetLeaf);await targetLeaf.openFile(target);
+    await openHexoInObsidian(app,repo,senderPath);
+    const senderLeaf=app.workspace.getLeavesOfType("markdown").find(leaf=>(leaf.view as MarkdownView).file?.path===sender.path)!;
+    leaves.push(senderLeaf);
+    session=await DraftSyncSession.create(plugin,sender);
+    assert(!!senderLeaf,"Synchronization pins and flushes the initiating native Hexo editor");
+    const wechatSync=session.targets.find(target=>target.location.platform.id==="wechat")!,zhihuSync=session.targets.find(target=>target.location.platform.id==="zhihu")!;
+    assert(zhihuSync.changes.some(change=>change.status==="conflict"),"Concurrent platform rewrites are identified as conflicts");
+    const imageIndices=new Set(wechatSync.changes.flatMap((change,index)=>change.imagesOnly?[index]:[]));
+    const expected=await session.preview(wechatSync,imageIndices);
+    assert(expected.assets.length===1&&!app.vault.getAbstractFileByPath(expected.assets[0].path),"Image conversion preview does not import attachments");
+    let applied=false;
+    modal=new DraftSyncModal(app,session,async(previews,guard)=>{const result=await session!.commit(previews,guard);applied=true;return result;},()=>{});modal.open();
+    const button=(text:string)=>Array.from(modal!.contentEl.querySelectorAll("button")).find(button=>button.textContent===text)!;
+    const scope=modal.contentEl.querySelector<HTMLSelectElement>('select[aria-label="同步范围"]')!;scope.value="images";scope.dispatchEvent(new Event("change",{bubbles:true}));
+    modal.contentEl.querySelector<HTMLInputElement>(`input[aria-label="同步到${wechat.name}"]`)!.click();
+    button("预览所选改动").click();
+    await wait(()=>!button("确认同步到所选稿件").disabled);
+    assert(modal.contentEl.textContent?.includes("最终正文预览"),"Native modal previews the exact selected target body");
+    assert(!app.vault.getAbstractFileByPath(expected.assets[0].path),"Preview remains read-only until confirmation");
+    button("确认同步到所选稿件").click();await wait(()=>applied);
+    const saved=parseFrontMatter(await app.vault.read(target));
+    assert(saved.content.includes("easypub-sync-")&&saved.content.includes("公众号独立结尾")&&saved.content.includes("重点段")&&!saved.content.includes("修改后的重点"),"Image-only synchronization preserves target-owned text");
+    assert(saved.data.title==="微信独立标题"&&saved.data.custom==="keep"&&(saved.data.wechat as any).author==="测试","Titles, custom metadata and account-independent article settings are preserved");
+    const layout=(saved.data.wechat as any).layout;
+    assert(layout.theme==="editorial"&&layout.blocks.length===1&&layout.blocks[0].locked,"Theme, unique unchanged block style and manual lock survive image insertion");
+    const imported=app.vault.getFileByPath(expected.assets[0].path)!;
+    assert(Buffer.from(await app.vault.readBinary(imported)).equals(bytes),"Imported Vault attachment preserves the blog image bytes");
+    const component=new Component();component.load();
+    try{const rendered=await renderWechatDocument(app,saved.content,target.path,component,()=>true,layout);assert(!rendered.issues.length&&rendered.images.length===1,"WeChat renderer accepts converted local image reference and rebased layout");releaseWechatImages(rendered.images);}finally{component.unload();}
+    assert(await app.vault.read(zhihuTarget)===zhihuBefore&&await fs.readFile(senderPath,"utf8")===senderText&&(await app.vault.read(source)).includes(originalBody),"Unchecked platform, sender and original remain unchanged");
+    session.dispose();session=await DraftSyncSession.create(plugin,sender);
+    assert(!session.targets.find(target=>target.location.platform.id==="wechat")!.changes.some(change=>change.imagesOnly),"Saved per-target baseline prevents already-shared images repeating");
+    assert((await app.vault.adapter.read(configPath).catch(()=>null))===beforeConfig,"Global Obsidian attachment configuration is unchanged");
+    return {checks};
+  }catch(error){throw new Error(`${(error as Error).message}; completed=${JSON.stringify(checks)}; modal=${modal?.contentEl.textContent?.slice(-2000)??"closed"}`);}
+  finally{
+    modal?.close();session?.dispose();
+    leaves.forEach(leaf=>leaf.detach());if(originalLeaf)await app.workspace.revealLeaf(originalLeaf);
+    const folder=app.vault.getAbstractFileByPath(id);if(folder)await app.vault.delete(folder,true);
+    for(const file of app.vault.getFiles())if(!beforeFiles.has(file.path)&&file.name.startsWith("easypub-sync-"))await app.vault.delete(file,true);
+    if(await app.vault.adapter.exists(storage))await app.vault.adapter.rmdir(storage,true);
+    await fs.rm(repo,{recursive:true,force:true});
+  }
+}

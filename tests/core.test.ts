@@ -1,6 +1,7 @@
 import { runWechatHexoTests } from "./wechatHexo.test";
 import { runWechatSourceUrlTests } from "./wechatSourceUrl.test";
 import { runWechatAssociationTests } from "./wechatAssociation.test";
+import {runSyncImageMemoryTests} from "./syncImageMemory.test";
 import { runHexoLocatorTests } from "./hexoLocator.test";
 import { runHexoPreviewPerformanceTests } from "./hexoPreviewPerformance.test";
 import { runPerformanceTests } from "./performance.test";
@@ -64,6 +65,7 @@ async function run() {
   await runPublishingWorkbenchTests();
   await runHexoEditingTests();
   await runDraftSyncTests();
+  await runSyncImageMemoryTests();
   await runStructureTests();
   await runArticlePropertyTests();
   await runControlRoomLauncherTests();

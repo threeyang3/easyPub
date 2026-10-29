@@ -36,17 +36,19 @@ export function syncAttachmentPath(configuration: string | null, target: string,
 export class DraftSyncImages {
   private images = new Map<string,SyncImage>();
   private originals = new Set<SyncImage>();
+  private files = new Map<string,Promise<SyncImage>>();
   constructor(private app: App, private settings: PluginSettings, private pubId: string) {}
 
   private async localImage(source: string, location: SyncLocation): Promise<SyncImage> {
     const draft = location.platform?.id === "hexo" ? location.path : hexoEditorPath(this.app,this.settings.hexoRepoPath,location.path);
-    let read: () => Promise<Buffer>, extension: string, vaultPath: string | undefined;
+    let read: () => Promise<Buffer>, extension: string, vaultPath: string | undefined, identity:string;
     if (draft) {
       const root = await getHexoRootPath(this.settings.hexoRepoPath);
       let decoded = decodeURIComponent(source.split(/[?#]/)[0]);
       if (/^[a-z][a-z\d+.-]*:/i.test(decoded) || decoded.startsWith("//")) throw new Error(`不支持的博客本地图片引用：${source}`);
       const absolute = decoded.startsWith(root) ? path.resolve(this.settings.hexoRepoPath,"source",decoded.slice(root.length))
         : decoded.startsWith("/") ? path.resolve(this.settings.hexoRepoPath,"source",decoded.slice(1)) : path.resolve(path.dirname(draft),decoded);
+      identity=`external:${absolute}`;
       const sourceRoot = path.join(await fs.realpath(this.settings.hexoRepoPath),"source");
       const safeRead = async () => {
         if (!isWithinPath(sourceRoot,await fs.realpath(absolute))) throw new Error("图片引用超出博客 source 目录");
@@ -58,6 +60,7 @@ export class DraftSyncImages {
     } else {
       const file = resolveVaultImage(this.app,source,location.path);
       if (file.path.startsWith("file:")) throw new Error("同步仅支持 Vault 附件和配置博客中的图片");
+      identity=`vault:${file.path}`;
       vaultPath = file.path; extension = file.extension.toLowerCase();
       read = async () => {
         if (file.path !== vaultPath || file.stat?.size > 50*1024*1024) throw new Error("附件已移动或超过 50 MB");
@@ -65,11 +68,17 @@ export class DraftSyncImages {
       };
     }
     if (!IMAGE_EXTENSIONS.has(extension)) throw new Error(`不支持的图片附件：${source}`);
-    const bytes = await read();
-    if (!bytes.length || bytes.length > 50*1024*1024) throw new Error("图片为空或超过 50 MB");
-    const image = {bytes,hash:syncHash(bytes),extension,vaultPath,read};
-    this.originals.add(image);
-    return image;
+    const cached=this.files.get(identity);
+    if(cached)return cached;
+    const loading=(async()=>{
+      const bytes = await read();
+      if (!bytes.length || bytes.length > 50*1024*1024) throw new Error("图片为空或超过 50 MB");
+      const image = {bytes,hash:syncHash(bytes),extension,vaultPath,read};
+      this.originals.add(image);
+      return image;
+    })();
+    this.files.set(identity,loading);
+    try{return await loading;}catch(error){if(this.files.get(identity)===loading)this.files.delete(identity);throw error;}
   }
 
   async canonical(body: string, location: SyncLocation): Promise<CanonicalBody> {

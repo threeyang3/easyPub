@@ -1,11 +1,11 @@
-import { Association, prepareAssociation } from "../utils/wechatAssociation";
+import { Association, prepareAssociation, patchWechatDraftAssociation } from "../utils/wechatAssociation";
 import { validateWechatArticleUrl } from "../utils/wechatArticleUrl";
 import { WechatAssociationModal } from "../modals/WechatAssociationModal";
 import { canReuseWechatPreview } from "../utils/wechatPreviewReuse";
 import { Component, FuzzySuggestModal, ItemView, TFile, ViewStateResult, WorkspaceLeaf } from "obsidian";
 import type EasyPub from "../main";
 import { WechatArticleSettings, WechatCrop, WechatImage, WechatPreparedDocument } from "../types";
-import { getFrontMatterString, parseFrontMatter, stringifyFrontMatter } from "../utils/frontMatter";
+import { getFrontMatterString, parseFrontMatter } from "../utils/frontMatter";
 import { isWechatDraftPath } from "../utils/platforms";
 import { cropCoordinates, centeredCrop, readWechatArticleSettings, wechatArticleNeedsSave, wechatAssetKey, wechatHash, wechatStateKey } from "../utils/wechatState";
 import { IMAGE_EXTENSIONS, replaceWechatImageTokens } from "../utils/wechatMarkdown";
@@ -402,6 +402,8 @@ export class WechatView extends ItemView {
     this.showPage(this.page);
   }
   private async linkArticle(value: Association) {
+    value = {...value};
+    if (value.publishedUrl) value.publishedUrl = validateWechatArticleUrl(value.publishedUrl);
     if (this.dirty) throw new Error("请先保存或放弃未保存的工作台设置");
     const file = this.file, snapshot = this.snapshot, filePath = this.snapshotPath;
     const repository = this.plugin.settings.hexoRepoPath;
@@ -419,14 +421,7 @@ export class WechatView extends ItemView {
     let saved = "";
     await this.app.vault.process(file, raw => {
       guard(); if (raw !== snapshot) throw new Error("本地稿已变化，请重新操作");
-      const parsed = parseFrontMatter(raw, true);
-      const previous = parsed.data.wechat;
-      if (previous !== undefined && (!previous || typeof previous !== "object" || Array.isArray(previous))) throw new Error("wechat 元数据格式无效");
-      const settings = {...previous as Record<string, unknown>};
-      delete settings.publishedUrl; delete settings.commentsEnabled;
-      if (value.publishedUrl) { settings.publishedUrl = value.publishedUrl; if (typeof value.commentsEnabled === "boolean") settings.commentsEnabled = value.commentsEnabled; }
-      parsed.data.wechat = settings;
-      return saved = stringifyFrontMatter(parsed.content, parsed.data);
+      return saved = patchWechatDraftAssociation(raw, value);
     });
     try {
       await plan.commit(guard, () => check(saved));

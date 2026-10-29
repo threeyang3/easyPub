@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, rename } from "node:f
 import os from "node:os";
 import path from "node:path";
 import { validateWechatArticleUrl } from "../utils/wechatArticleUrl";
-import { AssociationIO, patchAssociation, prepareAssociation } from "../utils/wechatAssociation";
+import { AssociationIO, patchAssociation, prepareAssociation, patchWechatDraftAssociation } from "../utils/wechatAssociation";
 import { writePublishedFile } from "../utils/publishFiles";
 import { parseFrontMatter, mergePublishedFrontMatter } from "../utils/frontMatter";
 import { readWechatArticleSettings } from "../utils/wechatState";
@@ -16,6 +16,13 @@ export async function runWechatAssociationTests() {
   assert.equal(validateWechatArticleUrl(url),url);
   assert.equal(validateWechatArticleUrl("https://mp.weixin.qq.com/s?__biz=x&mid=1&idx=1&sn=a&chksm=b"),"https://mp.weixin.qq.com/s?__biz=x&mid=1&idx=1&sn=a&chksm=b");
   for (const bad of ["http://mp.weixin.qq.com/s/a","https://mp.weixin.qq.com.evil.test/s/a","https://mp.weixin.qq.com@evil.test/s/a","https://user@mp.weixin.qq.com/s/a","https://mp.weixin.qq.com:443/s/a","https://mp.weixin.qq.com/s/../admin","https://mp.weixin.qq.com\\@evil.test/s/a","https://mp.weixin.qq.com/s?mid=1","javascript:alert(1)","https://mp.weixin.qq.com/s/a#b", "https://mp.weixin.qq.com/s/a\n", "https://mp.weixin.qq.com/s/"+"a".repeat(2048), "https://mp.weixin.qq.com/s/a?q="+"文".repeat(250)]) assert.throws(()=>validateWechatArticleUrl(bad),bad);
+  const noNewline = '---\npub_id: stable\nwechat:\n  sourceUrl: https://example.com\n  custom: keep\n---\nBody without final newline';
+  for (const value of [{publishedUrl:url,commentsEnabled:false},{}]) {
+    assert.equal(parseFrontMatter(patchWechatDraftAssociation(noNewline,value)).content,parseFrontMatter(noNewline).content);
+    assert.equal(parseFrontMatter(patchAssociation(noNewline,value)).content,parseFrontMatter(noNewline).content);
+    assert.equal((parseFrontMatter(patchWechatDraftAssociation(noNewline,value)).data.wechat as Record<string,unknown>).sourceUrl,'https://example.com');
+    assert.equal((parseFrontMatter(patchWechatDraftAssociation(noNewline,value)).data.wechat as Record<string,unknown>).custom,'keep');
+  }
   const original = `---\npub_id: stable\ntitle: same title\nabbrlink: ab12\ncustom:\n  nested: keep\n---\n# Body\n`;
   const linked = patchAssociation(original,{publishedUrl:url,commentsEnabled:false});
   assert.equal(parseFrontMatter(linked).data.wechat_comments_enabled,false);

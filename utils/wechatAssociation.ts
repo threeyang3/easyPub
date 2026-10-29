@@ -14,6 +14,26 @@ export function associationFields(data: FrontMatterData): Association {
   return { publishedUrl: typeof data.wechat_article_url === "string" ? data.wechat_article_url : undefined,
     commentsEnabled: typeof data.wechat_comments_enabled === "boolean" ? data.wechat_comments_enabled : undefined };
 }
+// gray-matter appends a trailing body newline when stringifying. Metadata-only
+// association edits must retain exact body bytes and saved layout hashes.
+function writeMetadata(body: string, data: FrontMatterData): string {
+  const header = stringifyFrontMatter("", data);
+  const generatedBody = parseFrontMatter(header).content;
+  return header.slice(0, header.length - generatedBody.length) + body;
+}
+export function patchWechatDraftAssociation(raw: string, value: Association): string {
+  const parsed = parseFrontMatter(raw, true);
+  const previous = parsed.data.wechat;
+  if (previous !== undefined && (!previous || typeof previous !== "object" || Array.isArray(previous))) throw new Error("wechat 元数据格式无效");
+  const settings = {...previous as Record<string, unknown>};
+  delete settings.publishedUrl; delete settings.commentsEnabled;
+  if (value.publishedUrl) {
+    settings.publishedUrl = validateWechatArticleUrl(value.publishedUrl);
+    if (typeof value.commentsEnabled === "boolean") settings.commentsEnabled = value.commentsEnabled;
+  }
+  parsed.data.wechat = settings;
+  return writeMetadata(parsed.content, parsed.data);
+}
 export function patchAssociation(raw: string, value: Association): string {
   const parsed = parseFrontMatter(raw, true);
   delete parsed.data.wechat_article_url; delete parsed.data.wechat_comments_enabled;
@@ -21,7 +41,7 @@ export function patchAssociation(raw: string, value: Association): string {
     parsed.data.wechat_article_url = validateWechatArticleUrl(value.publishedUrl);
     if (typeof value.commentsEnabled === "boolean") parsed.data.wechat_comments_enabled = value.commentsEnabled;
   }
-  return stringifyFrontMatter(parsed.content, parsed.data);
+  return writeMetadata(parsed.content, parsed.data);
 }
 export async function prepareAssociation(io: AssociationIO, repository: string, pubId: string, value: Association) {
   if (!path.isAbsolute(repository) || !pubId) throw new Error("需要 Hexo 绝对路径和当前稿件 pub_id，不能按标题匹配");

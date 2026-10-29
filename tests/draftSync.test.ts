@@ -63,7 +63,7 @@ export async function runDraftSyncTests(){
   await fs.writeFile(hexoPath,stringifyFrontMatter(senderBody,{pub_id:"sync-id",source_file:`[[${sourcePath}]]`}));
   await write(wechatPath,stringifyFrontMatter(old.replace("结尾","公众号独立结尾"),{title:"独立微信标题",pub_id:"sync-id",source_file:`[[${sourcePath}]]`,custom:42,wechat:{author:"作者",cover:"existing.png",layout:plan}}));
   await write(zhihuPath,stringifyFrontMatter(old,{title:"知乎标题",pub_id:"sync-id",source_file:`[[${sourcePath}]]`}));
-  const adapter:any={getFullPath:(p:string)=>path.join(vault,p),exists:async(p:string)=>{try{await fs.access(path.join(vault,p));return true;}catch{return false;}},read:(p:string)=>fs.readFile(path.join(vault,p),"utf8"),write:(p:string,s:string)=>write(p,s),mkdir:(p:string)=>fs.mkdir(path.join(vault,p),{recursive:true})};
+  const adapter:any={getFullPath:(p:string)=>path.join(vault,p),exists:async(p:string)=>{try{await fs.access(path.join(vault,p));return true;}catch{return false;}},read:(p:string)=>fs.readFile(path.join(vault,p),"utf8"),write:(p:string,s:string)=>write(p,s),remove:async(p:string)=>{await fs.rm(path.join(vault,p));files.delete(p);},mkdir:(p:string)=>fs.mkdir(path.join(vault,p),{recursive:true})};
   const app:any={vault:{configDir:".obsidian",adapter,getAbstractFileByPath:(p:string)=>files.get(p)??null,getFileByPath:(p:string)=>files.get(p)??null,getFiles:()=>[...files.values()],
     read:(f:TFile)=>fs.readFile(path.join(vault,f.path),"utf8"),readBinary:(f:TFile)=>fs.readFile(path.join(vault,f.path)),
     createBinary:async(p:string,bytes:ArrayBuffer)=>{await fs.mkdir(path.dirname(path.join(vault,p)),{recursive:true});await fs.writeFile(path.join(vault,p),Buffer.from(bytes));files.set(p,Object.assign(new TFile(),{path:p,extension:"png"}));},
@@ -109,6 +109,20 @@ export async function runDraftSyncTests(){
     await assert.rejects(()=>session!.commit([imagePreview],()=>{}),/图片在预览后/);
     await fs.writeFile(path.join(repo,"source/img/new.png"),png);
     await assert.rejects(()=>session!.commit([imagePreview],()=>{throw new Error("cancelled");}),/cancelled/);
+    // A target may commit before its baseline write fails or is truncated.
+    await write(wechatPath,unchanged);
+    const recoverySession=await DraftSyncSession.create(plugin,native);
+    const recoveryTarget=recoverySession.targets.find(t=>t.location.platform.id==="wechat")!;
+    const recoveryPreview=await recoverySession.preview(recoveryTarget,new Set(recoveryTarget.changes.flatMap((c,i)=>c.status!=="already"?[i]:[])));
+    const adapterWrite=adapter.write;
+    adapter.write=async(p:string,text:string)=>{if(p===recoveryTarget.baselinePath){await write(p,"{truncated");throw new Error("baseline disk failure");}return adapterWrite(p,text);};
+    await assert.rejects(()=>recoverySession.commit([recoveryPreview],()=>{}),/正文已保存[\s\S]*基准未完成/);
+    assert.equal(await adapter.read(wechatPath),recoveryPreview.content);
+    assert.equal(await adapter.exists(`${recoveryTarget.baselinePath}.pending`),true);
+    adapter.write=adapterWrite;recoverySession.dispose();
+    const recovered=await DraftSyncSession.create(plugin,native);
+    assert.equal(recovered.targets.find(t=>t.location.platform.id==="wechat")!.changes.some(c=>c.imagesOnly&&c.status!=="already"),false);
+    assert.equal(await adapter.exists(`${recoveryTarget.baselinePath}.pending`),false);recovered.dispose();
     const registry=new DraftSyncImages(app,settings,"sync-id");
     const coded="```md\n![示例](/img/missing.png)\n```\n\n![真实](/img/new.png)\n";
     const canonical=await registry.canonical(coded,{platform:hexo,path:hexoPath});
@@ -122,6 +136,20 @@ export async function runDraftSyncTests(){
     settings.picgoImageCache["静置/附件/original.png"]={hash:imageHash,url:"https://example.com/cached.png"};
     const remote=await registry.canonical("![缓存](https://example.com/cached.png)",{platform:hexo,path:hexoPath});
     assert.equal(remote.body,cachedImage.body,"Verified PicGo cache recognizes the same local image without network access");
+    await write("静置/附件/other.png","");await fs.writeFile(path.join(vault,"静置/附件/other.png"),png);
+    const distinct='before\n\n![same](../../静置/附件/original.png) and ![same](../../静置/附件/other.png)\n\nafter';
+    const independent=new DraftSyncImages(app,settings,"sync-id");
+    const targetRefs=await independent.canonical(distinct,{platform:wechat,path:wechatPath});
+    const senderRefs=await independent.canonical(distinct.replace("before","before updated"),{platform:wechat,path:wechatPath});
+    const referenceChanges=reconcileChanges(targetRefs.body,senderRefs.body,targetRefs.body);
+    const referenceResult=await independent.materialize(applySyncChanges(targetRefs.body,referenceChanges),{platform:wechat,path:wechatPath},targetRefs,await adapter.read(".obsidian/app.json"),referenceChanges,senderRefs);
+    assert.equal(referenceResult.body,distinct.replace("before","before updated"));
+    const addedRefs=await independent.canonical('![same](../../静置/附件/other.png)\n\n'+distinct,{platform:wechat,path:wechatPath});
+    const addedChanges=reconcileChanges(targetRefs.body,addedRefs.body,targetRefs.body);
+    const addedResult=await independent.materialize(applySyncChanges(targetRefs.body,addedChanges),{platform:wechat,path:wechatPath},targetRefs,await adapter.read(".obsidian/app.json"),addedChanges,addedRefs);
+    assert.match(addedResult.body,/other\.png/);assert(addedResult.body.endsWith(distinct));
+    await fs.writeFile(path.join(vault,"静置/附件/other.png"),Buffer.from("changed identical-byte sibling"));
+    await assert.rejects(independent.verify(),/图片.*变化/);
     assert.equal(await fs.readFile(hexoPath,"utf8"),stringifyFrontMatter(senderBody,{pub_id:"sync-id",source_file:`[[${sourcePath}]]`}));
     assert.equal((await app.vault.read(files.get(sourcePath))).includes("新增配图"),false);
     console.log("Cross-draft sync: bounded diff, selected image deltas, conflicts, independent edits, persisted baselines, image conversion, stale guards and layout preservation passed");

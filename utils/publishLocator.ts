@@ -34,7 +34,9 @@ export class PublishLocator {
       let entry: LocatorEntry;
       try { entry = {version: version ?? "", pubId: getFrontMatterString(parseFrontMatter(content, true).data, "pub_id"), invalid: false}; }
       catch { entry = {version: version ?? "", invalid: true}; }
-      if (version !== undefined && revision === this.revision && await io.version(file) === version) this.entries.set(file, entry);
+      const afterVersion = version === undefined ? undefined : await io.version(file);
+      if (version !== undefined && afterVersion !== version) throw new Error("稿件在读取期间发生变化，请重新操作");
+      if (version !== undefined && revision === this.revision) this.entries.set(file, entry);
       if (entry.invalid) invalid.push(file);
       else if (entry.pubId === pubId) matches.set(file, content);
     }

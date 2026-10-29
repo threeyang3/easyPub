@@ -1,6 +1,8 @@
 import { runWechatHexoTests } from "./wechatHexo.test";
 import { runWechatSourceUrlTests } from "./wechatSourceUrl.test";
 import { runWechatAssociationTests } from "./wechatAssociation.test";
+import { runHexoLocatorTests } from "./hexoLocator.test";
+import { runHexoPreviewPerformanceTests } from "./hexoPreviewPerformance.test";
 import { runPerformanceTests } from "./performance.test";
 import { runHexoEditingTests } from "./hexoEditing.test";
 import { runDraftSyncTests } from "./draftSync.test";
@@ -55,6 +57,8 @@ async function run() {
   await runWechatSourceUrlTests();
   await runWechatHexoTests();
   await runPerformanceTests();
+  await runHexoPreviewPerformanceTests();
+  await runHexoLocatorTests();
   runHexoFormattingTests();
   await runAttachmentImportTests();
   await runPublishingWorkbenchTests();

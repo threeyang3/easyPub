@@ -1,3 +1,5 @@
+import { runWechatHexoUi } from "./wechat-hexo-ui.mjs";
+import { runAssociationUi } from "./wechat-association-ui.mjs";
 import { chromium } from "playwright-core";
 import { build } from "esbuild";
 import { readFile, mkdtemp, rm } from "node:fs/promises";
@@ -22,7 +24,7 @@ const bundle = await build({ entryPoints: ["tests/fixtures/wechat-workbench.ts"]
     build.onResolve({ filter: /^url$/ }, () => ({ path: "url", namespace: "url-fixture" }));
     build.onLoad({ filter: /.*/, namespace: "url-fixture" }, () => ({ contents: `export const fileURLToPath = value => new URL(value).pathname;`, loader: "js" }));
     build.onResolve({ filter: /^path$/ }, () => ({ path: "path", namespace: "path-fixture" }));
-    build.onLoad({ filter: /.*/, namespace: "path-fixture" }, () => ({ contents: `export default { join: (...parts) => parts.join('/'), isAbsolute: value => value.startsWith('/') };`, loader: "js" }));
+    build.onLoad({ filter: /.*/, namespace: "path-fixture" }, () => ({ contents: `export default { join: (...parts) => parts.join('/'), resolve: value => value, isAbsolute: value => value.startsWith('/') };`, loader: "js" }));
     // Deterministic fixture hashes only; real SHA-256 is covered by Node tests.
     build.onLoad({ filter: /.*/, namespace: "fixture" }, () => ({ contents: `
       export const createHash = () => ({ data: '', update(v) { this.data = typeof v === 'string' ? v : Array.from(v).join(','); return this; }, digest() { let h=2166136261; for(const c of this.data) h=Math.imul(h^c.charCodeAt(0),16777619); return (h>>>0).toString(16).padStart(8,'0').repeat(8); } });
@@ -298,6 +300,8 @@ try {
   await page.evaluate(() => document.body.classList.remove('theme-dark'));
   await page.screenshot({ path: screenshot.replace(/\.png$/, "-cover.png"), fullPage: true });
   await runLayoutUi(page);
+  await runWechatHexoUi(page);
+  await runAssociationUi(page);
   await page.evaluate(async () => {
     window.fixture.setDelay(75);
     const pending = window.fixture.view.refresh(true);

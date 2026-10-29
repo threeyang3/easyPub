@@ -15,7 +15,7 @@ export async function generateHexoUrl(
     }
 
     const siteUrl = new URL(configuredUrl);
-    if (siteUrl.protocol !== "http:" && siteUrl.protocol !== "https:") {
+    if ((siteUrl.protocol !== "http:" && siteUrl.protocol !== "https:") || siteUrl.username || siteUrl.password) {
       return null;
     }
 
@@ -98,8 +98,13 @@ function getPostNames(
   targetPath: string,
   filenameCase: number
 ): { title: string; name: string } | null {
-  const postsDirectory = path.resolve(blogPath, "source", "_posts");
-  const relativePath = path.relative(postsDirectory, path.resolve(targetPath));
+  const articleDirectory = ["_posts", "_drafts"].map(folder => path.resolve(blogPath, "source", folder))
+    .find(directory => {
+      const relative = path.relative(directory, path.resolve(targetPath));
+      return relative && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+    });
+  if (!articleDirectory) return null;
+  const relativePath = path.relative(articleDirectory, path.resolve(targetPath));
   if (
     !relativePath
     || relativePath === ".."

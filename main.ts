@@ -1,3 +1,6 @@
+import { WechatHexoModal } from "./modals/WechatHexoModal";
+import { validateWechatArticleUrl } from "./utils/wechatArticleUrl";
+import { exportWechatHexoContent, WECHAT_HEXO_STYLES, WechatHexoInput } from "./utils/wechatHexoContent";
 import { PublishingView, PUBLISHING_VIEW } from "./views/PublishingView";
 import { openHexoInObsidian, registerHexoEditing } from "./utils/hexoEditing";
 import { DraftSyncSession } from "./utils/draftSync";
@@ -38,9 +41,11 @@ import {
   getObsoleteChildReferences,
   getTargetDirectory,
   getHexoAssetTargetPath,
+  getHexoDraftTargetPath,
   getHexoAssetRelativePath,
   isSourcePublishTarget,
 } from "./utils/platforms";
+import { resolveWechatSourceUrl } from "./utils/wechatSourceUrl";
 import { generateHexoUrl, getHexoRootPath } from "./utils/linkUtils";
 import { prepareHexoMetadata } from "./utils/hexoMetadata";
 import { prepareImageEmbeds, PreparedImageContent } from "./utils/imageEmbeds";
@@ -686,12 +691,17 @@ export default class EasyPub extends Plugin {
     };
     const initial = initialPlatformProperties(platform.id, sourceDataWithPubId,
       getFrontMatterString(sourceDataWithPubId, "title") || activeFile.basename, this.settings.wechat.defaultAuthor);
+    if (platform.id === "wechat") {
+      const sourceLink = await this.resolveWechatSourceUrl(pubId);
+      if (sourceLink.url) asObject(initial.wechat).sourceUrl = sourceLink.url;
+      else if (sourceLink.reason) new Notice(sourceLink.reason);
+    }
     const existingData = existingContent !== null ? parseFrontMatter(existingContent, true).data : undefined;
     let selectedProperties = existingData === undefined ? initial : platform.id === "wechat" ? canonicalWechatTitle(existingData) : existingData;
     let refreshCover = !existingData;
     if (options.configure && (isNew || options.propertiesOnly)) {
       const selection = await chooseArticleProperties(this.app, { title: options.propertiesOnly ? `刷新${platform.name}属性` : `生成${platform.name}稿件`,
-        description: options.propertiesOnly ? "勾选要从原稿刷新的字段，可调整建议值。正文和首次日期保留。" : "确认该平台的文章属性；后续更新正文时保留这些设置。",
+        description: options.propertiesOnly ? "勾选要从原稿刷新的字段，可调整建议值。正文和首次日期保留。" : platform.id === "wechat" ? "阅读原文会自动带入同一原稿的 Hexo 网址；请先部署博客并确认可访问，也可修改或清空。" : "确认该平台的文章属性；后续更新正文时保留这些设置。",
         attachmentSourcePath: activeFile.path, fields: platformPropertyFields(platform.id), current: selectedProperties, suggested: initial,
         refresh: options.propertiesOnly, removable: existingData ? legacyPropertyKeys(platform.id, existingData) : [] });
       if (!selection) return;
@@ -864,6 +874,98 @@ export default class EasyPub extends Plugin {
     return matches.keys().next().value ?? null;
   }
 
+  async prepareHexoFromWechat(file: TFile, input: WechatHexoInput) {
+    this.assertSettingsWritable();
+    if (this.publishInProgress || this.publishConfirmationOpen) throw new Error("已有发布任务正在进行，请稍后重试");
+    const repository = this.settings.hexoRepoPath;
+    await validateHexoBlog(repository);
+    const configuration = await fs.readFile(path.join(repository, "_config.yml"), "utf8");
+    const fingerprint = publishSettingsFingerprint(this.settings, "hexo");
+    const filePath = file.path;
+    const raw = await this.app.vault.read(file);
+    if (raw !== input.snapshot || !isWechatDraft(file, raw, this)) throw new Error("公众号稿已变化，请刷新后重新生成");
+    const parsed = parseFrontMatter(raw, true);
+    const id = getFrontMatterString(parsed.data, "pub_id")!;
+    const source = await this.resolvePublishingSource(file, parsed.data);
+    if (!source || source === file) throw new Error("未找到同一 pub_id 的原稿，请先修复原稿关联");
+    const sourceSnapshot = await this.app.vault.read(source);
+    const sourceData = parseFrontMatter(sourceSnapshot, true).data;
+    // Freeze precisely the rendered snapshot shown in the workbench.
+    const document = structuredClone(input.document), article = structuredClone(input.article);
+    const cover = input.cover ? structuredClone(input.cover) : undefined;
+    const hexo = PLATFORMS.find(platform => platform.id === "hexo")!;
+    const existingPath = await this.findArticleByPubId(hexo, id, sourceData, source.path);
+    const existing = existingPath ? await this.readPublishFile(hexo, existingPath) : null;
+    let target = existingPath ?? getHexoDraftTargetPath(this.settings, article.title || file.basename);
+    if (!existingPath && await this.publishPathExists(hexo, target)) target = await this.getAvailableTargetPath(hexo, target);
+    const root = await getHexoRootPath(repository);
+    const assets = new Map<string, PublishAsset>();
+    const imageChecks = new Map<string, {sourcePath: string; contentHash: string}>();
+    const imageUrl = (image: import("./types").WechatImage) => {
+      if (createHash("sha256").update(image.bytes).digest("hex") !== image.hash) throw new Error("预览图片已失效，请刷新后重试");
+      const extension = image.mime === "image/jpeg" ? "jpg" : image.mime === "image/png" ? "png" : null;
+      if (!extension) throw new Error("预览图片格式不支持，请转换为 PNG 或 JPG");
+      const destination = getHexoAssetTargetPath(this.settings, id, `wechat-${image.hash}.${extension}`, image.hash);
+      assets.set(destination, {sourcePath: image.localPath ?? image.source, targetPath: destination, contentHash: image.hash, bytes: image.bytes.slice()});
+      if (image.localPath) imageChecks.set(image.localPath, {sourcePath: image.localPath, contentHash: image.originalHash});
+      return root + getHexoAssetRelativePath(id, destination).split("/").map(encodeURIComponent).join("/");
+    };
+    const cssBytes = new TextEncoder().encode(WECHAT_HEXO_STYLES);
+    const cssHash = createHash("sha256").update(cssBytes).digest("hex");
+    const cssPath = getHexoAssetTargetPath(this.settings, id, "wechat-layout.css", cssHash);
+    const cssUrl = root + getHexoAssetRelativePath(id, cssPath).split("/").map(encodeURIComponent).join("/");
+    const output = exportWechatHexoContent(document, imageUrl, cssUrl);
+    assets.set(cssPath, {sourcePath:"wechat-layout.css", targetPath:cssPath, contentHash:cssHash, bytes:cssBytes});
+    const seed = {...sourceData, title: article.title || file.basename, author: article.author ?? "", description: article.digest ?? "", cover: ""};
+    let meta = await this.buildPublishedFrontMatter(hexo, source, seed, existing, id, new Date().toISOString(), target);
+    if (!existing && cover) meta.cover = imageUrl(cover);
+    if (!existing && article.publishedUrl) {
+      meta.wechat_article_url = validateWechatArticleUrl(article.publishedUrl);
+      if (typeof article.commentsEnabled === "boolean") meta.wechat_comments_enabled = article.commentsEnabled;
+    }
+    const diff: ArticleDiff = {pub_id:id, sourcePath:source.path, targetPath:target,
+      sourceContent:stringifyFrontMatter(output.body, meta), targetContent:existing, isNew:existing === null,
+      meta:meta as ArticleMeta, platform:hexo, sourceSnapshot, settingsFingerprint:fingerprint,
+      assets:[...assets.values()], imageChecks:[...imageChecks.values()]};
+    const assertFresh = async () => {
+      this.assertSettingsWritable();
+      await input.assertFresh();
+      if (file.path !== filePath || await this.app.vault.read(file) !== raw
+        || repository !== this.settings.hexoRepoPath || fingerprint !== publishSettingsFingerprint(this.settings, "hexo")
+        || configuration !== await fs.readFile(path.join(repository, "_config.yml"), "utf8")) throw new Error("公众号稿或博客配置已变化，请重新生成");
+      await this.validatePublishSource(diff, source);
+      const actual = await this.findArticleByPubId(hexo, id, sourceData, source.path, true);
+      if (actual !== existingPath) throw new Error("Hexo 稿件匹配关系已变化，请重新生成");
+      await input.assertFresh();
+    };
+    await assertFresh();
+    return {diff, source, assertFresh, preview:exportWechatHexoContent(document, image => image.previewUrl).html};
+  }
+
+  async generateHexoFromWechat(file: TFile, input: WechatHexoInput): Promise<boolean> {
+    const plan = await this.prepareHexoFromWechat(file, input);
+    if (this.publishInProgress || this.publishConfirmationOpen) throw new Error("已有发布任务正在进行，请稍后重试");
+    this.publishConfirmationOpen = true;
+    try {
+      return await new Promise<boolean>((resolve, reject) => {
+        try {
+          new WechatHexoModal(this.app, plan.diff, plan.preview, async guard => {
+            if (this.publishInProgress) throw new Error("已有发布任务正在进行，请稍后重试");
+            this.publishInProgress = true;
+            try {
+              await plan.assertFresh(); guard();
+              await this.copyAndOpenForEdit(plan.diff, plan.source, {beforeWrite:async () => {guard(); await plan.assertFresh(); guard();}, assertActive:guard, skipAutoDeploy:true});
+            } finally {this.publishInProgress = false;}
+          }, resolve).open();
+        } catch (error) {reject(error);}
+      });
+    } finally {this.publishConfirmationOpen = false;}
+  }
+
+  resolveWechatSourceUrl(pubId: string) {
+    return resolveWechatSourceUrl(this, this.settings.hexoRepoPath, pubId, generateHexoUrl);
+  }
+
   async buildPublishedFrontMatter(
     platform: Platform,
     sourceFile: TFile,
@@ -887,11 +989,24 @@ export default class EasyPub extends Plugin {
     });
     if (selectedProperties) {
       const protectedKeys = new Set(["pub_id", "source_file", "date", "updated"]);
-      if (platform.id === "hexo") { protectedKeys.add("publish_url"); protectedKeys.add("workflow"); }
+      if (platform.id === "hexo") { protectedKeys.add("publish_url"); protectedKeys.add("workflow"); protectedKeys.add("wechat_article_url"); protectedKeys.add("wechat_comments_enabled"); }
       for (const key of Object.keys(publishedData)) if (!protectedKeys.has(key)) delete publishedData[key];
       for (const [key, value] of Object.entries(selectedProperties)) if (!protectedKeys.has(key)) publishedData[key] = value;
     }
 
+    if (platform.id === "wechat" && existingData?.wechat) {
+      const previous = existingData.wechat as Record<string, unknown>;
+      const wechat = {...publishedData.wechat as Record<string, unknown>};
+      for (const key of ["publishedUrl", "commentsEnabled"]) {
+        if (Object.prototype.hasOwnProperty.call(previous, key)) wechat[key] = previous[key];
+        else delete wechat[key];
+      }
+      publishedData.wechat = wechat;
+    }
+    if (platform.id === "wechat" && asObject(publishedData.wechat).sourceUrl === undefined) {
+      const sourceLink = await this.resolveWechatSourceUrl(pubId);
+      if (sourceLink.url) publishedData.wechat = { ...asObject(publishedData.wechat), sourceUrl: sourceLink.url };
+    }
     if (platform.id === "hexo" && await findControlRoomIntegration(this.settings.hexoRepoPath)) {
       const used = new Set<string>();
       for (const directory of ["_posts", "_drafts"]) {
@@ -932,9 +1047,11 @@ export default class EasyPub extends Plugin {
 
   async copyAndOpenForEdit(
     diff: ArticleDiff,
-    sourceFile: TFile
+    sourceFile: TFile,
+    options: {beforeWrite?: () => Promise<void>; assertActive?: () => void; skipAutoDeploy?: boolean} = {}
   ) {
     const platform = diff.platform;
+    await options.beforeWrite?.();
     await this.validatePublishSource(diff, sourceFile);
 
     // 确保发布目录存在
@@ -972,7 +1089,8 @@ export default class EasyPub extends Plugin {
           throw new Error("文章已移动到其他位置，请重新发布以保留其状态");
         }
       }
-      await this.writePublishFile(platform, diff.targetPath, finalContent, diff.targetContent);
+      await options.beforeWrite?.();
+      await this.writePublishFile(platform, diff.targetPath, finalContent, diff.targetContent, options.assertActive ?? (() => {}), async () => {await options.beforeWrite?.();});
       targetWritten = true;
       await this.validatePublishSource(diff, sourceFile);
       await this.updateSourceFile(sourceFile, platform, diff.targetPath, diff.pub_id,
@@ -1034,7 +1152,7 @@ export default class EasyPub extends Plugin {
     }
     new Notice(diff.isNew ? `已生成${platform.name}发布稿` : `已更新${platform.name}发布稿`);
 
-    if (platform.id === "hexo" && this.settings.autoDeploy) {
+    if (platform.id === "hexo" && this.settings.autoDeploy && !options.skipAutoDeploy) {
       await this.deployToHexo();
     }
 
@@ -1561,12 +1679,12 @@ export default class EasyPub extends Plugin {
 
   private async copyPublishAssets(assets: PublishAsset[], created: string[]): Promise<void> {
     for (const asset of assets) {
-      const sourceFile = this.app.vault.getAbstractFileByPath(asset.sourcePath);
-      if (!(sourceFile instanceof TFile)) {
-        throw new Error(`找不到图片附件：${asset.sourcePath}`);
+      let bytes = asset.bytes;
+      if (!bytes) {
+        const sourceFile = this.app.vault.getAbstractFileByPath(asset.sourcePath);
+        if (!(sourceFile instanceof TFile)) throw new Error(`找不到图片附件：${asset.sourcePath}`);
+        bytes = new Uint8Array(await this.app.vault.readBinary(sourceFile));
       }
-      const content = await this.app.vault.readBinary(sourceFile);
-      const bytes = new Uint8Array(content);
       if (!asset.contentHash || createHash("sha256").update(bytes).digest("hex") !== asset.contentHash) {
         throw new Error("图片在确认期间发生变化，请重新发布");
       }

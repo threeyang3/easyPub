@@ -1,0 +1,78 @@
+import assert from 'node:assert/strict';
+export async function runAssociationUi(page) {
+  const original=await page.evaluate(()=>window.fixture.read());
+  const saveSettings=async()=>{
+    await page.getByRole('button',{name:'保存设置并刷新',exact:true}).click();
+    await page.waitForFunction(()=>!window.fixture.view.busy&&!window.fixture.view.dirty&&!window.fixture.view.stale);
+  };
+  await page.evaluate(async()=>{
+    window.fixture.replace('---\npub_id: local-id\nsource_file: "[[source]]"\nwechat:\n  sourceUrl: ""\n---\nRace fixture');
+    window.fixture.pauseAssociation();await window.fixture.view.refresh();
+  });
+  await page.waitForFunction(()=>window.fixture.associationPaused());
+  await page.evaluate(async()=>{window.fixture.invalidateAssociation();await window.fixture.view.refresh();});
+  await page.getByRole('button',{name:'文章信息',exact:true}).click();
+  await page.getByText('未关联',{exact:true}).waitFor();
+  await page.evaluate(async()=>{window.fixture.releaseAssociation();await new Promise(resolve=>setTimeout(resolve,0));});
+  assert.equal(await page.getByText('关联冲突：稿件查找期间文件发生变化，请重新操作',{exact:true}).count(),0,'An older delayed query cannot overwrite the latest refresh');
+  await page.evaluate(async text=>{window.fixture.replace(text);await window.fixture.view.refresh();},original);
+
+  await page.evaluate(async()=>{
+    window.fixture.savedAssociation=[...window.fixture.associationFiles];window.fixture.associationFiles.clear();await window.fixture.view.refresh();
+  });
+  await page.getByRole('button',{name:'文章信息',exact:true}).click();
+  await page.getByText('尚未关联：尚无 Hexo 稿件',{exact:true}).waitFor();
+  await page.evaluate(async()=>{for(const [file,raw]of window.fixture.savedAssociation)window.fixture.associationFiles.set(file,raw);await window.fixture.view.refresh();});
+  const beforeForm=await page.evaluate(()=>window.fixture.associationReads());
+  await page.getByRole('button',{name:'从正文重新提取摘要',exact:true}).click();
+  assert.equal(await page.evaluate(()=>window.fixture.associationReads()),beforeForm,'Rebuilding the form does not scan Hexo');
+  await saveSettings();
+  const sourceUrl = 'https://blog.example/posts/ab12/';
+  await page.evaluate(async () => { window.fixture.replace('---\npub_id: local-id\nsource_file: "[[source]]"\n---\nOriginal link test body\n\n![Cover](../../assets/cover.png)'); window.fixture.originalLink({reason:'阅读原文未自动填写：请先生成 Hexo 稿件'}); await window.fixture.view.refresh(); });
+  await page.getByRole('button',{name:'文章信息',exact:true}).click();
+  assert.match(await page.getByText(/阅读原文未自动填写/).innerText(), /请先生成/);
+  await page.evaluate(async url => {window.fixture.originalLink({url}); await window.fixture.view.refresh();}, sourceUrl);
+  const originalInput = page.getByLabel('阅读原文链接', {exact:false});
+  assert.equal(await originalInput.inputValue(), sourceUrl);
+  assert.doesNotMatch(await page.evaluate(()=>window.fixture.read()), /sourceUrl:/); // Preview stays read-only.
+  await saveSettings();
+  await page.getByText(/已自动填写 Hexo/).waitFor({state:'hidden'});
+  assert.match(await page.evaluate(()=>window.fixture.read()), /sourceUrl: [\'"]?https:\/\/blog.example\/posts\/ab12\//);
+  await originalInput.fill('https://manual.example/original');
+  await saveSettings();
+  await page.evaluate(async()=>{await window.fixture.view.refresh();});
+  assert.equal(await originalInput.inputValue(), 'https://manual.example/original');
+  await originalInput.fill('');
+  await saveSettings();
+  await page.evaluate(async()=>{await window.fixture.view.refresh();});
+  assert.equal(await originalInput.inputValue(), '');
+  await page.evaluate(async original=>{window.fixture.originalLink({}); window.fixture.replace(original);await window.fixture.view.refresh();},original);
+  console.log('Original link browser: late autofill, read-only preview, save, manual link and explicit clearing passed.');
+  await page.evaluate(async()=>{window.fixture.replace('---\npub_id: local-id\nsource_file: "[[source]]"\n---\nAssociation test body');await window.fixture.view.refresh(true);});
+  await page.getByRole('button',{name:'文章信息',exact:true}).click();
+  const open=()=>page.getByRole('button',{name:'关联已发布文章',exact:true}).click();
+  const next=()=>page.getByRole('button',{name:'下一步：预览关联',exact:true}).click();
+  const confirm=()=>page.getByRole('button',{name:'确认保存并同步',exact:true}).click();
+  await open();await page.getByRole('textbox',{name:'公众号文章 URL',exact:true}).fill('https://evil.test/s/a');await next();
+  assert.match(await page.getByRole('alert').innerText(),/仅支持/);
+  const url='https://mp.weixin.qq.com/s/test_Article-123';
+  await page.getByRole('textbox',{name:'公众号文章 URL',exact:true}).fill(url);
+  await page.getByRole('combobox',{name:'留言状态'}).selectOption('true');await next();
+  assert.match(await page.getByText(/博客路径：/).innerText(),/nested\/renamed.md/);
+  await page.evaluate(()=>window.fixture.associationFailure(true));await confirm();
+  await page.getByText('关联待同步',{exact:true}).waitFor();
+  assert.match(await page.getByRole('status').filter({hasText:'部分完成'}).innerText(),/部分完成/);
+  assert.match(await page.evaluate(()=>window.fixture.read()),/publishedUrl:/);
+  assert.doesNotMatch(await page.evaluate(()=>[...window.fixture.associationFiles.values()][0]),/wechat_article_url/);
+  await page.evaluate(()=>window.fixture.associationFailure(false));
+  await page.getByRole('button',{name:'重新同步至 Hexo',exact:true}).click();await confirm();
+  await page.getByText('已关联',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('link',{name:'查看公众号文章',exact:true}).getAttribute('href'),url);
+  assert.match(await page.evaluate(()=>[...window.fixture.associationFiles.values()][0]),/wechat_comments_enabled: true/);
+  await page.getByRole('button',{name:'取消关联',exact:true}).click();await confirm();
+  await page.getByText('未关联',{exact:true}).waitFor();
+  assert.doesNotMatch(await page.evaluate(()=>window.fixture.read()),/publishedUrl:|commentsEnabled:/);
+  assert.doesNotMatch(await page.evaluate(()=>[...window.fixture.associationFiles.values()][0]),/wechat_article_url:|wechat_comments_enabled:/);
+  await page.evaluate(async original=>{window.fixture.replace(original);await window.fixture.view.refresh(true);},original);
+  console.log('Association browser: URL rejection, preview, partial completion, persistent local state, retry, link and unlink passed.');
+}

@@ -70,7 +70,7 @@ export function initialPlatformProperties(platform: string, source: FrontMatterD
 export function legacyPropertyKeys(platform: string, data: FrontMatterData): string[] {
   const allowed = new Set(platformPropertyFields(platform).map(field => field.key.split(".")[0]));
   for (const key of ["pub_id", "source_file", "date", "updated"]) allowed.add(key);
-  if (platform === "hexo") for (const key of ["publish_url", "workflow"]) allowed.add(key);
+  if (platform === "hexo") for (const key of ["publish_url", "workflow", "wechat_article_url", "wechat_comments_enabled"]) allowed.add(key);
   return Object.keys(data).filter(key => !allowed.has(key));
 }
 

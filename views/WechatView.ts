@@ -1,3 +1,6 @@
+import { Association, readAssociationStatus, prepareAssociation, patchWechatDraftAssociation } from "../utils/wechatAssociation";
+import { validateWechatArticleUrl } from "../utils/wechatArticleUrl";
+import { WechatAssociationModal } from "../modals/WechatAssociationModal";
 import { canReuseWechatPreview } from "../utils/wechatPreviewReuse";
 import { Component, FuzzySuggestModal, ItemView, TFile, ViewStateResult, WorkspaceLeaf } from "obsidian";
 import type EasyPub from "../main";
@@ -31,10 +34,15 @@ class CoverPicker extends FuzzySuggestModal<TFile> {
 }
 
 export class WechatView extends ItemView {
+  private associationFeedback?: {path: string; text: string; error: boolean};
   private allowRemoteImages = () => this.plugin.settings.wechat.allowRemoteImages !== false;
   private imagePolicyRevision = 0;
   private file: TFile | null = null;
   private snapshot = "";
+  private sourceUrlNotice = "";
+  private associationStatus = "正在检查关联状态…";
+
+  private associationStatusNode?:HTMLElement;
   private snapshotPath = "";
   private prepared?: WechatPreparedDocument;
   private cover?: WechatImage;
@@ -101,6 +109,7 @@ export class WechatView extends ItemView {
       else void this.run(() => this.refresh(true));
     });
     this.button(tools, "打开本地稿", () => this.run(async () => { if (this.file) await this.app.workspace.getLeaf(false).openFile(this.file); }));
+    this.button(tools, "生成 Hexo 稿（保留排版）", () => this.run(() => this.generateHexo()));
     this.button(tools,"同步正文到其他稿",()=>{if(this.file)void this.plugin.syncDraftBody(this.file).catch(error=>this.message((error as Error).message,true));});
     this.button(tools, "智能排版", () => { void this.openLayout().catch(error => this.message((error as Error).message, true)); });
     this.status = root.createDiv({ cls: "epw-status", text: "等待选择公众号本地稿", attr: { role: "status", "aria-live": "polite" } });
@@ -239,6 +248,16 @@ export class WechatView extends ItemView {
       author: saved.author ?? this.plugin.settings.wechat.defaultAuthor,
       digest: saved.digest,
     };
+    const associationPromise=readAssociationStatus(this.plugin,this.plugin.settings.hexoRepoPath,
+      getFrontMatterString(parsed.data,"pub_id")??"",{publishedUrl:article.publishedUrl||undefined,commentsEnabled:article.commentsEnabled});
+    let sourceUrlNotice = "";
+    if (article.sourceUrl === undefined) {
+      const sourceLink = await this.plugin.resolveWechatSourceUrl(getFrontMatterString(parsed.data, "pub_id") ?? "");
+      if (sourceLink.url) {
+        article.sourceUrl = sourceLink.url;
+        sourceUrlNotice = "已自动填写 Hexo 网址；保存设置或同步时保存。请先部署博客并确认可访问。";
+      } else sourceUrlNotice = sourceLink.reason ?? "";
+    }
     let prepared: WechatPreparedDocument;
     const previous = this.prepared;
     const reusable = reuseBody && !requireMapping && previous && filePath === this.snapshotPath
@@ -276,13 +295,18 @@ export class WechatView extends ItemView {
       const scroll = this.preview.scrollTop;
       if (!reusable) this.disposePrepared();
       else if (this.cover) releaseWechatImages([this.cover]);
-      this.prepared = prepared; this.cover = cover; this.article = article;
+      this.prepared = prepared; this.cover = cover; this.article = article; this.sourceUrlNotice = sourceUrlNotice;
       installed = true;
       this.snapshot = snapshot; this.snapshotPath = filePath; this.dirty = keepDirty; this.stale = false; this.cropSourceStale = false;
       this.identity.textContent = filePath; this.identity.title = filePath;
       if (!reusable) this.preview.innerHTML = previewWechatHtml(prepared.html, prepared.images);
       this.preview.scrollTop = scroll;
+      this.associationStatus="正在检查关联状态…";
       this.renderInspector();
+      void associationPromise.then(text=>{
+        if(this.closed||this.version!==version||this.file!==file||file.path!==filePath)return;
+        this.associationStatus=text;if(this.associationStatusNode)this.associationStatusNode.textContent=text;
+      });
       if (articleInvalid) this.showPage("article");
       else if (prepared.issues.length || !cover) this.showSettings(true);
       this.message(keepDirty ? "正文预览已更新 · 未保存设置已保留，请保存设置并刷新后同步" : prepared.issues.length ? `预检发现 ${prepared.issues.length} 个问题，请修复后刷新` : !cover ? "请选择封面，保存设置后即可同步" : "预检通过 · 同步以此本地成稿为准");
@@ -310,6 +334,7 @@ export class WechatView extends ItemView {
     const fields = parent.createEl("details", { cls: "epw-section" }); fields.open = true;
     fields.dataset.page = "article";
     fields.createEl("summary", { text: "文章信息" });
+    if (this.sourceUrlNotice) fields.createEl("p", { cls: "epw-muted", text: this.sourceUrlNotice });
     for (const [key, label, limit] of WECHAT_ARTICLE_FIELDS) {
       const wrapper = fields.createEl("label", { cls: "epw-field", text: label });
       const input = key === "digest" ? wrapper.createEl("textarea") : wrapper.createEl("input", { type: "text" });
@@ -324,6 +349,26 @@ export class WechatView extends ItemView {
       updateCount();
       input.addEventListener("input", () => { this.article[key] = input.value; updateCount(); this.changed(); });
     }
+    const association = parent.createEl("details", {cls:"epw-section"}); association.open = true; association.dataset.page = "article";
+    association.createEl("summary", {text:"公众号文章关联"});
+    const status = association.createEl("p", {text:this.associationStatus});
+    this.associationStatusNode=status;
+    const value: Association = {publishedUrl:this.article.publishedUrl || undefined, commentsEnabled:this.article.commentsEnabled};
+    if (this.associationFeedback?.path === this.snapshotPath) association.createEl("p", {
+      text:this.associationFeedback.text, cls:this.associationFeedback.error ? "epw-error" : "", attr:{role:"status"},
+    });
+    this.button(association, value.publishedUrl ? "修改关联" : "关联已发布文章", () => {
+      new WechatAssociationModal(this.app, value, next => this.linkArticle(next)).open();
+    });
+    if (value.publishedUrl) {
+      try {
+        const url = validateWechatArticleUrl(value.publishedUrl);
+        association.createEl("a", {text:"查看公众号文章",attr:{href:url,target:"_blank",rel:"noopener noreferrer"}});
+        this.button(association,"复制公众号文章 URL", () => this.run(() => navigator.clipboard.writeText(url)));
+      } catch { status.textContent = "关联冲突或异常：本地 URL 无效"; }
+      this.button(association,"取消关联", () => this.run(() => this.linkArticle({})));
+    }
+    this.button(association,"重新同步至 Hexo", () => this.run(() => this.linkArticle(value)));
     const covers = parent.createEl("details", { cls: "epw-section" }); covers.open = true; covers.dataset.page = "images";
     this.button(fields, "从正文重新提取摘要", () => {
       if (!this.prepared || this.snapshotPath !== this.file?.path) return;
@@ -373,6 +418,40 @@ export class WechatView extends ItemView {
     const actions = parent.createDiv({ cls: "epw-inspector-actions" });
     this.button(actions, "保存设置并刷新", () => this.run(() => this.saveArticle())).addClass("mod-cta");
     this.showPage(this.page);
+  }
+  private async linkArticle(value: Association) {
+    value = {...value};
+    if (value.publishedUrl) value.publishedUrl = validateWechatArticleUrl(value.publishedUrl);
+    if (this.dirty) throw new Error("请先保存或放弃未保存的工作台设置");
+    const file = this.file, snapshot = this.snapshot, filePath = this.snapshotPath;
+    const repository = this.plugin.settings.hexoRepoPath;
+    if (!file) throw new Error("请先打开公众号本地稿");
+    const guard = () => {
+      if (this.closed || this.file !== file || file.path !== filePath || this.dirty || this.plugin.settings.hexoRepoPath !== repository) throw new Error("稿件上下文已变化，请重新操作");
+    };
+    const check = async (expected: string) => { guard(); if (await this.app.vault.read(file) !== expected) throw new Error("本地稿已变化，请刷新后重新操作"); };
+    await check(snapshot);
+    const pubId = getFrontMatterString(parseFrontMatter(snapshot).data,"pub_id") ?? "";
+    const plan = await prepareAssociation(this.plugin, repository, pubId, value);
+    const answer = await wechatChoice(this.app,"确认公众号文章关联",`公众号 URL：${value.publishedUrl ?? "取消关联"}\n博客标题：${plan.title}\n博客路径：${plan.path}\n原元数据：${JSON.stringify(plan.current)}\n新元数据：${JSON.stringify(value)}\n仅检查 URL 格式，请通过工作台链接手动核验文章。`,[{label:"确认保存并同步",value:"save"}]);
+    if (answer !== "save") return;
+    await check(snapshot);
+    let saved = "";
+    await this.app.vault.process(file, raw => {
+      guard(); if (raw !== snapshot) throw new Error("本地稿已变化，请重新操作");
+      return saved = patchWechatDraftAssociation(raw, value);
+    });
+    try {
+      await plan.commit(guard, () => check(saved));
+      this.associationFeedback = {path:filePath, text:"公众号关联已保存并同步至 Hexo；请通过现有发布流程构建部署", error:false};
+    }
+    catch (error) {
+      this.associationFeedback = {path:filePath, text:`部分完成：公众号本地关联已保存，Hexo 同步失败。请使用“重新同步至 Hexo”重试。${(error as Error).message}`, error:true};
+    }
+    await this.refresh(false, false, true);
+    // Cover preflight may switch to Images during refresh. Keep this operation's
+    // result and safe-retry actions visible even when the draft has no cover.
+    if (!this.closed && this.file === file && file.path === filePath) this.showPage("article");
   }
   private async openImageReference(bodyLine: number) {
     const file = this.file;
@@ -434,6 +513,21 @@ export class WechatView extends ItemView {
       catch (error) { this.cropModal = undefined; modal.close(); throw error; }
     } finally { this.cropOpening = false; }
   }
+  private async generateHexo() {
+    if (this.closed || !this.file || !this.prepared || this.stale || this.dirty || this.layoutModal || this.cropModal) throw new Error("请先保存设置并刷新公众号预览，再生成 Hexo 稿");
+    const file = this.file, snapshot = this.snapshot, version = this.version, filePath = file.path;
+    const assertFresh = async () => {
+      if (this.closed || this.file !== file || file.path !== filePath || version !== this.version || this.stale || this.dirty
+        || await this.app.vault.read(file) !== snapshot) throw new Error("公众号预览已变化，请刷新后重新生成");
+    };
+    const saved = await this.plugin.generateHexoFromWechat(file, {snapshot, document:this.prepared,
+      article:this.article, cover:this.cover, assertFresh});
+    if (saved && !this.closed) {
+      await this.refresh();
+      this.message("Hexo 稿已保存并保留公众号排版；请在博客中预览确认后发布");
+    }
+  }
+
   private async saveArticle(article?: WechatArticleSettings, assertActive: () => void = () => {}) {
     const file = this.file, snapshot = this.snapshot, snapshotPath = this.snapshotPath;
     if (!file) return;

@@ -1,3 +1,6 @@
+import {invalidateHexoLocator} from "../../utils/hexoLocator";
+import { WechatHexoModal } from "../../modals/WechatHexoModal";
+import { exportWechatHexoContent } from "../../utils/wechatHexoContent";
 import { ArticlePropertiesModal } from "../../modals/ArticlePropertiesModal";
 import { platformPropertyFields } from "../../utils/articleProperties";
 import { PublishingView } from "../../views/PublishingView";
@@ -41,6 +44,7 @@ const app: any = {
       if (readDelay) { globals.fixtureDelayedReads = (globals.fixtureDelayedReads ?? 0) + 1; await new Promise(resolve => setTimeout(resolve, readDelay)); }
       return snapshot;
     },
+    process: async (_file: TFile, update: (raw: string) => string) => { text = update(text); emit("modify",file); },
     readBinary: async () => { if (delay) await new Promise(resolve => setTimeout(resolve, delay)); return raw; },
     getAbstractFileByPath: (path: string) => path === file.path ? file : path === attachment.path ? attachment : path === alternate.path ? alternate : imported.get(path) ?? null,
     getFiles: () => [file, attachment, alternate, source, ...imported.values()],
@@ -68,16 +72,48 @@ const app: any = {
   } },
   workspace: { on: (event: string, listener: (...args: any[]) => void) => { if (!listeners.has(event)) listeners.set(event, new Set()); listeners.get(event)!.add(listener); return () => listeners.get(event)?.delete(listener); }, getActiveFile: () => file, requestSaveLayout: () => {}, getLeaf: () => ({ openFile: async (file: TFile, options: unknown) => { globals.fixtureOpened = { path: file.path, options }; } }) },
 };
-const plugin: any = { app, settings: normalizeSettings(null), wechatSyncInProgress: false, wechatCredentialRevision: 0,
+let hexoGenerated = "", hexoCommitted = 0;
+let sourceUrlResult: {url?:string; reason?:string} = {};
+const plugin: any = { resolveWechatSourceUrl: async () => sourceUrlResult, app, settings: normalizeSettings(null), wechatSyncInProgress: false, wechatCredentialRevision: 0,
+  generateHexoFromWechat: async (_file: TFile, input: any) => {
+    await input.assertFresh();
+    const output = exportWechatHexoContent(input.document, image => `/picture/${image.hash}.png`);
+    const diff: any = {isNew:true,targetPath:"/blog/source/_drafts/current-wechat.md",sourceContent:output.body,targetContent:null,meta:{title:input.article.title}};
+    return new Promise<boolean>(resolve => new WechatHexoModal(app,diff,exportWechatHexoContent(input.document,image=>image.previewUrl).html,
+      async guard => {guard();await input.assertFresh();guard();hexoGenerated=output.body;hexoCommitted++;},resolve).open());
+  },
   getWechatAiConfiguration: () => ({settings: {endpoint: 'https://ai.example/v1/chat/completions', model: 'test-model', encryptedKey: '', jsonMode: true}, key: 'test-ai-key'}),
   openWechatAiSettings: () => {},
   hasWechatCredentials: () => connected, openWechatSetup: (done?:()=>void) => {connected=true; done?.();},
   relativeWechatAttachment: () => "../../assets/cover.png", openWechatBackend: async () => {}, saveSettings: async () => {},
   getWechatApi: () => ({ listDrafts: async () => [{ media_id: "recovered", content: { news_item: [{ title: "恢复测试草稿" }] } }],
     getDraft: async () => [{ title: "恢复测试草稿", content: "<p>远端正文</p>" }] }) };
+const associationFiles = new Map<string,string>([["/blog/source/_drafts/nested/renamed.md", "---\npub_id: local-id\ntitle: Blog title\nabbrlink: ab12\n---\nBlog body"]]);
+let associationFailure = false, associationReads = 0;
+let pauseAssociation=false, releaseAssociation:(()=>void)|undefined;
+Object.assign(plugin, {
+  publishDirectoryExists: async () => true,
+  listPublishFiles: async (_platform: unknown, directory: string) => [...associationFiles.keys()].filter(file => file.startsWith(directory+"/")),
+  readPublishFile: async (_platform: unknown, file: string) => {associationReads++;const raw=associationFiles.get(file);if(pauseAssociation){pauseAssociation=false;await new Promise<void>(resolve=>{releaseAssociation=resolve;});}return raw;},
+  publishFileVersion: async (_platform:unknown,file:string) => associationFiles.get(file),
+  writePublishFile: async (_platform:unknown, file:string, next:string, expected:string, guard:()=>void, before:()=>Promise<void>) => {
+    await before();guard();if(associationFailure)throw new Error("fixture write failure");
+    if(associationFiles.get(file)!==expected)throw new Error("concurrent edit");associationFiles.set(file,next);
+  },
+});
+plugin.settings.hexoRepoPath = "/blog";
 const view = new WechatView({ app, contentEl: document.querySelector("#workbench") } as any, plugin);
 await view.onOpen(); await view.bind(file);
 globals.fixture = { view,
+  hexoGenerated: () => hexoGenerated, hexoCommitted: () => hexoCommitted,
+  originalLink: (value: {url?:string; reason?:string}) => {sourceUrlResult=value;},
+  associationFiles,
+  associationReads:()=>associationReads,
+  pauseAssociation:()=>{pauseAssociation=true;},
+  associationPaused:()=>!!releaseAssociation,
+  releaseAssociation:()=>{releaseAssociation?.();releaseAssociation=undefined;},
+  invalidateAssociation:()=>invalidateHexoLocator(plugin),
+  associationFailure: (value:boolean) => {associationFailure=value;},
   selectNewCover: () => (view as any).selectCover("../../assets/alternate.png"),
   settingsWrites: () => settingsWrites,
   disconnectAccount: async () => {connected=false; await view.refresh();},

@@ -7,7 +7,7 @@ const output=process.argv[2];if(!output)throw new Error('Pass an output director
 const bundle=await build({entryPoints:['tests/fixtures/wechat-workbench.ts'],bundle:true,platform:'browser',format:'esm',write:false,external:['electron'],plugins:[{name:'browser-fixtures',setup(build){
   build.onResolve({filter:/^obsidian$/},()=>({path:path.resolve('tests/fixtures/wechat-obsidian.ts')}));
   build.onResolve({filter:/^(crypto|path|url)$/},args=>({path:args.path,namespace:'fixture'}));
-  build.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:args.path==='url'?`export const fileURLToPath=p=>new URL(p).pathname;`:args.path==='path'?`export default {join:(...parts)=>parts.join('/'),isAbsolute:p=>p.startsWith('/')};`:`export const createHash=()=>({data:'',update(v){this.data=String(v);return this;},digest(){let h=2166136261;for(const c of this.data)h=Math.imul(h^c.charCodeAt(0),16777619);return(h>>>0).toString(16).padStart(8,'0').repeat(8);}});export const randomBytes=n=>({toString:()=>'a'.repeat(n*2)});`,loader:'js'}));
+  build.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:args.path==='url'?`export const fileURLToPath=p=>new URL(p).pathname;`:args.path==='path'?`export default {join:(...parts)=>parts.join('/'),resolve:value=>value,isAbsolute:p=>p.startsWith('/')};`:`export const createHash=()=>({data:'',update(v){this.data=String(v);return this;},digest(){let h=2166136261;for(const c of this.data)h=Math.imul(h^c.charCodeAt(0),16777619);return(h>>>0).toString(16).padStart(8,'0').repeat(8);}});export const randomBytes=n=>({toString:()=>'a'.repeat(n*2)});`,loader:'js'}));
 }}]});
 await mkdir(output,{recursive:true});
 await writeFile(path.join(output,'workbench.js'),bundle.outputFiles[0].text);

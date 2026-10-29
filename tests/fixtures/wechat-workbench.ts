@@ -69,7 +69,8 @@ const app: any = {
   } },
   workspace: { on: (event: string, listener: (...args: any[]) => void) => { if (!listeners.has(event)) listeners.set(event, new Set()); listeners.get(event)!.add(listener); return () => listeners.get(event)?.delete(listener); }, getActiveFile: () => file, requestSaveLayout: () => {}, getLeaf: () => ({ openFile: async (file: TFile, options: unknown) => { globals.fixtureOpened = { path: file.path, options }; } }) },
 };
-const plugin: any = { app, settings: normalizeSettings(null), wechatSyncInProgress: false, wechatCredentialRevision: 0,
+let sourceUrlResult: {url?:string; reason?:string} = {};
+const plugin: any = { resolveWechatSourceUrl: async () => sourceUrlResult, app, settings: normalizeSettings(null), wechatSyncInProgress: false, wechatCredentialRevision: 0,
   getWechatAiConfiguration: () => ({settings: {endpoint: 'https://ai.example/v1/chat/completions', model: 'test-model', encryptedKey: '', jsonMode: true}, key: 'test-ai-key'}),
   openWechatAiSettings: () => {},
   hasWechatCredentials: () => connected, openWechatSetup: (done?:()=>void) => {connected=true; done?.();},
@@ -91,6 +92,7 @@ plugin.settings.hexoRepoPath = "/blog";
 const view = new WechatView({ app, contentEl: document.querySelector("#workbench") } as any, plugin);
 await view.onOpen(); await view.bind(file);
 globals.fixture = { view,
+  originalLink: (value: {url?:string; reason?:string}) => {sourceUrlResult=value;},
   associationFiles,
   associationFailure: (value:boolean) => {associationFailure=value;},
   selectNewCover: () => (view as any).selectCover("../../assets/alternate.png"),

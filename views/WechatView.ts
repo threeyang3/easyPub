@@ -39,6 +39,7 @@ export class WechatView extends ItemView {
   private imagePolicyRevision = 0;
   private file: TFile | null = null;
   private snapshot = "";
+  private sourceUrlNotice = "";
   private snapshotPath = "";
   private prepared?: WechatPreparedDocument;
   private cover?: WechatImage;
@@ -243,6 +244,14 @@ export class WechatView extends ItemView {
       author: saved.author ?? this.plugin.settings.wechat.defaultAuthor,
       digest: saved.digest,
     };
+    let sourceUrlNotice = "";
+    if (article.sourceUrl === undefined) {
+      const sourceLink = await this.plugin.resolveWechatSourceUrl(getFrontMatterString(parsed.data, "pub_id") ?? "");
+      if (sourceLink.url) {
+        article.sourceUrl = sourceLink.url;
+        sourceUrlNotice = "已自动填写 Hexo 网址；保存设置或同步时保存。请先部署博客并确认可访问。";
+      } else sourceUrlNotice = sourceLink.reason ?? "";
+    }
     let prepared: WechatPreparedDocument;
     const previous = this.prepared;
     const reusable = reuseBody && !requireMapping && previous && filePath === this.snapshotPath
@@ -280,7 +289,7 @@ export class WechatView extends ItemView {
       const scroll = this.preview.scrollTop;
       if (!reusable) this.disposePrepared();
       else if (this.cover) releaseWechatImages([this.cover]);
-      this.prepared = prepared; this.cover = cover; this.article = article;
+      this.prepared = prepared; this.cover = cover; this.article = article; this.sourceUrlNotice = sourceUrlNotice;
       installed = true;
       this.snapshot = snapshot; this.snapshotPath = filePath; this.dirty = keepDirty; this.stale = false; this.cropSourceStale = false;
       this.identity.textContent = filePath; this.identity.title = filePath;
@@ -314,6 +323,7 @@ export class WechatView extends ItemView {
     const fields = parent.createEl("details", { cls: "epw-section" }); fields.open = true;
     fields.dataset.page = "article";
     fields.createEl("summary", { text: "文章信息" });
+    if (this.sourceUrlNotice) fields.createEl("p", { cls: "epw-muted", text: this.sourceUrlNotice });
     for (const [key, label, limit] of WECHAT_ARTICLE_FIELDS) {
       const wrapper = fields.createEl("label", { cls: "epw-field", text: label });
       const input = key === "digest" ? wrapper.createEl("textarea") : wrapper.createEl("input", { type: "text" });

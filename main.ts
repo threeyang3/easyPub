@@ -41,6 +41,7 @@ import {
   getHexoAssetRelativePath,
   isSourcePublishTarget,
 } from "./utils/platforms";
+import { resolveWechatSourceUrl } from "./utils/wechatSourceUrl";
 import { generateHexoUrl, getHexoRootPath } from "./utils/linkUtils";
 import { prepareHexoMetadata } from "./utils/hexoMetadata";
 import { prepareImageEmbeds, PreparedImageContent } from "./utils/imageEmbeds";
@@ -685,12 +686,17 @@ export default class EasyPub extends Plugin {
     };
     const initial = initialPlatformProperties(platform.id, sourceDataWithPubId,
       getFrontMatterString(sourceDataWithPubId, "title") || activeFile.basename, this.settings.wechat.defaultAuthor);
+    if (platform.id === "wechat") {
+      const sourceLink = await this.resolveWechatSourceUrl(pubId);
+      if (sourceLink.url) asObject(initial.wechat).sourceUrl = sourceLink.url;
+      else if (sourceLink.reason) new Notice(sourceLink.reason);
+    }
     const existingData = existingContent !== null ? parseFrontMatter(existingContent, true).data : undefined;
     let selectedProperties = existingData === undefined ? initial : platform.id === "wechat" ? canonicalWechatTitle(existingData) : existingData;
     let refreshCover = !existingData;
     if (options.configure && (isNew || options.propertiesOnly)) {
       const selection = await chooseArticleProperties(this.app, { title: options.propertiesOnly ? `刷新${platform.name}属性` : `生成${platform.name}稿件`,
-        description: options.propertiesOnly ? "勾选要从原稿刷新的字段，可调整建议值。正文和首次日期保留。" : "确认该平台的文章属性；后续更新正文时保留这些设置。",
+        description: options.propertiesOnly ? "勾选要从原稿刷新的字段，可调整建议值。正文和首次日期保留。" : platform.id === "wechat" ? "阅读原文会自动带入同一原稿的 Hexo 网址；请先部署博客并确认可访问，也可修改或清空。" : "确认该平台的文章属性；后续更新正文时保留这些设置。",
         attachmentSourcePath: activeFile.path, fields: platformPropertyFields(platform.id), current: selectedProperties, suggested: initial,
         refresh: options.propertiesOnly, removable: existingData ? legacyPropertyKeys(platform.id, existingData) : [] });
       if (!selection) return;
@@ -856,6 +862,10 @@ export default class EasyPub extends Plugin {
     return matches.keys().next().value ?? null;
   }
 
+  resolveWechatSourceUrl(pubId: string) {
+    return resolveWechatSourceUrl(this, this.settings.hexoRepoPath, pubId, generateHexoUrl);
+  }
+
   async buildPublishedFrontMatter(
     platform: Platform,
     sourceFile: TFile,
@@ -892,6 +902,10 @@ export default class EasyPub extends Plugin {
         else delete wechat[key];
       }
       publishedData.wechat = wechat;
+    }
+    if (platform.id === "wechat" && asObject(publishedData.wechat).sourceUrl === undefined) {
+      const sourceLink = await this.resolveWechatSourceUrl(pubId);
+      if (sourceLink.url) publishedData.wechat = { ...asObject(publishedData.wechat), sourceUrl: sourceLink.url };
     }
     if (platform.id === "hexo" && await findControlRoomIntegration(this.settings.hexoRepoPath)) {
       const used = new Set<string>();

@@ -436,6 +436,9 @@ export class WechatView extends ItemView {
       this.associationFeedback = {path:filePath, text:`部分完成：公众号本地关联已保存，Hexo 同步失败。请使用“重新同步至 Hexo”重试。${(error as Error).message}`, error:true};
     }
     await this.refresh(false, false, true);
+    // Cover preflight may switch to Images during refresh. Keep this operation's
+    // result and safe-retry actions visible even when the draft has no cover.
+    if (!this.closed && this.file === file && file.path === filePath) this.showPage("article");
   }
   private async openImageReference(bodyLine: number) {
     const file = this.file;

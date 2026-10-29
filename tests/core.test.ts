@@ -1,3 +1,4 @@
+import {runSyncImageMemoryTests} from "./syncImageMemory.test";
 import { runHexoLocatorTests } from "./hexoLocator.test";
 import { runHexoPreviewPerformanceTests } from "./hexoPreviewPerformance.test";
 import { runPerformanceTests } from "./performance.test";
@@ -58,6 +59,7 @@ async function run() {
   await runPublishingWorkbenchTests();
   await runHexoEditingTests();
   await runDraftSyncTests();
+  await runSyncImageMemoryTests();
   await runStructureTests();
   await runArticlePropertyTests();
   await runControlRoomLauncherTests();

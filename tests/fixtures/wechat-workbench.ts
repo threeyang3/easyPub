@@ -1,3 +1,4 @@
+import {invalidateHexoLocator} from "../../utils/hexoLocator";
 import { WechatHexoModal } from "../../modals/WechatHexoModal";
 import { exportWechatHexoContent } from "../../utils/wechatHexoContent";
 import { ArticlePropertiesModal } from "../../modals/ArticlePropertiesModal";
@@ -89,10 +90,11 @@ const plugin: any = { resolveWechatSourceUrl: async () => sourceUrlResult, app, 
     getDraft: async () => [{ title: "恢复测试草稿", content: "<p>远端正文</p>" }] }) };
 const associationFiles = new Map<string,string>([["/blog/source/_drafts/nested/renamed.md", "---\npub_id: local-id\ntitle: Blog title\nabbrlink: ab12\n---\nBlog body"]]);
 let associationFailure = false, associationReads = 0;
+let pauseAssociation=false, releaseAssociation:(()=>void)|undefined;
 Object.assign(plugin, {
   publishDirectoryExists: async () => true,
   listPublishFiles: async (_platform: unknown, directory: string) => [...associationFiles.keys()].filter(file => file.startsWith(directory+"/")),
-  readPublishFile: async (_platform: unknown, file: string) => {associationReads++;return associationFiles.get(file);},
+  readPublishFile: async (_platform: unknown, file: string) => {associationReads++;const raw=associationFiles.get(file);if(pauseAssociation){pauseAssociation=false;await new Promise<void>(resolve=>{releaseAssociation=resolve;});}return raw;},
   publishFileVersion: async (_platform:unknown,file:string) => associationFiles.get(file),
   writePublishFile: async (_platform:unknown, file:string, next:string, expected:string, guard:()=>void, before:()=>Promise<void>) => {
     await before();guard();if(associationFailure)throw new Error("fixture write failure");
@@ -107,6 +109,10 @@ globals.fixture = { view,
   originalLink: (value: {url?:string; reason?:string}) => {sourceUrlResult=value;},
   associationFiles,
   associationReads:()=>associationReads,
+  pauseAssociation:()=>{pauseAssociation=true;},
+  associationPaused:()=>!!releaseAssociation,
+  releaseAssociation:()=>{releaseAssociation?.();releaseAssociation=undefined;},
+  invalidateAssociation:()=>invalidateHexoLocator(plugin),
   associationFailure: (value:boolean) => {associationFailure=value;},
   selectNewCover: () => (view as any).selectCover("../../assets/alternate.png"),
   settingsWrites: () => settingsWrites,

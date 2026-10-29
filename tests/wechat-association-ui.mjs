@@ -2,6 +2,18 @@ import assert from 'node:assert/strict';
 export async function runAssociationUi(page) {
   const original=await page.evaluate(()=>window.fixture.read());
   await page.evaluate(async()=>{
+    window.fixture.replace('---\npub_id: local-id\nsource_file: "[[source]]"\nwechat:\n  sourceUrl: ""\n---\nRace fixture');
+    window.fixture.pauseAssociation();await window.fixture.view.refresh();
+  });
+  await page.waitForFunction(()=>window.fixture.associationPaused());
+  await page.evaluate(async()=>{window.fixture.invalidateAssociation();await window.fixture.view.refresh();});
+  await page.getByRole('button',{name:'文章信息',exact:true}).click();
+  await page.getByText('未关联',{exact:true}).waitFor();
+  await page.evaluate(async()=>{window.fixture.releaseAssociation();await new Promise(resolve=>setTimeout(resolve,0));});
+  assert.equal(await page.getByText('关联冲突：稿件查找期间文件发生变化，请重新操作',{exact:true}).count(),0,'An older delayed query cannot overwrite the latest refresh');
+  await page.evaluate(async text=>{window.fixture.replace(text);await window.fixture.view.refresh();},original);
+
+  await page.evaluate(async()=>{
     window.fixture.savedAssociation=[...window.fixture.associationFiles];window.fixture.associationFiles.clear();await window.fixture.view.refresh();
   });
   await page.getByRole('button',{name:'文章信息',exact:true}).click();

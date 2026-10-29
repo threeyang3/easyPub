@@ -41,7 +41,7 @@ export class WechatView extends ItemView {
   private snapshot = "";
   private sourceUrlNotice = "";
   private associationStatus = "正在检查关联状态…";
-  private associationStatusKey = "";
+
   private associationStatusNode?:HTMLElement;
   private snapshotPath = "";
   private prepared?: WechatPreparedDocument;
@@ -301,12 +301,10 @@ export class WechatView extends ItemView {
       this.identity.textContent = filePath; this.identity.title = filePath;
       if (!reusable) this.preview.innerHTML = previewWechatHtml(prepared.html, prepared.images);
       this.preview.scrollTop = scroll;
-      this.associationStatusKey=JSON.stringify([filePath,snapshot,this.plugin.settings.hexoRepoPath]);
-      const associationKey=this.associationStatusKey;
       this.associationStatus="正在检查关联状态…";
       this.renderInspector();
       void associationPromise.then(text=>{
-        if(this.closed||this.associationStatusKey!==associationKey)return;
+        if(this.closed||this.version!==version||this.file!==file||file.path!==filePath)return;
         this.associationStatus=text;if(this.associationStatusNode)this.associationStatusNode.textContent=text;
       });
       if (articleInvalid) this.showPage("article");

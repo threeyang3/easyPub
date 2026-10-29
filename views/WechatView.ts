@@ -13,7 +13,7 @@ import { wechatChoice } from "../modals/WechatChoiceModal";
 import { WechatComparison, wechatReadableHtml } from "../utils/wechatComparison";
 import { WechatCropModal } from "../modals/WechatCropModal";
 import { WechatLayoutModal } from "../modals/WechatLayoutModal";
-import { readWechatLayoutPlan, themePlan } from "../utils/wechatLayoutEngine";
+import { readWechatLayoutPlan, themePlan, anchorWechatLayout } from "../utils/wechatLayoutEngine";
 import { WECHAT_ARTICLE_FIELDS, wechatFieldLength } from "../utils/wechatLimits";
 import { compareWechatReadback } from "../utils/wechatReadback";
 
@@ -101,6 +101,7 @@ export class WechatView extends ItemView {
       else void this.run(() => this.refresh(true));
     });
     this.button(tools, "打开本地稿", () => this.run(async () => { if (this.file) await this.app.workspace.getLeaf(false).openFile(this.file); }));
+    this.button(tools,"同步正文到其他稿",()=>{if(this.file)void this.plugin.syncDraftBody(this.file).catch(error=>this.message((error as Error).message,true));});
     this.button(tools, "智能排版", () => { void this.openLayout().catch(error => this.message((error as Error).message, true)); });
     this.status = root.createDiv({ cls: "epw-status", text: "等待选择公众号本地稿", attr: { role: "status", "aria-live": "polite" } });
     const tabs = root.createDiv({ cls: "epw-tabs", attr: { "aria-label": "预览布局" } });
@@ -495,7 +496,7 @@ export class WechatView extends ItemView {
             let old = themePlan(doc, "default");
             try { old = readWechatLayoutPlan(previous.layout); } catch { /* First layout or invalid old plan. */ }
             const history = [...(previous.layoutHistory ?? []), old].slice(-5);
-            await this.saveArticle({...previous, layout: plan, layoutHistory: history}, guard);
+            await this.saveArticle({...previous, layout: anchorWechatLayout(plan, doc), layoutHistory: history}, guard);
           } finally {
             this.busy = false; this.updateSyncState();
             if (this.rerenderRequested && !this.closed && !this.paused && !this.dirty) this.scheduleRefresh();

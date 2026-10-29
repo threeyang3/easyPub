@@ -1,4 +1,7 @@
 import { PublishingView, PUBLISHING_VIEW } from "./views/PublishingView";
+import { openHexoInObsidian, registerHexoEditing } from "./utils/hexoEditing";
+import { DraftSyncSession } from "./utils/draftSync";
+import { DraftSyncModal } from "./modals/DraftSyncModal";
 import { formatHexoMarkdown } from "./utils/hexoFormatting";
 import { HexoFormatModal } from "./modals/HexoFormatModal";
 import fs from "fs/promises";
@@ -110,9 +113,13 @@ export default class EasyPub extends Plugin {
 
   async onload() {
     await this.loadSettings();
+    registerHexoEditing(this, () => this.settings.hexoRepoPath);
     this.registerView(PUBLISHING_VIEW, leaf => new PublishingView(leaf, this));
     this.addRibbonIcon("panels-top-left", "打开 EasyPub 发布面板", () => { void this.openPublishingPanel().catch(error => new Notice(this.getErrorMessage(error))); });
     this.addCommand({ id: "open-publishing-panel", name: "打开发布面板", callback: () => this.openPublishingPanel() });
+    this.addCommand({id:"sync-draft-body",name:"将本稿改动同步到其他发布稿",callback:()=>{
+      void this.syncDraftBody().catch(error=>new Notice(this.getErrorMessage(error)));
+    }});
     this.addCommand({ id: "format-hexo", name: "一键排版 Hexo 发布稿", callback: () => {
       void this.formatHexoArticle().catch(error => new Notice(this.getErrorMessage(error)));
     } });
@@ -382,7 +389,11 @@ export default class EasyPub extends Plugin {
     const raw = getFrontMatterString(meta, "source_file");
     if (!raw) return file;
     const link = raw.replace(/^\[\[|\]\]$/g, "").split("|")[0].split("#")[0];
-    const source = this.app.metadataCache.getFirstLinkpathDest(link, file.path);
+    // Native external files resolve relative links outside the Vault. Source associations are Vault-root paths.
+    const resolved=this.app.metadataCache.getFirstLinkpathDest(link, file.path);
+    const exact = !resolved && !path.isAbsolute(link) && !link.startsWith("file:")
+      ? this.app.vault.getAbstractFileByPath(link) ?? this.app.vault.getAbstractFileByPath(`${link}.md`) : null;
+    const source = resolved ?? (exact instanceof TFile ? exact : null);
     if (!source || source.extension !== "md" || source === file) return null;
     const sourceMeta = parseFrontMatter(await this.app.vault.read(source), true).data;
     const id = getFrontMatterString(meta, "pub_id");
@@ -405,8 +416,7 @@ export default class EasyPub extends Plugin {
     const target = await this.findArticleByPubId(platform, id, meta, source.path);
     if (!target) throw new Error(`尚未创建${platform.name}发布稿，请使用“创建 / 更新发布稿”`);
     if (platform.isExternal) {
-      // The protected Control Room is the editor for external Hexo files.
-      await this.openHexoControlRoom(); return;
+      await this.openPublishedFile(target, platform); return;
     }
     const file = this.app.vault.getAbstractFileByPath(target);
     if (!(file instanceof TFile)) throw new Error("发布稿已移动，请刷新后重试");
@@ -1114,15 +1124,7 @@ export default class EasyPub extends Plugin {
 
   async openPublishedFile(filePath: string, platform: Platform) {
     if (platform.isExternal) {
-      try {
-        const electron = require("electron") as {
-          shell?: { openPath(filePath: string): Promise<string> };
-        };
-        const error = await electron.shell?.openPath(filePath);
-        new Notice(error || !electron.shell ? `稿件已保存：${filePath}，请用外部编辑器打开。` : "已用外部编辑器打开发布稿，修改后请保存。");
-      } catch {
-        new Notice(`稿件已保存：${filePath}`);
-      }
+      await openHexoInObsidian(this.app, this.settings.hexoRepoPath, filePath);
       return;
     }
 
@@ -1157,8 +1159,34 @@ export default class EasyPub extends Plugin {
     return this.getPublishStore().readPublishFile(platform, filePath);
   }
 
-  writePublishFile(platform: Platform, filePath: string, content: string, expected?: string | null): Promise<void> {
-    return this.getPublishStore().writePublishFile(platform, filePath, content, expected);
+  writePublishFile(platform: Platform, filePath: string, content: string, expected?: string | null, assertActive:()=>void=()=>{}, beforeCommit:()=>Promise<void>=async()=>{}): Promise<void> {
+    return this.getPublishStore().writePublishFile(platform, filePath, content, expected, assertActive, beforeCommit);
+  }
+
+  async syncDraftBody(selected?:TFile):Promise<void> {
+    this.assertSettingsWritable();
+    if(this.publishInProgress||this.publishConfirmationOpen||this.wechatSyncInProgress||this.pubIdBatchInProgress)throw new Error("请先完成当前发布或同步任务");
+    let file=selected??this.app.workspace.getActiveFile();
+    const view=this.app.workspace.activeLeaf?.view;
+    if(!selected&&view?.getViewType()===WECHAT_VIEW) {
+      const state=view.getState();file=typeof state.path==="string"?this.app.vault.getFileByPath(state.path):null;
+    }
+    if(!file)throw new Error("请先打开需要同步改动的发布稿");
+    this.publishInProgress=true;
+    let session:DraftSyncSession|undefined;
+    try {
+      session=await DraftSyncSession.create(this,file);
+      this.publishConfirmationOpen=true;
+      const modal=new DraftSyncModal(this.app,session,async(previews,guard)=>{
+        this.assertSettingsWritable();
+        if(this.publishInProgress||this.wechatSyncInProgress)throw new Error("已有发布或公众号同步任务，请稍后重试");
+        this.publishInProgress=true;
+        try{return await session!.commit(previews,()=>{guard();this.assertSettingsWritable();});}
+        finally{this.publishInProgress=false;}
+      },()=>{this.publishConfirmationOpen=false;session?.dispose();});
+      modal.open();
+    } catch(error){this.publishConfirmationOpen=false;session?.dispose();throw error;}
+    finally{this.publishInProgress=false;}
   }
 
   listPublishFiles(platform: Platform, directoryPath: string): Promise<string[]> {

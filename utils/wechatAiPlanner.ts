@@ -36,6 +36,7 @@ export async function planWechatLayout(settings: WechatAiSettings, key: string, 
   let data: unknown;
   try { data = JSON.parse(text); } catch { throw new Error("AI 返回的 JSON 无效；已保留当前排版，可选择默认主题"); }
   const proposed = data as {blocks?: unknown[]};
+  if(data&&typeof data==="object"&&Object.prototype.hasOwnProperty.call(data,"sourceBlocks"))throw new Error("AI 不能写入本地排版区块记录");
   if (Array.isArray(proposed?.blocks) && proposed.blocks.some(block => block && typeof block === "object" && Object.prototype.hasOwnProperty.call(block, "locked"))) throw new Error("AI 不能改变手工锁定状态");
   const plan = mergeLockedLayout(validateWechatLayout(data, doc), current, doc);
   if (epoch === cacheEpoch) plans.set(cacheKey, structuredClone(plan));

@@ -11,6 +11,8 @@
 | `npm test` | 元数据、身份、原子写入、恢复、布局、AI 协议、设置等 | Node；临时测试文件/仓库，接口替身；不需真实微信账号 |
 | `npm run check` | TypeScript 类型检查 | 不生成生产产物 |
 | `npm run build` | 类型检查、生产 bundle、release 同步 | 修改根目录 main.js 与 release/ |
+| `node tests/run-wechat-native.mjs --hexo-editing` | Hexo 原生外部编辑、侧栏打开、剪贴板图片、实时/阅读预览与宿主保存 | 仅 Sandbox；创建并清理临时原稿和博客目录，无图床上传或部署 |
+| `node tests/run-wechat-native.mjs --draft-sync` | 跨稿同步实际窗口、只同步配图、宿主附件目录、独立编辑和排版保留、连续同步 | 仅 Sandbox；临时稿件/博客/插件私有记录均清理，不上传或部署 |
 | `npm run test:wechat-ui` | 真实工作台/排版组件、Canvas、裁剪、异步和 CSS | Chromium + Obsidian API 替身；不等于真实宿主 |
 | `npm run test:publishing-ui` | 备份/诊断/传输确认窗口 | Chromium + 可控文件读取替身 |
 | `npm run test:wechat-native` | 原生 Markdown、图像、布局与系统加密 | 正在运行的 Obsidian CLI；临时内存插件，测试不写笔记、不请求微信 |

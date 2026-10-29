@@ -13,8 +13,10 @@ try {
   const picker = process.argv.includes('--file-picker');
   const workbench = process.argv.includes('--workbench');
   const hexo = process.argv.includes('--hexo');
+  const editing = process.argv.includes('--hexo-editing');
+  const draftSync = process.argv.includes('--draft-sync');
   if ((hexo || workbench) && !process.env.EASYPUB_TEST_HEXO_REPO) throw new Error('Set EASYPUB_TEST_HEXO_REPO to a disposable blog copy');
-  const entry = performance ? 'tests/performance-native.ts' : picker ? 'tests/attachment-picker-native.ts' : workbench ? 'tests/workbench-native.ts' : hexo ? 'tests/hexo-native.ts' : process.argv.includes('--download') ? 'tests/wechat-download-native.ts' : 'tests/wechat-native.ts';
+  const entry = draftSync ? 'tests/draft-sync-native.ts' : editing ? 'tests/hexo-editing-native.ts' : performance ? 'tests/performance-native.ts' : picker ? 'tests/attachment-picker-native.ts' : workbench ? 'tests/workbench-native.ts' : hexo ? 'tests/hexo-native.ts' : process.argv.includes('--download') ? 'tests/wechat-download-native.ts' : 'tests/wechat-native.ts';
   const result = await build({ entryPoints: [entry], bundle: true, platform: 'node', format: 'cjs', external: ['obsidian','electron','@electron/remote'], write: false });
   const file = path.join(temp, 'native.cjs');
   const pickerImagePath=picker ? path.join(temp,'easypub-native-picker-test.png') : undefined;
@@ -23,7 +25,7 @@ try {
     console.log(`Native picker test image: ${pickerImagePath}`);
   }
   const options = {pickerImagePath, imageUrl: process.env.EASYPUB_TEST_IMAGE_URL?.trim() || undefined, blogPath: process.env.EASYPUB_TEST_HEXO_REPO, ...(workbench || picker ? {styles:await readFile("styles.css","utf8")} : {}) };
-  await writeFile(file, result.outputFiles[0].text + '\nconst runAcceptance=module.exports.run; module.exports=class extends require("obsidian").Plugin { async onload(){this.result=await runAcceptance(this.app,' + JSON.stringify(options) + ');} };');
+  await writeFile(file, result.outputFiles[0].text + '\nconst runAcceptance=module.exports.run; module.exports=class extends require("obsidian").Plugin { async onload(){this.result=await runAcceptance.call(this,this.app,' + JSON.stringify(options) + ');} };');
   const id = `easypub-acceptance-${Date.now()}`;
   const code = `(async()=>{
     const id=${JSON.stringify(id)}, manager=app.plugins, adapter=app.vault.adapter;

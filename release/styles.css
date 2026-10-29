@@ -343,3 +343,9 @@
 .easy-pub-wechat .epw-section[data-page="article"] { padding:0; border:0; }
 .easy-pub-wechat .epw-section[data-page="article"] > summary { display:none; }
 .easy-pub-wechat .epw-inspector-actions { bottom:0; padding:6px 0; }
+.easy-pub-draft-sync { width: min(1050px, 94vw); }
+.easy-pub-draft-sync .ep-sync-target { margin: 14px 0; padding: 12px; border: 1px solid var(--background-modifier-border); border-radius: 8px; }
+.easy-pub-draft-sync .ep-sync-target > label { display: block; font-weight: 600; margin-bottom: 6px; }
+.easy-pub-draft-sync input[type="checkbox"] { margin-right: 6px; }
+.easy-pub-draft-sync details { margin-top: 8px; }
+.easy-pub-draft-sync pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow-y: auto; padding: 10px; background: var(--background-secondary); border-radius: 6px; }

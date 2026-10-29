@@ -171,6 +171,7 @@ export interface WechatLayoutPlan {
   theme: WechatThemeId;
   accentColor: WechatAccent;
   blocks: WechatLayoutInstruction[];
+  sourceBlocks?: Array<{id: string; kind: WechatBlockKind}>;
 }
 export interface WechatAiSettings { endpoint: string; model: string; encryptedKey: string; jsonMode: boolean }
 export interface WechatArticle {

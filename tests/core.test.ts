@@ -1,4 +1,6 @@
 import { runPerformanceTests } from "./performance.test";
+import { runHexoEditingTests } from "./hexoEditing.test";
+import { runDraftSyncTests } from "./draftSync.test";
 import { runAttachmentImportTests } from "./attachmentImport.test";
 import { runPublishingWorkbenchTests } from "./publishingWorkbench.test";
 import { runHexoFormattingTests } from "./hexoFormatting.test";
@@ -50,6 +52,8 @@ async function run() {
   runHexoFormattingTests();
   await runAttachmentImportTests();
   await runPublishingWorkbenchTests();
+  await runHexoEditingTests();
+  await runDraftSyncTests();
   await runStructureTests();
   await runArticlePropertyTests();
   await runControlRoomLauncherTests();

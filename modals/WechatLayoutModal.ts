@@ -1,7 +1,7 @@
 import { Modal } from "obsidian";
 import type EasyPub from "../main";
 import { WechatImage, WechatLayoutDocument, WechatLayoutPlan, WechatLayoutComponent, WechatThemeId } from "../types";
-import { LAYOUT_COMPONENT_ROLES, mergeLockedLayout, themePlan, validateWechatLayout } from "../utils/wechatLayoutEngine";
+import { LAYOUT_COMPONENT_ROLES, mergeLockedLayout, themePlan, validateWechatLayout, rebaseWechatLayout } from "../utils/wechatLayoutEngine";
 import { COMPONENT_LABELS, WECHAT_ACCENTS, WECHAT_THEMES, WECHAT_THEME_DESIGNS, themePalette } from "../utils/wechatThemes";
 import { plannerMessages, planWechatLayout } from "../utils/wechatAiPlanner";
 import { validateAiEndpoint } from "../utils/wechatAiProvider";
@@ -46,9 +46,10 @@ export class WechatLayoutModal extends Modal {
   private undoButton!: HTMLButtonElement;
   private previewLabel!: HTMLElement;
   private aiTheme: WechatThemeId | "auto" = "auto";
+  private rebaseNotice?: string;
   constructor(private plugin: EasyPub, private context: WechatLayoutContext) {
     super(plugin.app);
-    try { this.selected = validateWechatLayout(context.current, context.document); }
+    try { const rebased=rebaseWechatLayout(context.current, context.document);this.selected=rebased.plan;this.rebaseNotice=rebased.notice; }
     catch { this.selected = themePlan(context.document, "default"); }
     this.candidates = [{name: "打开时的方案", plan: structuredClone(this.selected)},
       ...context.history.flatMap(plan => {
@@ -62,6 +63,7 @@ export class WechatLayoutModal extends Modal {
     root.createEl("h2", {text: "智能排版"});
     root.createEl("p", {cls: "epl-intro", text: "选择风格 → 调整重点 → 应用到本地稿。文字与图片保持原样，同步公众号草稿箱需单独操作。"});
     this.status = root.createDiv({attr: {role: "status", "aria-live": "polite"}});
+    if(this.rebaseNotice)this.status.textContent=`${this.rebaseNotice}请在逐块调整中核对后应用。`;
     const mobileTabs = root.createDiv({cls: "epl-mobile-tabs", attr: {"aria-label": "排版工作区"}});
     const showPane = (preview: boolean) => {
       root.classList.toggle("epl-show-preview", preview);

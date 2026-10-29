@@ -146,7 +146,7 @@ export async function runWechatLayoutTests() {
     assert.throws(() => readWechatLayoutPlan({...semantic, blocks: [{...semantic.blocks[0], text: 'new text'}]}));
     const outdated = {...semantic, documentHash: '0'.repeat(64)};
     const outcome = applyWechatLayout(root, mapped.document, mapped.bindings, outdated);
-    assert.match(outcome.notice!, /过期/);
+    assert.match(outcome.notice!, /保留主题和配色/);
     assert.deepEqual(content(), before);
     const locks = mergeLockedLayout({...semantic, blocks: []}, semantic, mapped.document);
     assert.deepEqual(locks.blocks, [semantic.blocks[0]]);

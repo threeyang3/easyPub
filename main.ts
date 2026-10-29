@@ -879,11 +879,20 @@ export default class EasyPub extends Plugin {
     });
     if (selectedProperties) {
       const protectedKeys = new Set(["pub_id", "source_file", "date", "updated"]);
-      if (platform.id === "hexo") { protectedKeys.add("publish_url"); protectedKeys.add("workflow"); }
+      if (platform.id === "hexo") { protectedKeys.add("publish_url"); protectedKeys.add("workflow"); protectedKeys.add("wechat_article_url"); protectedKeys.add("wechat_comments_enabled"); }
       for (const key of Object.keys(publishedData)) if (!protectedKeys.has(key)) delete publishedData[key];
       for (const [key, value] of Object.entries(selectedProperties)) if (!protectedKeys.has(key)) publishedData[key] = value;
     }
 
+    if (platform.id === "wechat" && existingData?.wechat) {
+      const previous = existingData.wechat as Record<string, unknown>;
+      const wechat = {...publishedData.wechat as Record<string, unknown>};
+      for (const key of ["publishedUrl", "commentsEnabled"]) {
+        if (Object.prototype.hasOwnProperty.call(previous, key)) wechat[key] = previous[key];
+        else delete wechat[key];
+      }
+      publishedData.wechat = wechat;
+    }
     if (platform.id === "hexo" && await findControlRoomIntegration(this.settings.hexoRepoPath)) {
       const used = new Set<string>();
       for (const directory of ["_posts", "_drafts"]) {

@@ -147,6 +147,8 @@ export interface PicGoPendingUpload {
 
 export interface WechatCrop { x: number; y: number; width: number; height: number }
 export interface WechatArticleSettings {
+  publishedUrl?: string;
+  commentsEnabled?: boolean;
   title?: string;
   author?: string;
   digest?: string;

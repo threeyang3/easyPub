@@ -115,3 +115,7 @@
 - [上传永久素材](https://developers.weixin.qq.com/doc/service/api/material/permanent/api_addmaterial)：永久图片素材与临时缩略图的类型、大小不同。
 
 文档目前给出的标题和作者上限分别为 32 字、16 字，摘要 120 字。插件按该口径预检，不静默截断用户内容。正文同时按 2 万字符及 1 MB 预检；最终限制由微信接口决定。
+
+## 已发布文章与博客交流入口
+
+正式发布后的公开 URL 可在工作台「文章信息 → 公众号文章关联」中关联到同 pub_id 的 Hexo 稿件；参见[关联、重试和手动验收指南](wechat-association.md)。此功能独立于草稿箱同步，不修改 `wechat.sourceUrl` 或微信远端内容。

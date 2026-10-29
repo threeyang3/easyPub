@@ -50,9 +50,16 @@ export class Setting {
   constructor(private el: HTMLElement) { this.settingEl = el.createDiv(); }
   setName(text: string) { this.settingEl.createDiv({ text }); return this; }
   setDesc(text: string) { this.settingEl.createDiv({ text }); return this; }
+  addText(callback: (control: any) => void) {
+    const el = document.createElement("input"); this.settingEl.appendChild(el);
+    const control = { inputEl: el, setValue(value: string) {el.value=value;return control;}, onChange(fn:(value:string)=>void) {el.oninput=()=>fn(el.value);return control;} };
+    callback(control);return this;
+  }
   addDropdown(callback: (control: any) => void) {
     const el = document.createElement("select"); this.settingEl.appendChild(el);
     const control = {
+      selectEl: el,
+      addOptions(values: Record<string,string>) { for (const [value,text] of Object.entries(values)) el.add(new Option(text,value)); return control; },
       addOption(value: string, text: string) { el.add(new Option(text, value)); return control; },
       setValue(value: string) { el.value = value; return control; },
       onChange(fn: (value: string) => void) { el.onchange = () => fn(el.value); return control; },

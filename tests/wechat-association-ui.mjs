@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+export async function runAssociationUi(page) {
+  const original=await page.evaluate(()=>window.fixture.read());
+  await page.evaluate(async()=>{window.fixture.replace('---\npub_id: local-id\nsource_file: "[[source]]"\n---\nAssociation test body');await window.fixture.view.refresh(true);});
+  await page.getByRole('button',{name:'文章信息',exact:true}).click();
+  const open=()=>page.getByRole('button',{name:'关联已发布文章',exact:true}).click();
+  const next=()=>page.getByRole('button',{name:'下一步：预览关联',exact:true}).click();
+  const confirm=()=>page.getByRole('button',{name:'确认保存并同步',exact:true}).click();
+  await open();await page.getByRole('textbox',{name:'公众号文章 URL',exact:true}).fill('https://evil.test/s/a');await next();
+  assert.match(await page.getByRole('alert').innerText(),/仅支持/);
+  const url='https://mp.weixin.qq.com/s/test_Article-123';
+  await page.getByRole('textbox',{name:'公众号文章 URL',exact:true}).fill(url);
+  await page.getByRole('combobox',{name:'留言状态'}).selectOption('true');await next();
+  assert.match(await page.getByText(/博客路径：/).innerText(),/nested\/renamed.md/);
+  await page.evaluate(()=>window.fixture.associationFailure(true));await confirm();
+  await page.getByText('关联待同步',{exact:true}).waitFor();
+  assert.match(await page.getByRole('status').filter({hasText:'部分完成'}).innerText(),/部分完成/);
+  assert.match(await page.evaluate(()=>window.fixture.read()),/publishedUrl:/);
+  assert.doesNotMatch(await page.evaluate(()=>[...window.fixture.associationFiles.values()][0]),/wechat_article_url/);
+  await page.evaluate(()=>window.fixture.associationFailure(false));
+  await page.getByRole('button',{name:'重新同步至 Hexo',exact:true}).click();await confirm();
+  await page.getByText('已关联',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('link',{name:'查看公众号文章',exact:true}).getAttribute('href'),url);
+  assert.match(await page.evaluate(()=>[...window.fixture.associationFiles.values()][0]),/wechat_comments_enabled: true/);
+  await page.getByRole('button',{name:'取消关联',exact:true}).click();await confirm();
+  await page.getByText('未关联',{exact:true}).waitFor();
+  assert.doesNotMatch(await page.evaluate(()=>window.fixture.read()),/publishedUrl:|commentsEnabled:/);
+  assert.doesNotMatch(await page.evaluate(()=>[...window.fixture.associationFiles.values()][0]),/wechat_article_url:|wechat_comments_enabled:/);
+  await page.evaluate(async original=>{window.fixture.replace(original);await window.fixture.view.refresh(true);},original);
+  console.log('Association browser: URL rejection, preview, partial completion, persistent local state, retry, link and unlink passed.');
+}

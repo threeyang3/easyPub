@@ -1,3 +1,4 @@
+import { runWechatAssociationTests } from "./wechatAssociation.test";
 import { runPerformanceTests } from "./performance.test";
 import { runHexoEditingTests } from "./hexoEditing.test";
 import { runDraftSyncTests } from "./draftSync.test";
@@ -48,6 +49,7 @@ import { runStructureTests } from "./structure.test";
 import { runArticlePropertyTests } from "./articleProperties.test";
 
 async function run() {
+  await runWechatAssociationTests();
   await runPerformanceTests();
   runHexoFormattingTests();
   await runAttachmentImportTests();

@@ -1,8 +1,11 @@
+import { Association, prepareAssociation } from "../utils/wechatAssociation";
+import { validateWechatArticleUrl } from "../utils/wechatArticleUrl";
+import { WechatAssociationModal } from "../modals/WechatAssociationModal";
 import { canReuseWechatPreview } from "../utils/wechatPreviewReuse";
 import { Component, FuzzySuggestModal, ItemView, TFile, ViewStateResult, WorkspaceLeaf } from "obsidian";
 import type EasyPub from "../main";
 import { WechatArticleSettings, WechatCrop, WechatImage, WechatPreparedDocument } from "../types";
-import { getFrontMatterString, parseFrontMatter } from "../utils/frontMatter";
+import { getFrontMatterString, parseFrontMatter, stringifyFrontMatter } from "../utils/frontMatter";
 import { isWechatDraftPath } from "../utils/platforms";
 import { cropCoordinates, centeredCrop, readWechatArticleSettings, wechatArticleNeedsSave, wechatAssetKey, wechatHash, wechatStateKey } from "../utils/wechatState";
 import { IMAGE_EXTENSIONS, replaceWechatImageTokens } from "../utils/wechatMarkdown";
@@ -31,6 +34,7 @@ class CoverPicker extends FuzzySuggestModal<TFile> {
 }
 
 export class WechatView extends ItemView {
+  private associationFeedback?: {path: string; text: string; error: boolean};
   private allowRemoteImages = () => this.plugin.settings.wechat.allowRemoteImages !== false;
   private imagePolicyRevision = 0;
   private file: TFile | null = null;
@@ -324,6 +328,29 @@ export class WechatView extends ItemView {
       updateCount();
       input.addEventListener("input", () => { this.article[key] = input.value; updateCount(); this.changed(); });
     }
+    const association = parent.createEl("details", {cls:"epw-section"}); association.open = true; association.dataset.page = "article";
+    association.createEl("summary", {text:"公众号文章关联"});
+    const status = association.createEl("p", {text:"正在检查关联状态…"});
+    const value: Association = {publishedUrl:this.article.publishedUrl || undefined, commentsEnabled:this.article.commentsEnabled};
+    if (this.associationFeedback?.path === this.snapshotPath) association.createEl("p", {
+      text:this.associationFeedback.text, cls:this.associationFeedback.error ? "epw-error" : "", attr:{role:"status"},
+    });
+    const version = this.snapshot;
+    void prepareAssociation(this.plugin, this.plugin.settings.hexoRepoPath, getFrontMatterString(parseFrontMatter(version).data,"pub_id") ?? "", value)
+      .then(plan => { if (this.snapshot === version) status.textContent = plan.synced ? value.publishedUrl ? "已关联" : "未关联" : "关联待同步"; })
+      .catch(error => { if (this.snapshot === version) status.textContent = `关联冲突或异常：${(error as Error).message}`; });
+    this.button(association, value.publishedUrl ? "修改关联" : "关联已发布文章", () => {
+      new WechatAssociationModal(this.app, value, next => this.linkArticle(next)).open();
+    });
+    if (value.publishedUrl) {
+      try {
+        const url = validateWechatArticleUrl(value.publishedUrl);
+        association.createEl("a", {text:"查看公众号文章",attr:{href:url,target:"_blank",rel:"noopener noreferrer"}});
+        this.button(association,"复制公众号文章 URL", () => this.run(() => navigator.clipboard.writeText(url)));
+      } catch { status.textContent = "关联冲突或异常：本地 URL 无效"; }
+      this.button(association,"取消关联", () => this.run(() => this.linkArticle({})));
+    }
+    this.button(association,"重新同步至 Hexo", () => this.run(() => this.linkArticle(value)));
     const covers = parent.createEl("details", { cls: "epw-section" }); covers.open = true; covers.dataset.page = "images";
     this.button(fields, "从正文重新提取摘要", () => {
       if (!this.prepared || this.snapshotPath !== this.file?.path) return;
@@ -373,6 +400,42 @@ export class WechatView extends ItemView {
     const actions = parent.createDiv({ cls: "epw-inspector-actions" });
     this.button(actions, "保存设置并刷新", () => this.run(() => this.saveArticle())).addClass("mod-cta");
     this.showPage(this.page);
+  }
+  private async linkArticle(value: Association) {
+    if (this.dirty) throw new Error("请先保存或放弃未保存的工作台设置");
+    const file = this.file, snapshot = this.snapshot, filePath = this.snapshotPath;
+    const repository = this.plugin.settings.hexoRepoPath;
+    if (!file) throw new Error("请先打开公众号本地稿");
+    const guard = () => {
+      if (this.closed || this.file !== file || file.path !== filePath || this.dirty || this.plugin.settings.hexoRepoPath !== repository) throw new Error("稿件上下文已变化，请重新操作");
+    };
+    const check = async (expected: string) => { guard(); if (await this.app.vault.read(file) !== expected) throw new Error("本地稿已变化，请刷新后重新操作"); };
+    await check(snapshot);
+    const pubId = getFrontMatterString(parseFrontMatter(snapshot).data,"pub_id") ?? "";
+    const plan = await prepareAssociation(this.plugin, repository, pubId, value);
+    const answer = await wechatChoice(this.app,"确认公众号文章关联",`公众号 URL：${value.publishedUrl ?? "取消关联"}\n博客标题：${plan.title}\n博客路径：${plan.path}\n原元数据：${JSON.stringify(plan.current)}\n新元数据：${JSON.stringify(value)}\n仅检查 URL 格式，请通过工作台链接手动核验文章。`,[{label:"确认保存并同步",value:"save"}]);
+    if (answer !== "save") return;
+    await check(snapshot);
+    let saved = "";
+    await this.app.vault.process(file, raw => {
+      guard(); if (raw !== snapshot) throw new Error("本地稿已变化，请重新操作");
+      const parsed = parseFrontMatter(raw, true);
+      const previous = parsed.data.wechat;
+      if (previous !== undefined && (!previous || typeof previous !== "object" || Array.isArray(previous))) throw new Error("wechat 元数据格式无效");
+      const settings = {...previous as Record<string, unknown>};
+      delete settings.publishedUrl; delete settings.commentsEnabled;
+      if (value.publishedUrl) { settings.publishedUrl = value.publishedUrl; if (typeof value.commentsEnabled === "boolean") settings.commentsEnabled = value.commentsEnabled; }
+      parsed.data.wechat = settings;
+      return saved = stringifyFrontMatter(parsed.content, parsed.data);
+    });
+    try {
+      await plan.commit(guard, () => check(saved));
+      this.associationFeedback = {path:filePath, text:"公众号关联已保存并同步至 Hexo；请通过现有发布流程构建部署", error:false};
+    }
+    catch (error) {
+      this.associationFeedback = {path:filePath, text:`部分完成：公众号本地关联已保存，Hexo 同步失败。请使用“重新同步至 Hexo”重试。${(error as Error).message}`, error:true};
+    }
+    await this.refresh(false, false, true);
   }
   private async openImageReference(bodyLine: number) {
     const file = this.file;

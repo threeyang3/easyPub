@@ -66,3 +66,5 @@
 | [1.6.3](releases/1.6.3.md)、[1.6.4](releases/1.6.4.md)、[1.7.0](releases/1.7.0.md)、[1.7.1](releases/1.7.1.md)、[1.7.2](releases/1.7.2.md)、[1.7.3](releases/1.7.3.md)、[1.8.0](releases/1.8.0.md)、[1.9.0](releases/1.9.0.md)、[1.9.1](releases/1.9.1.md) | 各稳定版本发布说明 |
 
 结构化验收摘要保存在 [verification/](verification/)。不要向该目录提交真实账号密钥、访问令牌、未公开文章或完整插件配置。
+
+- [公众号正式文章关联与 Hexo 交流入口](wechat-association.md)

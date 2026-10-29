@@ -41,6 +41,7 @@ const app: any = {
       if (readDelay) { globals.fixtureDelayedReads = (globals.fixtureDelayedReads ?? 0) + 1; await new Promise(resolve => setTimeout(resolve, readDelay)); }
       return snapshot;
     },
+    process: async (_file: TFile, update: (raw: string) => string) => { text = update(text); emit("modify",file); },
     readBinary: async () => { if (delay) await new Promise(resolve => setTimeout(resolve, delay)); return raw; },
     getAbstractFileByPath: (path: string) => path === file.path ? file : path === attachment.path ? attachment : path === alternate.path ? alternate : imported.get(path) ?? null,
     getFiles: () => [file, attachment, alternate, source, ...imported.values()],
@@ -75,9 +76,23 @@ const plugin: any = { app, settings: normalizeSettings(null), wechatSyncInProgre
   relativeWechatAttachment: () => "../../assets/cover.png", openWechatBackend: async () => {}, saveSettings: async () => {},
   getWechatApi: () => ({ listDrafts: async () => [{ media_id: "recovered", content: { news_item: [{ title: "恢复测试草稿" }] } }],
     getDraft: async () => [{ title: "恢复测试草稿", content: "<p>远端正文</p>" }] }) };
+const associationFiles = new Map<string,string>([["/blog/source/_drafts/nested/renamed.md", "---\npub_id: local-id\ntitle: Blog title\nabbrlink: ab12\n---\nBlog body"]]);
+let associationFailure = false;
+Object.assign(plugin, {
+  publishDirectoryExists: async () => true,
+  listPublishFiles: async (_platform: unknown, directory: string) => [...associationFiles.keys()].filter(file => file.startsWith(directory+"/")),
+  readPublishFile: async (_platform: unknown, file: string) => associationFiles.get(file),
+  writePublishFile: async (_platform:unknown, file:string, next:string, expected:string, guard:()=>void, before:()=>Promise<void>) => {
+    await before();guard();if(associationFailure)throw new Error("fixture write failure");
+    if(associationFiles.get(file)!==expected)throw new Error("concurrent edit");associationFiles.set(file,next);
+  },
+});
+plugin.settings.hexoRepoPath = "/blog";
 const view = new WechatView({ app, contentEl: document.querySelector("#workbench") } as any, plugin);
 await view.onOpen(); await view.bind(file);
 globals.fixture = { view,
+  associationFiles,
+  associationFailure: (value:boolean) => {associationFailure=value;},
   selectNewCover: () => (view as any).selectCover("../../assets/alternate.png"),
   settingsWrites: () => settingsWrites,
   disconnectAccount: async () => {connected=false; await view.refresh();},

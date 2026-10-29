@@ -36,7 +36,7 @@ export function normalizeWechatSettings(input: unknown): WechatSettings {
 export function readWechatArticleSettings(value: unknown): WechatArticleSettings {
   const data = object(value);
   const result: WechatArticleSettings = {};
-  for (const key of ["title", "author", "digest", "sourceUrl", "cover"] as const) {
+  for (const key of ["title", "author", "digest", "sourceUrl", "cover", "publishedUrl"] as const) {
     if (typeof data[key] === "string") result[key] = data[key] as string;
   }
   for (const key of ["cropWide", "cropSquare"] as const) {
@@ -47,6 +47,7 @@ export function readWechatArticleSettings(value: unknown): WechatArticleSettings
       result[key] = crop as unknown as WechatCrop;
     }
   }
+  if (typeof data.commentsEnabled === "boolean") result.commentsEnabled = data.commentsEnabled;
   // Invalid plans remain visible so rendering can explain safe fallback.
   if (data.layout !== undefined) result.layout = data.layout as WechatArticleSettings["layout"];
   if (Array.isArray(data.layoutHistory)) result.layoutHistory = data.layoutHistory.slice(-5).flatMap(plan => {

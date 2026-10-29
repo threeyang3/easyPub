@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 export async function runAssociationUi(page) {
   const original=await page.evaluate(()=>window.fixture.read());
+  const saveSettings=async()=>{
+    await page.getByRole('button',{name:'保存设置并刷新',exact:true}).click();
+    await page.waitForFunction(()=>!window.fixture.view.busy&&!window.fixture.view.dirty&&!window.fixture.view.stale);
+  };
   await page.evaluate(async()=>{
     window.fixture.replace('---\npub_id: local-id\nsource_file: "[[source]]"\nwechat:\n  sourceUrl: ""\n---\nRace fixture');
     window.fixture.pauseAssociation();await window.fixture.view.refresh();
@@ -22,7 +26,7 @@ export async function runAssociationUi(page) {
   const beforeForm=await page.evaluate(()=>window.fixture.associationReads());
   await page.getByRole('button',{name:'从正文重新提取摘要',exact:true}).click();
   assert.equal(await page.evaluate(()=>window.fixture.associationReads()),beforeForm,'Rebuilding the form does not scan Hexo');
-  await page.getByRole('button',{name:'保存设置并刷新',exact:true}).click();
+  await saveSettings();
   const sourceUrl = 'https://blog.example/posts/ab12/';
   await page.evaluate(async () => { window.fixture.replace('---\npub_id: local-id\nsource_file: "[[source]]"\n---\nOriginal link test body\n\n![Cover](../../assets/cover.png)'); window.fixture.originalLink({reason:'阅读原文未自动填写：请先生成 Hexo 稿件'}); await window.fixture.view.refresh(); });
   await page.getByRole('button',{name:'文章信息',exact:true}).click();
@@ -31,15 +35,15 @@ export async function runAssociationUi(page) {
   const originalInput = page.getByLabel('阅读原文链接', {exact:false});
   assert.equal(await originalInput.inputValue(), sourceUrl);
   assert.doesNotMatch(await page.evaluate(()=>window.fixture.read()), /sourceUrl:/); // Preview stays read-only.
-  await page.getByRole('button',{name:'保存设置并刷新',exact:true}).click();
+  await saveSettings();
   await page.getByText(/已自动填写 Hexo/).waitFor({state:'hidden'});
   assert.match(await page.evaluate(()=>window.fixture.read()), /sourceUrl: [\'"]?https:\/\/blog.example\/posts\/ab12\//);
   await originalInput.fill('https://manual.example/original');
-  await page.getByRole('button',{name:'保存设置并刷新',exact:true}).click();
+  await saveSettings();
   await page.evaluate(async()=>{await window.fixture.view.refresh();});
   assert.equal(await originalInput.inputValue(), 'https://manual.example/original');
   await originalInput.fill('');
-  await page.getByRole('button',{name:'保存设置并刷新',exact:true}).click();
+  await saveSettings();
   await page.evaluate(async()=>{await window.fixture.view.refresh();});
   assert.equal(await originalInput.inputValue(), '');
   await page.evaluate(async original=>{window.fixture.originalLink({}); window.fixture.replace(original);await window.fixture.view.refresh();},original);

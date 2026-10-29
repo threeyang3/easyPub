@@ -146,9 +146,14 @@ export async function runLayoutUi(page) {
   assert.match(await status().innerText(), /已变化/);
   assert.equal(await page.evaluate(() => window.fixture.view.article.layout.theme), 'research');
   await button('取消').click();
+  const changedBeforeRefresh = await page.evaluate(() => window.fixture.read());
   await button('刷新预览').click();
   await page.waitForFunction(() => !window.fixture.view.stale && !window.fixture.view.busy);
-  assert.match(await page.locator('.epw-status').innerText(), /过期/);
+  // Current draft-sync behavior rebases unchanged blocks in preview. The stale
+  // pending AI response above must still be rejected, and preview never saves.
+  assert.match(await page.locator('.epw-status').innerText(), /正文已变化，已保留主题和配色/);
+  assert.equal(await page.evaluate(() => window.fixture.view.article.layout.theme), 'research');
+  assert.equal(await page.evaluate(() => window.fixture.read()), changedBeforeRefresh, 'Rebased preview must not silently persist layout metadata');
 
   await open(); await button('准备 AI 排版请求').click(); await button('确认发送这些片段并生成方案').click();
   await page.waitForFunction(() => window.fixtureAiRequests.length === 5);

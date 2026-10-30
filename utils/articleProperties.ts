@@ -5,6 +5,8 @@ export interface PropertyField {
   label: string;
   kind?: "list" | "date" | "image" | "choice";
   choices?: string[];
+  suggestions?: string[];
+  allowCustom?: boolean;
 }
 
 export const SOURCE_FIELDS: PropertyField[] = [

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { TFile } from "obsidian";
 import EasyPub from "../main";
-import { ArticlePropertiesModal } from "../modals/ArticlePropertiesModal";
+import { ArticlePropertiesModal, parsePropertyList } from "../modals/ArticlePropertiesModal";
 import { DiffModal } from "../modals/DiffModal";
 import { applyPropertySelection, canonicalWechatTitle, initialPlatformProperties, legacyPropertyKeys } from "../utils/articleProperties";
 import { mergePublishedFrontMatter, parseFrontMatter, stringifyFrontMatter } from "../utils/frontMatter";
@@ -10,6 +10,11 @@ import { wechatArticleNeedsSave } from "../utils/wechatState";
 import { PLATFORMS } from "../types";
 
 export async function runArticlePropertyTests() {
+  assert.deepEqual(parsePropertyList("写作\nAI", "tags"), ["写作", "AI"]);
+  assert.deepEqual(parsePropertyList('["随笔", "生活"]', "categories"), ["随笔", "生活"]);
+  assert.throws(() => parsePropertyList("写作,AI", "tags"), /不要用逗号/);
+  assert.throws(() => parsePropertyList('["写作,AI"]', "tags"), /不要在单个标签中使用逗号/);
+  assert.throws(() => parsePropertyList(`["${"标".repeat(61)}"]`, "tags"), /最多 60 个字符/);
   const source = { title: "Source", author: "Writer", description: "Summary", tags: ["AI"], categories: ["Tech"],
     cover: "https://example.com/cover.png", date: "2020-01-01", aliases: ["private"], secret: "never export",
     zhihu_type: "想法", wechat: { author: "wrong" }, top_img: "/source-only.png", layout: "private", abbrlink: "dead" };

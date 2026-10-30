@@ -4,6 +4,7 @@ import { runWechatAssociationTests } from "./wechatAssociation.test";
 import {runSyncImageMemoryTests} from "./syncImageMemory.test";
 import { runHexoLocatorTests } from "./hexoLocator.test";
 import { runHexoPreviewPerformanceTests } from "./hexoPreviewPerformance.test";
+import { runSourceArticleTests } from "./sourceArticle.test";
 import { runPerformanceTests } from "./performance.test";
 import { runHexoEditingTests } from "./hexoEditing.test";
 import { runDraftSyncTests } from "./draftSync.test";
@@ -662,6 +663,7 @@ async function run() {
     await rm(blogDirectory, { recursive: true, force: true });
   }
 
+  await runSourceArticleTests();
   console.log("EasyPub core tests passed");
 }
 

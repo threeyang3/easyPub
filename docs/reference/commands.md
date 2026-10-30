@@ -11,6 +11,7 @@
 | `open-publishing-panel` | `打开发布面板` | 随时打开常驻侧栏，无文章时也能使用常用工具 |
 | `format-hexo` | `一键排版 Hexo 发布稿` | 从原稿定位 Hexo 稿；预览补空行和空白清理，确认后备份并保存 |
 | `publish` | `Publish to platform` | 当前源 Markdown；选平台后生成或确认更新稿件。公众号已有本地稿时只打开 |
+| `new-article` | `新建文章` | 填写仓库内保存目录和基础属性，预览后创建原稿；新 ID、草稿状态和初稿版次自动生成，同名文件自动编号；左侧工具栏和发布面板也提供入口；可在 Obsidian 快捷键设置中绑定按键 |
 | `initialize-source-properties` | `初始化原稿属性` | 当前原稿；填写基础属性并预览，确认后补齐缺失 ID；保留自定义属性 |
 | `refresh-platform-properties` | `从原稿刷新平台属性（选择字段）` | 当前原稿；选择已有平台稿及要刷新的字段，可预览并选择清理旧额外属性；保留目标正文与首次日期 |
 | `build-hexo` | `Build Hexo locally (no deploy)` | 使用设置中的博客仓库执行 clean + generate，不部署；构建成功后尝试更新当前文章发布链接 |

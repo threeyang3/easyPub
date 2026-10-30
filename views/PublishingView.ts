@@ -42,6 +42,7 @@ export class PublishingView extends ItemView {
       this.app.workspace.requestSaveLayout(); await this.renderArticle();
     });
     const shortcuts = root.createDiv({ cls: "ep-panel-shortcuts" });
+    this.button(shortcuts, "新建文章", () => this.plugin.newArticle()).addClass("mod-cta");
     this.button(shortcuts, "Hexo 管理后台", () => this.plugin.openHexoControlRoom());
     this.article = root.createDiv({ cls: "ep-panel-article" });
     const tools = root.createDiv({ cls: "ep-panel-tools" });

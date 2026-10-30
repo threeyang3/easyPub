@@ -12,6 +12,8 @@ export interface ArticlePropertiesContext {
   refresh?: boolean;
   removable?: string[];
   attachmentSourcePath?: string;
+  previewSelection?: (selection: PropertySelection) => unknown;
+  suggestions?: Record<string, string[]>;
 }
 
 class AttachmentPicker extends FuzzySuggestModal<TFile> {
@@ -34,7 +36,7 @@ export class ArticlePropertiesModal extends Modal {
     el.createEl("p", { text: this.context.description });
     let uploading = false;
     const importButtons: HTMLButtonElement[] = [];
-    const controls: Array<{ field: PropertyField; input: HTMLInputElement | HTMLSelectElement; selected?: HTMLInputElement }> = [];
+    const controls: Array<{ field: PropertyField; input: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement; customInput?: HTMLInputElement; selected?: HTMLInputElement }> = [];
     for (const field of this.context.fields) {
       const row = el.createEl("label");
       let selected: HTMLInputElement | undefined;
@@ -43,12 +45,52 @@ export class ArticlePropertiesModal extends Modal {
         selected.setAttribute("aria-label", `刷新${field.label}`);
       }
       row.createEl("span", { text: field.label });
-      const input = field.choices ? row.createEl("select") : row.createEl("input", { type: "text" });
+      let customInput: HTMLInputElement | undefined;
+      const input = field.choices
+        ? row.createEl("select")
+        : field.kind === "list"
+          ? row.createEl("textarea", { attr: { rows: "2" } })
+          : row.createEl("input", { type: "text" });
       input.setAttribute("aria-label", field.label);
-      if (field.choices) for (const choice of field.choices) input.createEl("option", { value: choice, text: choice });
+      if (field.choices) {
+        for (const choice of field.choices) input.createEl("option", { value: choice, text: choice || "Vault 根目录" });
+        if (field.allowCustom) input.createEl("option", { value: "__custom__", text: "自定义目录…" });
+        if (field.allowCustom) {
+          customInput = row.createEl("input", { type: "text", placeholder: "输入仓库内相对目录" });
+          const currentText = propertyValue(this.context.refresh ? this.context.suggested : this.context.current, field.key);
+          const currentValue = currentText === undefined ? "" : String(currentText);
+          if (field.choices.includes(currentValue)) input.value = currentValue;
+          else { input.value = "__custom__"; customInput.value = currentValue; }
+          customInput.hidden = input.value !== "__custom__";
+          input.addEventListener("change", () => { customInput!.hidden = input.value !== "__custom__"; invalidate(); });
+          customInput.addEventListener("input", () => invalidate());
+        }
+      }
       const value = propertyValue(this.context.refresh ? this.context.suggested : this.context.current, field.key);
-      input.value = value === undefined ? "" : value instanceof Date ? value.toISOString() : typeof value === "string" ? value : JSON.stringify(value);
-      if (field.kind === "list") input.setAttribute("placeholder", '["标签一", "标签二"]');
+      if (!customInput) input.value = value === undefined ? "" : value instanceof Date ? value.toISOString() : typeof value === "string" ? value : JSON.stringify(value);
+      if (field.kind === "list") {
+        input.setAttribute("placeholder", field.key === "tags" ? "每行一个标签，例如：\n写作\nAI\n\n也支持 JSON：[\"写作\", \"AI\"]" : '["随笔", "生活"]');
+        row.createEl("small", { text: field.key === "tags" ? "可点选已有标签，也可每行添加自定义标签；每项最多 60 字，不要用逗号分隔。" : "可点选已有分类，也可填写 JSON 文本列表。" });
+      }
+      const suggestions = field.suggestions ?? this.context.suggestions?.[field.key];
+      if (suggestions?.length) {
+        const picker = row.createDiv({ cls: "ep-property-suggestions" });
+        picker.createEl("small", { text: field.kind === "list" ? "已有选项 · 点击切换" : "已有目录 · 点击填入" });
+        for (const suggestion of suggestions) {
+          const button = picker.createEl("button", { text: suggestion, attr: { type: "button" } });
+          button.onclick = () => {
+            if (field.kind === "list") {
+              let values: unknown[];
+              try { values = parsePropertyList(input.value, field.key); }
+              catch { values = []; }
+              const index = values.findIndex(value => value === suggestion);
+              if (index >= 0) values.splice(index, 1); else values.push(suggestion);
+              input.value = JSON.stringify(values);
+            } else input.value = suggestion;
+            input.dispatchEvent(new Event("input"));
+          };
+        }
+      }
       if (this.context.refresh) {
         input.disabled = true;
         selected!.addEventListener("change", () => { input.disabled = !selected!.checked; invalidate(); });
@@ -56,7 +98,7 @@ export class ArticlePropertiesModal extends Modal {
       }
       input.addEventListener("input", () => invalidate());
       input.addEventListener("change", () => invalidate());
-      controls.push({ field, input, selected });
+      controls.push({ field, input, customInput, selected });
       if (field.kind === "image" && this.context.attachmentSourcePath) {
         const purpose = field.key === "top_img" ? "顶部图片" : "封面";
         const actions = row.createDiv({ cls: "ep-property-image-actions" });
@@ -154,16 +196,17 @@ export class ArticlePropertiesModal extends Modal {
       invalidate(); error.textContent = "";
       try {
         const values: FrontMatterData = {};
-        for (const { field, input, selected } of controls) {
+        for (const { field, input, selected, customInput } of controls) {
           if (selected && !selected.checked) continue;
-          const text = input.value.trim();
+          const rawValue = field.allowCustom && (input as HTMLSelectElement).value === "__custom__" ? customInput?.value : input.value;
+          const text = rawValue?.trim() ?? "";
           // Empty optional values on initialization stay absent, preserving derived defaults.
           if (!text && !this.context.refresh && propertyValue(this.context.current, field.key) === undefined) continue;
           let value: unknown = text;
           if (field.kind === "list") {
-            value = text ? JSON.parse(text) : [];
+            value = parsePropertyList(text, field.key);
             if (!Array.isArray(value) || !value.every(item => typeof item === "string" || field.key === "categories" && Array.isArray(item) && item.every(v => typeof v === "string"))) {
-              throw new Error(`${field.label}请填写 JSON 文本列表`);
+              throw new Error(`${field.label}请填写列表；标签可每行一个，或使用 JSON 文本列表`);
             }
           }
           if (field.kind === "image" && text === "false" && !field.key.startsWith("wechat.")) value = false;
@@ -174,9 +217,10 @@ export class ArticlePropertiesModal extends Modal {
         }
         proposed = { values, remove: removals.filter(item => item.input.checked).map(item => item.key) };
         if (this.context.refresh && !Object.keys(values).length && !proposed.remove.length) throw new Error("请至少选择一个字段或待清理属性");
-        preview.textContent = JSON.stringify({ 写入: proposed.values, 移除: proposed.remove }, null, 2);
+        preview.textContent = JSON.stringify(this.context.previewSelection ? this.context.previewSelection(proposed)
+          : { 写入: proposed.values, 移除: proposed.remove }, null, 2);
         preview.hidden = false; confirm.disabled = false;
-      } catch (cause) { error.textContent = (cause as Error).message; }
+      } catch (cause) { invalidate(); error.textContent = (cause as Error).message; }
     };
     confirm.onclick = () => { if (!uploading && proposed) this.respond(proposed); };
   }
@@ -188,6 +232,27 @@ export class ArticlePropertiesModal extends Modal {
     this.contentEl.empty();
     if (!this.responded) { this.responded = true; this.finish(null); }
   }
+}
+
+export function parsePropertyList(text: string, key: string): unknown[] {
+  if (!text.trim()) return [];
+  if (text.trimStart().startsWith("[")) {
+    const parsed = JSON.parse(text);
+    if (!Array.isArray(parsed)) throw new Error("列表必须是数组");
+    if (key === "tags") {
+      if (parsed.some(value => typeof value === "string" && /[,，]/.test(value))) {
+        throw new Error("标签请每项填写一个，不要在单个标签中使用逗号；也可每行填写");
+      }
+      if (parsed.some(value => typeof value === "string" && value.length > 60)) {
+        throw new Error("单个标签最多 60 个字符");
+      }
+    }
+    return parsed;
+  }
+  const values = text.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+  if (key === "tags" && values.some(value => /[,，]/.test(value))) throw new Error("标签请每行填写一个，不要用逗号分隔；也可填写 JSON 文本列表");
+  if (key === "tags" && values.some(value => value.length > 60)) throw new Error("单个标签最多 60 个字符");
+  return values;
 }
 
 export function chooseArticleProperties(app: App, context: ArticlePropertiesContext): Promise<PropertySelection | null> {

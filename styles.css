@@ -238,11 +238,15 @@
 }
 .easy-pub-properties label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
 .easy-pub-properties label > span { min-width: 140px; }
-.easy-pub-properties label > input[type="text"], .easy-pub-properties label > select { flex: 1; min-width: 180px; }
+.easy-pub-properties label > input[type="text"], .easy-pub-properties label > select, .easy-pub-properties label > textarea { flex: 1; min-width: 180px; }
+.easy-pub-properties label > textarea { min-height: 58px; resize: vertical; font: inherit; }
 .easy-pub-properties label > small { flex-basis: 100%; color: var(--text-muted); overflow-wrap: anywhere; }
 .easy-pub-properties pre { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .easy-pub-properties [role="alert"] { color: var(--text-error); }
 .easy-pub-properties button { margin-right: 8px; }
+.easy-pub-properties .ep-property-suggestions { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.easy-pub-properties .ep-property-suggestions small { color: var(--text-muted); }
+.easy-pub-properties .ep-property-suggestions button { margin: 0; padding: 3px 8px; font-size: 11px; }
 
 /* Unified publishing panel uses the host's visual language and one vertical flow. */
 .easy-pub-panel { padding:16px; overflow:auto; height:100%; }

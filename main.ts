@@ -1,6 +1,7 @@
 import { WechatHexoModal } from "./modals/WechatHexoModal";
 import { validateWechatArticleUrl } from "./utils/wechatArticleUrl";
 import { exportWechatHexoContent, WECHAT_HEXO_STYLES, WechatHexoInput } from "./utils/wechatHexoContent";
+import { createSourceArticle, planNewArticle } from "./utils/sourceArticle";
 import { PublishingView, PUBLISHING_VIEW } from "./views/PublishingView";
 import { openHexoInObsidian, registerHexoEditing } from "./utils/hexoEditing";
 import { DraftSyncSession } from "./utils/draftSync";
@@ -121,6 +122,7 @@ export default class EasyPub extends Plugin {
     await this.loadSettings();
     registerHexoEditing(this, () => this.settings.hexoRepoPath);
     this.registerView(PUBLISHING_VIEW, leaf => new PublishingView(leaf, this));
+    this.addRibbonIcon("file-plus-2", "新建文章", () => { void this.newArticle().catch(error => new Notice(this.getErrorMessage(error))); });
     this.addRibbonIcon("panels-top-left", "打开 EasyPub 发布面板", () => { void this.openPublishingPanel().catch(error => new Notice(this.getErrorMessage(error))); });
     this.addCommand({ id: "open-publishing-panel", name: "打开发布面板", callback: () => this.openPublishingPanel() });
     this.addCommand({id:"sync-draft-body",name:"将本稿改动同步到其他发布稿",callback:()=>{
@@ -189,6 +191,9 @@ export default class EasyPub extends Plugin {
     });
 
     this.addSettingTab(new EasyPubSettingTab(this.app, this));
+    this.addCommand({ id: "new-article", name: "新建文章", callback: () => {
+      void this.newArticle().catch(error => new Notice(this.getErrorMessage(error)));
+    } });
     this.addCommand({ id: "initialize-source-properties", name: "初始化原稿属性", callback: () => {
       void this.initializeSourceProperties().catch(error => new Notice(this.getErrorMessage(error)));
     } });
@@ -572,6 +577,61 @@ export default class EasyPub extends Plugin {
     }
   }
 
+  async newArticle() {
+    this.assertSettingsWritable();
+    if (this.publishInProgress || this.publishConfirmationOpen || this.pubIdBatchInProgress) throw new Error("已有 EasyPub 任务正在进行，请稍候");
+    this.publishInProgress = true;
+    try {
+      const directories = PLATFORMS.filter(p => !p.isExternal).map(p => getPublishPath(p, this.settings));
+      const active = this.app.workspace.getActiveFile();
+      const parent = active?.extension === "md"
+        ? (active.parent?.path === "/" ? "" : active.parent?.path ?? "") : "随笔";
+      const folder = directories.some(dir => parent === dir || parent.startsWith(`${dir}/`))
+        || ["components", "话题", "静置", "附件", ".obsidian"].some(dir => parent === dir || parent.startsWith(`${dir}/`)) ? "随笔" : parent;
+      const id = generatePubId();
+      const loadedFolders = (this.app.vault.getAllLoadedFiles?.() ?? [])
+        .filter((file): file is TFolder => file instanceof TFolder)
+        .map(file => file.path)
+        .filter(path => path !== "/" && !path.split("/").some(part => part.startsWith(".")));
+      const folderChoices = [...new Set(["", folder, ...loadedFolders])]
+        .sort((left, right) => left.localeCompare(right, "zh-CN"));
+      const suggestions = this.getSourceArticleSuggestions();
+      const current = { folder, title: "", author: this.settings.wechat.defaultAuthor || "",
+        description: "", tags: [], categories: ["随笔"], cover: "", date: new Date().toISOString() };
+      const selection = await chooseArticleProperties(this.app, {
+        title: "新建文章", description: "创建独立原稿，自动生成新 ID 并标记为草稿。同名文件自动编号。日期为原稿创作时间，可修改或留空。",
+        fields: [{ key: "folder", label: "保存目录（相对仓库，留空为根目录）", choices: folderChoices, allowCustom: true }, ...SOURCE_FIELDS],
+        suggestions,
+        current, suggested: {}, previewSelection: proposed => {
+          const plan = planNewArticle(proposed.values, id, directories, p => !!this.app.vault.getAbstractFileByPath(p));
+          return { 文件路径: plan.path, 属性: plan.metadata };
+        },
+      });
+      if (!selection) return;
+      const file = await createSourceArticle(this.app, selection.values, id, directories);
+      new Notice(`文章已创建：${file.path}`);
+      try { await this.app.workspace.getLeaf(false).openFile(file); }
+      catch { new Notice(`文章已保存，但打开失败，请在文件列表打开：${file.path}`); }
+    } finally { this.publishInProgress = false; }
+  }
+
+  private getSourceArticleSuggestions(): Record<string, string[]> {
+    const tags = new Set<string>(), categories = new Set<string>();
+    for (const file of this.app.vault.getMarkdownFiles?.() ?? []) {
+      const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+      const collect = (target: Set<string>, value: unknown) => {
+        if (Array.isArray(value)) {
+          for (const item of value) Array.isArray(item) ? item.forEach(child => typeof child === "string" && target.add(child)) : typeof item === "string" && target.add(item);
+        } else if (typeof value === "string" && value.trim()) target.add(value.trim());
+      };
+      collect(tags, frontmatter?.tags); collect(categories, frontmatter?.categories);
+    }
+    return {
+      tags: [...tags].sort((left, right) => left.localeCompare(right, "zh-CN")).slice(0, 80),
+      categories: [...categories].sort((left, right) => left.localeCompare(right, "zh-CN")).slice(0, 40),
+    };
+  }
+
   async initializeSourceProperties() {
     this.assertSettingsWritable();
     const file = this.app.workspace.getActiveFile();
@@ -586,7 +646,7 @@ export default class EasyPub extends Plugin {
       }
       const selection = await chooseArticleProperties(this.app, { title: "初始化原稿属性",
         description: "填写通用文章信息。自定义属性保留；缺失的 pub_id 在确认后生成，发布稿关联在发布后建立。",
-        attachmentSourcePath: filePath, fields: SOURCE_FIELDS, current: { ...parsed.data, title: parsed.data.title || file.basename }, suggested: {} });
+        attachmentSourcePath: filePath, fields: SOURCE_FIELDS, suggestions: this.getSourceArticleSuggestions(), current: { ...parsed.data, title: parsed.data.title || file.basename }, suggested: {} });
       if (!selection) return;
       if (file.path !== filePath || await this.app.vault.read(file) !== snapshot) throw new Error("原稿已变化，请重新初始化");
       await this.app.fileManager.processFrontMatter(file, data => {
@@ -702,7 +762,7 @@ export default class EasyPub extends Plugin {
     if (options.configure && (isNew || options.propertiesOnly)) {
       const selection = await chooseArticleProperties(this.app, { title: options.propertiesOnly ? `刷新${platform.name}属性` : `生成${platform.name}稿件`,
         description: options.propertiesOnly ? "勾选要从原稿刷新的字段，可调整建议值。正文和首次日期保留。" : platform.id === "wechat" ? "阅读原文会自动带入同一原稿的 Hexo 网址；请先部署博客并确认可访问，也可修改或清空。" : "确认该平台的文章属性；后续更新正文时保留这些设置。",
-        attachmentSourcePath: activeFile.path, fields: platformPropertyFields(platform.id), current: selectedProperties, suggested: initial,
+        attachmentSourcePath: activeFile.path, fields: platformPropertyFields(platform.id), suggestions: this.getSourceArticleSuggestions(), current: selectedProperties, suggested: initial,
         refresh: options.propertiesOnly, removable: existingData ? legacyPropertyKeys(platform.id, existingData) : [] });
       if (!selection) return;
       refreshCover = refreshCover || Object.prototype.hasOwnProperty.call(selection.values, platform.id === "wechat" ? "wechat.cover" : "cover");

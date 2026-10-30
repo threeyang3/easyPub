@@ -125,7 +125,7 @@ try {
   assert.equal(await page.evaluate(() => window.consent), true);
   await page.evaluate(() => window.openProperties());
   assert.equal(await button('确认并继续').isDisabled(), true);
-  await page.getByRole('textbox', { name: '标签', exact: true }).fill('not a list');
+  await page.getByRole('textbox', { name: '标签', exact: true }).fill('not a list,still invalid');
   await button('预览属性变更').click();
   assert.equal(await button('确认并继续').isDisabled(), true);
   await page.getByRole('textbox', { name: '标签', exact: true }).fill('["reviewed"]');

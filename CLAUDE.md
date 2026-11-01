@@ -140,7 +140,7 @@ npm run check
 npm run build
 ```
 
-`npm run build` runs TypeScript checking, creates the production bundle, and synchronizes `main.js`, `manifest.json`, `styles.css`, and `LICENSE` into `release/`. Core/build CI covers Linux, Windows, and macOS; browser CI runs on Linux. Real macOS Obsidian acceptance remains separate (docs/macos.md).
+`npm run build` runs TypeScript checking, creates the production bundle, and synchronizes `main.js`, `manifest.json`, `styles.css`, and `LICENSE` into `release/`. Core/build CI always runs on Linux for code changes; compatibility-sensitive changes, manual runs and version tags also cover Windows and macOS. Both browser suites remain required for code changes on Linux. Full three-OS and browser checks for the final commit are required before release. Real macOS Obsidian acceptance remains separate (docs/macos.md).
 
 After source or manifest changes:
 

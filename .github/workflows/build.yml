@@ -2,15 +2,46 @@ name: Build
 
 on:
   push:
-    branches: ["main"]
+    branches: [main]
+    tags: ["[0-9]*"]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 jobs:
+  scope:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.scope.outputs.code }}
+      full: ${{ steps.scope.outputs.full }}
+      docs: ${{ steps.scope.outputs.docs }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Test CI scope rules
+        run: python3 .github/test_ci_scope.py
+      - id: scope
+        name: Select checks from the complete change set
+        run: python3 .github/ci_scope.py
+        env:
+          CI_EVENT: ${{ github.event_name }}
+          CI_REF: ${{ github.ref }}
+          CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
   build:
+    needs: scope
+    if: needs.scope.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: ${{ fromJSON(needs.scope.outputs.full == 'true' && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -25,6 +56,8 @@ jobs:
         run: git diff --exit-code -- main.js release/
 
   wechat-ui:
+    needs: [scope, build]
+    if: needs.scope.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

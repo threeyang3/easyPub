@@ -91,7 +91,20 @@ Hexo 原生测试必须先阅读 [tests/hexo-native.ts](../../tests/hexo-native.
 | 微信写入协议 | 模拟接口故障测试，必要时授权的测试账号验收 |
 | 只有 Markdown 文档 | 相对链接、标题锚点、命令/默认值核对、Mermaid 语法和渲染检查 |
 
-CI 当前为三系统 Node 20 核心/构建，以及 Linux 浏览器任务。CI 校验已提交产物与构建结果一致。原生测试和真实服务测试不在普通 CI 内。
+CI 自动响应 main push 和 PR；开发分支 push 不重复启动检查，新提交取消过时验证。
+所有代码变更保留 Linux / Node 20 核心测试、类型/生产构建、已提交产物一致性检查，以及
+两套 Linux 浏览器测试。浏览器任务等待构建成功，避免基础失败时继续消耗额度。
+
+纯 views/modals、微信逻辑/UI 测试及 CSS 改动通常只用 Linux；文件/进程/宿主集成、
+依赖、manifest、构建脚本、工作流和未知路径仍跑 Linux/Windows/macOS。
+具体规则见 [.github/ci_scope.py](../../.github/ci_scope.py)，测试覆盖整个提交范围、
+删除/重命名、PR merge-base、文档混合修改和手动/标签全量检查。
+仅 docs、根 README/CHANGELOG/规则/许可文档的变更不安装依赖或启动浏览器。
+Markdown 模板等未知路径不会按文档放行。
+
+手动 Run workflow 和版本标签始终执行三系统及两套浏览器检查。发布前必须核对最终提交的
+完整检查，不能以日常精简 CI 代替发版验证。原生和真实服务验收仍单独执行。
+本机禁止外部 Chrome/Chromium；本地运行核心测试/构建，完整浏览器套件由 CI 验证。
 
 ## 不启动外部浏览器的工作台预览
 

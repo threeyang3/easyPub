@@ -14,6 +14,7 @@ export interface ArticlePropertiesContext {
   attachmentSourcePath?: string;
   previewSelection?: (selection: PropertySelection) => unknown;
   suggestions?: Record<string, string[]>;
+  categoryPaths?: string[][];
 }
 
 class AttachmentPicker extends FuzzySuggestModal<TFile> {
@@ -72,6 +73,18 @@ export class ArticlePropertiesModal extends Modal {
         input.setAttribute("placeholder", field.key === "tags" ? "每行一个标签，例如：\n写作\nAI\n\n也支持 JSON：[\"写作\", \"AI\"]" : '["随笔", "生活"]');
         row.createEl("small", { text: field.key === "tags" ? "可点选已有标签，也可每行添加自定义标签；每项最多 60 字，不要用逗号分隔。" : "可点选已有分类，也可填写 JSON 文本列表。" });
       }
+      if (field.key === "categories" && this.context.categoryPaths?.length) {
+        const picker = row.createDiv({ cls: "ep-property-suggestions" });
+        picker.createEl("small", { text: "博客分类 · 点击填入完整层级，也可手动编辑" });
+        for (const categoryPath of this.context.categoryPaths) {
+          const button = picker.createEl("button", { text: categoryPath.join(" / "), attr: { type: "button" } });
+          button.onclick = () => {
+            input.value = JSON.stringify(categoryPath);
+            if (selected) { selected.checked = true; input.disabled = false; }
+            input.dispatchEvent(new Event("input"));
+          };
+        }
+      }
       const suggestions = field.suggestions ?? this.context.suggestions?.[field.key];
       if (suggestions?.length) {
         const picker = row.createDiv({ cls: "ep-property-suggestions" });
@@ -82,11 +95,12 @@ export class ArticlePropertiesModal extends Modal {
             if (field.kind === "list") {
               let values: unknown[];
               try { values = parsePropertyList(input.value, field.key); }
-              catch { values = []; }
+              catch (cause) { new Notice((cause as Error).message); return; }
               const index = values.findIndex(value => value === suggestion);
               if (index >= 0) values.splice(index, 1); else values.push(suggestion);
               input.value = JSON.stringify(values);
             } else input.value = suggestion;
+            if (selected) { selected.checked = true; input.disabled = false; }
             input.dispatchEvent(new Event("input"));
           };
         }

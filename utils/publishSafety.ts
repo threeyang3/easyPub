@@ -17,6 +17,23 @@ export function completeControlRoomMetadata(data: FrontMatterData, title: string
   const result: FrontMatterData = { ...data, title: data.title || title };
   if (result.categories === undefined || result.categories === "") result.categories = [];
   if (result.tags === undefined || result.tags === "") result.tags = [];
+  if (typeof result.title !== "string" || !result.title.trim() || result.title.length > 200) {
+    throw new Error("博客标题不能为空且不能超过 200 字");
+  }
+  if (result.description != null && (typeof result.description !== "string" || result.description.length > 500)) {
+    throw new Error("博客摘要必须为文本且不能超过 500 字");
+  }
+  for (const key of ["tags", "categories"] as const) {
+    const value = result[key];
+    const values = Array.isArray(value) ? value : [value];
+    const entries = key === "categories" ? values.flat() : values;
+    if (entries.some(item => typeof item !== "string" || item.length > 60 || /[\r\n]/.test(item))) {
+      throw new Error("博客分类或标签须为文本，每项最多 60 字且不能包含换行");
+    }
+    if (key === "tags" && entries.some(item => /[,，]/.test(String(item)))) {
+      throw new Error("博客标签请逐项填写，不要在单个标签中使用逗号");
+    }
+  }
   if (!result.abbrlink) {
     if (used.size >= 65536) throw new Error("文章短链接空间已用完");
     let id: string;

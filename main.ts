@@ -1,3 +1,4 @@
+import { readBlogTaxonomy } from "./utils/blogTaxonomy";
 import { WechatHexoModal } from "./modals/WechatHexoModal";
 import { validateWechatArticleUrl } from "./utils/wechatArticleUrl";
 import { exportWechatHexoContent, WECHAT_HEXO_STYLES, WechatHexoInput } from "./utils/wechatHexoContent";
@@ -595,13 +596,13 @@ export default class EasyPub extends Plugin {
         .filter(path => path !== "/" && !path.split("/").some(part => part.startsWith(".")));
       const folderChoices = [...new Set(["", folder, ...loadedFolders])]
         .sort((left, right) => left.localeCompare(right, "zh-CN"));
-      const suggestions = this.getSourceArticleSuggestions();
+      const guidance = await this.getArticleGuidance();
       const current = { folder, title: "", author: this.settings.wechat.defaultAuthor || "",
         description: "", tags: [], categories: ["随笔"], cover: "", date: new Date().toISOString() };
       const selection = await chooseArticleProperties(this.app, {
         title: "新建文章", description: "创建独立原稿，自动生成新 ID 并标记为草稿。同名文件自动编号。日期为原稿创作时间，可修改或留空。",
         fields: [{ key: "folder", label: "保存目录（相对仓库，留空为根目录）", choices: folderChoices, allowCustom: true }, ...SOURCE_FIELDS],
-        suggestions,
+        ...guidance,
         current, suggested: {}, previewSelection: proposed => {
           const plan = planNewArticle(proposed.values, id, directories, p => !!this.app.vault.getAbstractFileByPath(p));
           return { 文件路径: plan.path, 属性: plan.metadata };
@@ -613,6 +614,17 @@ export default class EasyPub extends Plugin {
       try { await this.app.workspace.getLeaf(false).openFile(file); }
       catch { new Notice(`文章已保存，但打开失败，请在文件列表打开：${file.path}`); }
     } finally { this.publishInProgress = false; }
+  }
+
+  private async getArticleGuidance(includeBlog = true) {
+    const suggestions = this.getSourceArticleSuggestions();
+    if (!includeBlog) return { suggestions };
+    const taxonomy = await readBlogTaxonomy(this.settings.hexoRepoPath);
+    for (const warning of taxonomy.warnings) new Notice(warning);
+    suggestions.tags = [...new Set([...taxonomy.tags, ...suggestions.tags])];
+    // A category is a complete ordered path, never a bag of unrelated names.
+    if (taxonomy.categoryPaths.length) suggestions.categories = [];
+    return { suggestions, categoryPaths: taxonomy.categoryPaths };
   }
 
   private getSourceArticleSuggestions(): Record<string, string[]> {
@@ -646,7 +658,7 @@ export default class EasyPub extends Plugin {
       }
       const selection = await chooseArticleProperties(this.app, { title: "初始化原稿属性",
         description: "填写通用文章信息。自定义属性保留；缺失的 pub_id 在确认后生成，发布稿关联在发布后建立。",
-        attachmentSourcePath: filePath, fields: SOURCE_FIELDS, suggestions: this.getSourceArticleSuggestions(), current: { ...parsed.data, title: parsed.data.title || file.basename }, suggested: {} });
+        attachmentSourcePath: filePath, fields: SOURCE_FIELDS, ...await this.getArticleGuidance(), current: { ...parsed.data, title: parsed.data.title || file.basename }, suggested: {} });
       if (!selection) return;
       if (file.path !== filePath || await this.app.vault.read(file) !== snapshot) throw new Error("原稿已变化，请重新初始化");
       await this.app.fileManager.processFrontMatter(file, data => {
@@ -762,7 +774,7 @@ export default class EasyPub extends Plugin {
     if (options.configure && (isNew || options.propertiesOnly)) {
       const selection = await chooseArticleProperties(this.app, { title: options.propertiesOnly ? `刷新${platform.name}属性` : `生成${platform.name}稿件`,
         description: options.propertiesOnly ? "勾选要从原稿刷新的字段，可调整建议值。正文和首次日期保留。" : platform.id === "wechat" ? "阅读原文会自动带入同一原稿的 Hexo 网址；请先部署博客并确认可访问，也可修改或清空。" : "确认该平台的文章属性；后续更新正文时保留这些设置。",
-        attachmentSourcePath: activeFile.path, fields: platformPropertyFields(platform.id), suggestions: this.getSourceArticleSuggestions(), current: selectedProperties, suggested: initial,
+        attachmentSourcePath: activeFile.path, fields: platformPropertyFields(platform.id), ...await this.getArticleGuidance(platform.id === "hexo"), current: selectedProperties, suggested: initial,
         refresh: options.propertiesOnly, removable: existingData ? legacyPropertyKeys(platform.id, existingData) : [] });
       if (!selection) return;
       refreshCover = refreshCover || Object.prototype.hasOwnProperty.call(selection.values, platform.id === "wechat" ? "wechat.cover" : "cover");

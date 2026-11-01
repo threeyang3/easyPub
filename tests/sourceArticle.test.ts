@@ -1,3 +1,8 @@
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { readBlogTaxonomy } from "../utils/blogTaxonomy";
+import { completeControlRoomMetadata } from "../utils/publishSafety";
 import assert from "node:assert/strict";
 import { TFile, TFolder } from "obsidian";
 import type { App } from "obsidian";
@@ -8,6 +13,32 @@ import { parseFrontMatter } from "../utils/frontMatter";
 import { normalizeSettings } from "../utils/settings";
 
 export async function runSourceArticleTests() {
+  const repo = await mkdtemp(path.join(os.tmpdir(), "easypub-taxonomy-"));
+  try {
+    assert.deepEqual(await readBlogTaxonomy(repo), { categoryPaths: [], tags: [], warnings: [] });
+    const data = path.join(repo, "source", "_data");
+    await mkdir(data, { recursive: true });
+    await writeFile(path.join(data, "discovery.yml"), "categories:\n  评论:\n    children:\n      读书: 观点\n  笔记:\n    children:\n      读书: 摘录\n");
+    await writeFile(path.join(data, "tag-taxonomy.json"), JSON.stringify({groups: [{tags: ["写作", "物理"]}, {tags: ["写作"]}], legacy: {旧标签: []}}));
+    const taxonomy = await readBlogTaxonomy(repo);
+    assert.deepEqual(taxonomy.categoryPaths, [["评论"], ["评论", "读书"], ["笔记"], ["笔记", "读书"]]);
+    assert.deepEqual(taxonomy.tags, ["写作", "物理"]);
+    await writeFile(path.join(data, "tag-taxonomy.json"), "{");
+    const invalid = await readBlogTaxonomy(repo);
+    assert.equal(invalid.warnings.length, 1);
+    assert.deepEqual(invalid.categoryPaths, taxonomy.categoryPaths);
+    assert.deepEqual(invalid.tags, []);
+  } finally { await rm(repo, { recursive: true, force: true }); }
+  for (const metadata of [{tags: ["写作，物理"]}, {tags: ["a\nb"]}, {tags: ["a".repeat(61)]},
+    {categories: [42]}, {description: "a".repeat(501)}, {title: "a".repeat(201)}]) {
+    assert.throws(() => completeControlRoomMetadata(metadata, "标题", new Set()));
+  }
+  const metadata = { tags: ["自定义标签"], categories: [["评论", "读书"], ["笔记", "读书"]], custom: true };
+  const completed = completeControlRoomMetadata(metadata, "标题", new Set());
+  assert.deepEqual(completed.tags, metadata.tags);
+  assert.deepEqual(completed.categories, metadata.categories);
+  assert.equal(completed.custom, true);
+
   for (const folder of ["../escape", "/tmp", "C:\\tmp", ".obsidian", "notes/../escape", "notes//bad", "发布/微信公众号"])
     assert.throws(() => planNewArticle({ title: "T", folder }, "id", ["发布/微信公众号"], () => false));
   assert.throws(() => planNewArticle({title: " "}, "id", [], () => false), /标题/);

@@ -73,6 +73,24 @@ export async function runAttachmentImportTests() {
     return {modal,el,button,selectFile,selection:() => selection};
   }
   try {
+    const previousEvent = globalThis.Event;
+    globalThis.Event = dom.window.Event as typeof Event;
+    try {
+      let result: any;
+      const modal = new ArticlePropertiesModal(app, { title: '博客属性', description: '',
+        fields: platformPropertyFields('hexo'), current: {categories: ['随笔'], tags: ['旧标签']},
+        suggested: {categories: ['随笔'], tags: ['旧标签']}, refresh: true,
+        categoryPaths: [['评论', '读书'], ['笔记', '读书']], suggestions: {tags: ['写作']} }, value => {result = value;});
+      const el = dom.window.document.createElement('div');
+      Object.assign(modal, {app, contentEl: el, modalEl: el, close: () => modal.onClose()}); modal.onOpen();
+      const click = (text: string) => [...el.querySelectorAll('button')].find(b => b.textContent === text)!.click();
+      click('评论 / 读书'); click('写作');
+      assert.equal(el.querySelector<HTMLInputElement>('input[aria-label="刷新分类"]')!.checked, true);
+      assert.equal(el.querySelector<HTMLTextAreaElement>('textarea[aria-label="分类"]')!.disabled, false);
+      click('预览属性变更'); click('确认并继续');
+      assert.deepEqual(result.values.categories, ['评论', '读书']);
+      assert.deepEqual(result.values.tags, ['旧标签', '写作']);
+    } finally { globalThis.Event = previousEvent; }
     const form=setup(true);
     form.selectFile(image('fresh.png'));
     assert.equal(form.button('确认并继续').disabled,true);

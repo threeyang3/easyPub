@@ -16,6 +16,7 @@ import { wechatChoice } from "../modals/WechatChoiceModal";
 import { WechatComparison, wechatReadableHtml } from "../utils/wechatComparison";
 import { WechatCropModal } from "../modals/WechatCropModal";
 import { WechatLayoutModal } from "../modals/WechatLayoutModal";
+import { DraftFormatModal, openDraftFormatting } from "../modals/DraftFormatModal";
 import { readWechatLayoutPlan, themePlan, anchorWechatLayout } from "../utils/wechatLayoutEngine";
 import { WECHAT_ARTICLE_FIELDS, wechatFieldLength } from "../utils/wechatLimits";
 import { compareWechatReadback } from "../utils/wechatReadback";
@@ -57,6 +58,7 @@ export class WechatView extends ItemView {
   private busy = false;
   private layoutOpening = false;
   private layoutModal?: WechatLayoutModal;
+  private formatModal?: DraftFormatModal;
   private rerenderRequested = false;
   private manualRefreshRequested = false;
   private timer?: ReturnType<typeof setTimeout>;
@@ -110,9 +112,10 @@ export class WechatView extends ItemView {
       else void this.run(() => this.refresh(true));
     });
     this.button(tools, "打开本地稿", () => this.run(async () => { if (this.file) await this.app.workspace.getLeaf(false).openFile(this.file); }));
-    this.button(tools, "生成 Hexo 稿（保留排版）", () => this.run(() => this.generateHexo()));
+    this.button(tools, "生成 Hexo 稿", () => this.run(() => this.generateHexo()));
     this.button(tools,"同步正文到其他稿",()=>{if(this.file)void this.plugin.syncDraftBody(this.file).catch(error=>this.message((error as Error).message,true));});
     this.button(tools, "智能排版", () => { void this.openLayout().catch(error => this.message((error as Error).message, true)); });
+    this.button(tools, "基础排版", () => this.run(() => this.formatBody()));
     this.status = root.createDiv({ cls: "epw-status", text: "等待选择公众号本地稿", attr: { role: "status", "aria-live": "polite" } });
     const tabs = root.createDiv({ cls: "epw-tabs", attr: { "aria-label": "预览布局" } });
     this.previewTab = this.button(tabs, "正文预览", () => this.showSettings(false));
@@ -233,7 +236,7 @@ export class WechatView extends ItemView {
     }, 500);
   }
   async bind(file: TFile) {
-    if (this.busy || this.cropOpening || this.cropModal || this.layoutModal) throw new Error("请先完成当前任务并关闭编辑窗口，再切换稿件");
+    if (this.busy || this.cropOpening || this.cropModal || this.layoutModal || this.formatModal) throw new Error("请先完成当前任务并关闭编辑窗口，再切换稿件");
     if (this.file === file && this.snapshot && (!this.stale || this.dirty)) return;
     const text = await this.app.vault.read(file);
     if (!isWechatDraft(file, text, this.plugin)) { this.message("请打开已生成的公众号本地稿，不会从源文章直接同步", true); return; }
@@ -548,8 +551,20 @@ export class WechatView extends ItemView {
       article:this.article, cover:this.cover, assertFresh});
     if (saved && !this.closed) {
       await this.refresh();
-      this.message("Hexo 稿已保存并保留公众号排版；请在博客中预览确认后发布");
+      this.message("Hexo 稿已保存；请在博客中预览确认后发布");
     }
+  }
+
+  private async formatBody() {
+    if (this.closed || !this.file || this.dirty || this.layoutModal || this.cropModal || this.formatModal) throw new Error("请先保存文章信息并关闭编辑窗口，再整理正文");
+    const file = this.file, filePath = file.path;
+    try {
+      const saved = await openDraftFormatting(this.plugin, file, modal => {
+        if (this.closed || this.file !== file || file.path !== filePath) throw new Error("工作台已关闭或稿件已变化，已取消排版");
+        this.formatModal = modal;
+      });
+      if (saved && !this.closed) { await this.refresh(); this.message("基础排版已保存；需要时可同步正文到其他稿"); }
+    } finally { this.formatModal = undefined; }
   }
 
   private async saveArticle(article?: WechatArticleSettings, assertActive: () => void = () => {}) {
@@ -737,6 +752,7 @@ export class WechatView extends ItemView {
   async onClose() {
     this.closed = true; this.version++;
     this.layoutModal?.close();
+    this.formatModal?.close();
     this.cropModal?.close();
     if (this.timer) clearTimeout(this.timer);
     this.disposePrepared(); this.contentEl.empty();

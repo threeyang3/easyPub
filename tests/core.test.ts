@@ -11,6 +11,8 @@ import { runDraftSyncTests } from "./draftSync.test";
 import { runAttachmentImportTests } from "./attachmentImport.test";
 import { runPublishingWorkbenchTests } from "./publishingWorkbench.test";
 import { runHexoFormattingTests } from "./hexoFormatting.test";
+import { runMarkdownFormattingTests } from "./markdownFormatting.test";
+import { runDraftFormattingTests } from "./draftFormatting.test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile, readdir } from "node:fs/promises";
 import os from "node:os";
@@ -62,6 +64,8 @@ async function run() {
   await runHexoPreviewPerformanceTests();
   await runHexoLocatorTests();
   runHexoFormattingTests();
+  runMarkdownFormattingTests();
+  await runDraftFormattingTests();
   await runAttachmentImportTests();
   await runPublishingWorkbenchTests();
   await runHexoEditingTests();

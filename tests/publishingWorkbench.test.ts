@@ -53,6 +53,7 @@ export async function runPublishingWorkbenchTests() {
     active = files[1]; listeners.get('file-open')!(active); await flush();
     pending!('---\ntitle: stale A\n---\nold'); await flush();
     assert.match(root.textContent, /b.md/); assert.doesNotMatch(root.textContent, /stale A/);
+    assert.ok(button('基础排版'), 'Original notes expose the same basic formatting entry');
     let queries = 0, creations = 0;
     plugin.hasRelatedDraft = async () => {queries++; return false;};
     plugin.preparePublish = async (_platform: unknown, _refresh: boolean, options: any) => {

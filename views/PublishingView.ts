@@ -2,6 +2,7 @@ import { ItemView, Notice, TFile, ViewStateResult, WorkspaceLeaf } from "obsidia
 import { WECHAT_VIEW } from "./WechatView";
 import { HEXO_PREVIEW_VIEW } from "./HexoPreviewView";
 import { PublishDirectoryModal } from "../modals/PublishDirectoryModal";
+import { openDraftFormatting } from "../modals/DraftFormatModal";
 import type EasyPub from "../main";
 import { PLATFORMS } from "../types";
 import { parseFrontMatter, getFrontMatterString } from "../utils/frontMatter";
@@ -123,6 +124,7 @@ export class PublishingView extends ItemView {
       this.article.createEl("p", { text: file.path, cls: "ep-panel-path" });
       const actions = this.article.createDiv({ cls: "ep-panel-actions" });
       this.button(actions, "打开当前文章", () => this.app.workspace.getLeaf(false).openFile(file));
+      this.button(actions, "基础排版", () => openDraftFormatting(this.plugin, file));
       if (meta.source_file) {
         this.button(actions,"同步正文改动到其他稿",()=>this.plugin.syncDraftBody(file));
         if (source) this.button(actions, "返回原稿", () => this.app.workspace.getLeaf(false).openFile(source));

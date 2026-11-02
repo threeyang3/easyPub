@@ -41,7 +41,8 @@ export class Modal extends Component {
     this.contentEl.style.cssText = 'padding:24px;overflow:auto';
     this.modalEl.style.cssText = 'position:fixed;top:5vh;left:50%;transform:translateX(-50%);z-index:1000;background:var(--background-primary,white);max-height:90vh;overflow:auto;border-radius:12px;box-shadow:0 12px 60px #0003';
     this.modalEl.appendChild(this.contentEl); document.body.appendChild(this.modalEl); this.onOpen();
-    if (!this.modalEl.classList.contains('easy-pub-layout-modal') && !this.modalEl.classList.contains('easy-pub-crop-modal') && !this.modalEl.classList.contains('easy-pub-properties-modal')) this.modalEl.style.width = 'min(700px,94vw)';
+    if (this.modalEl.classList.contains('easy-pub-composer-modal')) this.contentEl.style.padding = '0';
+    else if (!this.modalEl.classList.contains('easy-pub-layout-modal') && !this.modalEl.classList.contains('easy-pub-crop-modal') && !this.modalEl.classList.contains('easy-pub-properties-modal')) this.modalEl.style.width = 'min(700px,94vw)';
   }
   close() { this.onClose(); this.modalEl.remove(); }
 }

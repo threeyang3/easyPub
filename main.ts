@@ -1,7 +1,7 @@
 import { readBlogTaxonomy } from "./utils/blogTaxonomy";
 import { WechatHexoModal } from "./modals/WechatHexoModal";
 import { validateWechatArticleUrl } from "./utils/wechatArticleUrl";
-import { exportWechatHexoContent, WECHAT_HEXO_STYLES, WechatHexoInput } from "./utils/wechatHexoContent";
+import { exportWechatHexoContent, exportWechatHexoMarkdown, WECHAT_HEXO_STYLES, WechatHexoInput, WechatHexoMode } from "./utils/wechatHexoContent";
 import { createSourceArticle, planNewArticle } from "./utils/sourceArticle";
 import { PublishingView, PUBLISHING_VIEW } from "./views/PublishingView";
 import { openHexoInObsidian, registerHexoEditing } from "./utils/hexoEditing";
@@ -68,7 +68,7 @@ import { isPicGoEnabled, normalizeSettings, publishSettingsFingerprint } from ".
 import { WechatApi } from "./utils/wechatApi";
 import { decryptWechatSecret, encryptWechatSecret } from "./utils/wechatSecret";
 import { restorePicGoSecret, serializePicGoSettings } from "./utils/picgoSecret";
-import { rebaseWechatImages } from "./utils/wechatMarkdown";
+import { rebaseWechatImages, resolveVaultImage } from "./utils/wechatMarkdown";
 import { relativeVaultAttachment } from "./utils/platforms";
 import { WECHAT_VIEW, WechatView, isWechatDraft } from "./views/WechatView";
 import { WechatSetupModal } from "./modals/WechatSetupModal";
@@ -949,9 +949,10 @@ export default class EasyPub extends Plugin {
     return matches.keys().next().value ?? null;
   }
 
-  async prepareHexoFromWechat(file: TFile, input: WechatHexoInput) {
+  async prepareHexoFromWechat(file: TFile, input: WechatHexoInput, mode: WechatHexoMode = "markdown") {
     this.assertSettingsWritable();
-    if (this.publishInProgress || this.publishConfirmationOpen) throw new Error("已有发布任务正在进行，请稍后重试");
+    if (this.publishInProgress) throw new Error("已有发布任务正在进行，请稍后重试");
+    if (mode !== "markdown" && mode !== "layout") throw new Error("请选择有效的 Hexo 正文格式");
     const repository = this.settings.hexoRepoPath;
     await validateHexoBlog(repository);
     const configuration = await fs.readFile(path.join(repository, "_config.yml"), "utf8");
@@ -985,12 +986,32 @@ export default class EasyPub extends Plugin {
       if (image.localPath) imageChecks.set(image.localPath, {sourcePath: image.localPath, contentHash: image.originalHash});
       return root + getHexoAssetRelativePath(id, destination).split("/").map(encodeURIComponent).join("/");
     };
-    const cssBytes = new TextEncoder().encode(WECHAT_HEXO_STYLES);
-    const cssHash = createHash("sha256").update(cssBytes).digest("hex");
-    const cssPath = getHexoAssetTargetPath(this.settings, id, "wechat-layout.css", cssHash);
-    const cssUrl = root + getHexoAssetRelativePath(id, cssPath).split("/").map(encodeURIComponent).join("/");
-    const output = exportWechatHexoContent(document, imageUrl, cssUrl);
-    assets.set(cssPath, {sourcePath:"wechat-layout.css", targetPath:cssPath, contentHash:cssHash, bytes:cssBytes});
+    let body: string, preview: string;
+    if (mode === "layout") {
+      const cssBytes = new TextEncoder().encode(WECHAT_HEXO_STYLES);
+      const cssHash = createHash("sha256").update(cssBytes).digest("hex");
+      const cssPath = getHexoAssetTargetPath(this.settings, id, "wechat-layout.css", cssHash);
+      const cssUrl = root + getHexoAssetRelativePath(id, cssPath).split("/").map(encodeURIComponent).join("/");
+      const output = exportWechatHexoContent(document, imageUrl, cssUrl);
+      assets.set(cssPath, {sourcePath:"wechat-layout.css", targetPath:cssPath, contentHash:cssHash, bytes:cssBytes});
+      body = output.body;
+      preview = exportWechatHexoContent(document, image => image.previewUrl).html;
+    } else {
+      body = await exportWechatHexoMarkdown(parsed.content, async source => {
+        // Network Markdown images keep their existing URL. Local images use the
+        // same immutable, content-addressed blog assets as ordinary Hexo drafts.
+        if (/^https?:\/\//i.test(source)) return source;
+        const attachment = resolveVaultImage(this.app, source, file.path);
+        const bytes = new Uint8Array(await this.app.vault.readBinary(attachment));
+        const hash = createHash("sha256").update(bytes).digest("hex");
+        const destination = getHexoAssetTargetPath(this.settings, id, attachment.path, hash);
+        assets.set(destination, {sourcePath:attachment.path, targetPath:destination, contentHash:hash, bytes});
+        imageChecks.set(attachment.path, {sourcePath:attachment.path, contentHash:hash});
+        return root + getHexoAssetRelativePath(id, destination).split("/")
+          .map(segment => encodeURIComponent(segment).replace(/[!'()*]/g, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`)).join("/");
+      });
+      preview = body;
+    }
     const seed = {...sourceData, title: article.title || file.basename, author: article.author ?? "", description: article.digest ?? "", cover: ""};
     let meta = await this.buildPublishedFrontMatter(hexo, source, seed, existing, id, new Date().toISOString(), target);
     if (!existing && cover) meta.cover = imageUrl(cover);
@@ -999,7 +1020,7 @@ export default class EasyPub extends Plugin {
       if (typeof article.commentsEnabled === "boolean") meta.wechat_comments_enabled = article.commentsEnabled;
     }
     const diff: ArticleDiff = {pub_id:id, sourcePath:source.path, targetPath:target,
-      sourceContent:stringifyFrontMatter(output.body, meta), targetContent:existing, isNew:existing === null,
+      sourceContent:stringifyFrontMatter(body, meta), targetContent:existing, isNew:existing === null,
       meta:meta as ArticleMeta, platform:hexo, sourceSnapshot, settingsFingerprint:fingerprint,
       assets:[...assets.values()], imageChecks:[...imageChecks.values()]};
     const assertFresh = async () => {
@@ -1014,22 +1035,23 @@ export default class EasyPub extends Plugin {
       await input.assertFresh();
     };
     await assertFresh();
-    return {diff, source, assertFresh, preview:exportWechatHexoContent(document, image => image.previewUrl).html};
+    return {mode, diff, source, assertFresh, preview};
   }
 
-  async generateHexoFromWechat(file: TFile, input: WechatHexoInput): Promise<boolean> {
-    const plan = await this.prepareHexoFromWechat(file, input);
+  async generateHexoFromWechat(file: TFile, input: WechatHexoInput, mode: WechatHexoMode = "markdown"): Promise<boolean> {
+    if (this.publishInProgress || this.publishConfirmationOpen) throw new Error("已有发布任务正在进行，请稍后重试");
+    const plan = await this.prepareHexoFromWechat(file, input, mode);
     if (this.publishInProgress || this.publishConfirmationOpen) throw new Error("已有发布任务正在进行，请稍后重试");
     this.publishConfirmationOpen = true;
     try {
       return await new Promise<boolean>((resolve, reject) => {
         try {
-          new WechatHexoModal(this.app, plan.diff, plan.preview, async guard => {
+          new WechatHexoModal(this.app, plan, selected => this.prepareHexoFromWechat(file, input, selected), async (current, guard) => {
             if (this.publishInProgress) throw new Error("已有发布任务正在进行，请稍后重试");
             this.publishInProgress = true;
             try {
-              await plan.assertFresh(); guard();
-              await this.copyAndOpenForEdit(plan.diff, plan.source, {beforeWrite:async () => {guard(); await plan.assertFresh(); guard();}, assertActive:guard, skipAutoDeploy:true});
+              await current.assertFresh(); guard();
+              await this.copyAndOpenForEdit(current.diff, current.source, {beforeWrite:async () => {guard(); await current.assertFresh(); guard();}, assertActive:guard, skipAutoDeploy:true});
             } finally {this.publishInProgress = false;}
           }, resolve).open();
         } catch (error) {reject(error);}

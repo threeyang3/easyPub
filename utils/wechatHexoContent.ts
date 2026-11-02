@@ -1,5 +1,8 @@
 import type { WechatArticleSettings, WechatImage, WechatPreparedDocument } from "../types";
 import { WECHAT_HTML_LIMIT_ISSUE } from "./wechatLimits";
+import { IMAGE_EXTENSIONS, transformMarkdownImages, transformWechatWikiImages } from "./wechatMarkdown";
+
+export type WechatHexoMode = "markdown" | "layout";
 
 export interface WechatHexoInput {
   snapshot: string;
@@ -10,6 +13,57 @@ export interface WechatHexoInput {
 }
 const tags = new Set("section p h1 h2 h3 h4 h5 h6 blockquote ul ol li pre code table thead tbody tfoot tr th td img a strong em del hr br span sup sub b i s figure figcaption".split(" "));
 export const WECHAT_HEXO_STYLES = `.easy-pub-wechat-layout::before,.easy-pub-wechat-layout::after,.easy-pub-wechat-layout *::before,.easy-pub-wechat-layout *::after{content:none!important}.easy-pub-wechat-layout,.easy-pub-wechat-layout *{box-sizing:border-box}.easy-pub-wechat-layout{display:block;max-width:100%;text-align:left}.easy-pub-wechat-layout a{border:0!important}.easy-pub-wechat-layout pre{display:block!important}`;
+
+/** Keep the local draft's Markdown; only materialize image references for the blog. */
+export async function exportWechatHexoMarkdown(body: string, imageUrl: (source: string) => Promise<string>): Promise<string> {
+  const literal = (text: string) => text.replace(/[!-/:-@[-`{-~]/g, "\\$&");
+  const image = (alt: string, url: string, title?: string | null, label?: string) => `${label ?? `![${literal(alt)}]`}(${url}${title == null ? "" : ` "${literal(title)}"`})`;
+  const standard = await transformMarkdownImages(body, async (source, alt, _line, syntax) => {
+    if (/^https?:\/\//i.test(source)) return syntax.raw;
+    return image(alt, await imageUrl(source), syntax.title, originalImageLabel(syntax.raw));
+  });
+  return transformWechatWikiImages(standard, async source => {
+    if (!IMAGE_EXTENSIONS.has(source.split(".").pop()?.toLowerCase() ?? "")) return null;
+    return image(source.split("/").pop() ?? source, await imageUrl(source));
+  });
+}
+
+/** Preserve the original label's escapes, entities and inline formatting. */
+function originalImageLabel(raw: string): string | undefined {
+  let depth = 1, codeTicks = 0;
+  for (let i = 2; i < raw.length; i++) {
+    const character = raw[i];
+    if (!codeTicks && character === "\\") { i++; continue; }
+    if (character === "`") {
+      let end = i + 1;
+      while (raw[end] === "`") end++;
+      const width = end - i;
+      if (codeTicks === width) codeTicks = 0;
+      else if (!codeTicks) {
+        // An unmatched backtick is literal text, rather than an open code span.
+        let closing = raw.indexOf("`".repeat(width), end);
+        while (closing >= 0 && (raw[closing - 1] === "`" || raw[closing + width] === "`")) closing = raw.indexOf("`".repeat(width), closing + width);
+        if (closing >= 0) codeTicks = width;
+      }
+      i = end - 1; continue;
+    }
+    if (codeTicks) continue;
+    if (character === "<" && /^<(?:\/?[A-Za-z][\w-]*(?:[\s/>])|!--|\?|!\[CDATA\[)/.test(raw.slice(i))) {
+      // Brackets in an inline HTML attribute belong to that token, not the label.
+      let quote = "";
+      for (let end = i + 1; end < raw.length; end++) {
+        const token = raw[end];
+        if (quote) { if (token === quote) quote = ""; }
+        else if (token === '"' || token === "'") quote = token;
+        else if (token === ">") { i = end; break; }
+      }
+      continue;
+    }
+    if (character === "[") depth++;
+    else if (character === "]" && --depth === 0) return raw.slice(0, i + 1);
+  }
+  return undefined;
+}
 
 /** Export the approved rendered layout, not a second Markdown rendition. */
 export function exportWechatHexoContent(prepared: WechatPreparedDocument, imageUrl: (image: WechatImage) => string, stylesheetUrl?: string) {

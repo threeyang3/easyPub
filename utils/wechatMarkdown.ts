@@ -6,7 +6,7 @@ import type { WechatImage, WechatImageReference } from "../types";
 export const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "svg"]);
 export const escapeHtml = (value: string): string => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 export interface MarkdownNode {
-  type: string; url?: string; alt?: string | null; identifier?: string;
+  type: string; url?: string; alt?: string | null; title?: string | null; identifier?: string;
   position?: { start: { offset?: number; line: number }; end: { offset?: number } };
   children?: MarkdownNode[];
 }
@@ -45,23 +45,25 @@ export async function transformWechatWikiImages(body: string,
 // Use syntax positions, so code, escaped images, reference links and nested alt text
 // cannot be accidentally rewritten by a regular-expression replacement.
 export async function transformMarkdownImages(body: string,
-  resolve: (source: string, alt: string, line: number) => Promise<string>,
+  resolve: (source: string, alt: string, line: number, syntax: {raw: string; title?: string | null}) => Promise<string>,
   tree: MarkdownNode = parseWechatMarkdown(body)): Promise<string> {
-  const definitions = new Map<string, string>();
+  const definitions = new Map<string, {url: string; title?: string | null}>();
   const images: MarkdownNode[] = [];
   const visit = (node: MarkdownNode) => {
-    if (node.type === "definition" && node.identifier && node.url) definitions.set(node.identifier.toLowerCase(), node.url);
+    if (node.type === "definition" && node.identifier && node.url) definitions.set(node.identifier.toLowerCase(), {url:node.url, title:node.title});
     if (node.type === "image" || node.type === "imageReference") images.push(node);
     node.children?.forEach(visit);
   };
   visit(tree);
   const replacements: Array<{ start: number; end: number; content: string }> = [];
   for (const image of images) {
-    const source = image.url ?? definitions.get((image.identifier ?? "").toLowerCase());
+    const definition = definitions.get((image.identifier ?? "").toLowerCase());
+    const source = image.url ?? definition?.url;
     const start = image.position?.start.offset;
     const end = image.position?.end.offset;
     if (!source || start === undefined || end === undefined) continue;
-    replacements.push({ start, end, content: await resolve(source, image.alt ?? "", image.position!.start.line) });
+    replacements.push({ start, end, content: await resolve(source, image.alt ?? "", image.position!.start.line,
+      {raw:body.slice(start,end), title:image.type === "image" ? image.title : definition?.title}) });
   }
   for (const replacement of replacements.reverse()) body = body.slice(0, replacement.start) + replacement.content + body.slice(replacement.end);
   return body;

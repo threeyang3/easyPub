@@ -127,12 +127,13 @@ export class WechatView extends ItemView {
     this.inspector = body.createDiv({ cls: "epw-inspector", attr: { role: "region", "aria-label": "信息、配图与封面", tabindex: "0" } });
     this.showSettings(false);
     const footer = root.createDiv({ cls: "epw-footer" });
-    this.syncButton = this.button(footer, "同步草稿箱", () => this.run(() => this.sync()));
+    const footerActions = footer.createDiv({ cls: "epw-footer-actions" });
+    this.syncButton = this.button(footerActions, "同步草稿箱", () => this.run(() => this.sync()));
     this.syncButton.addClass("mod-cta"); this.syncButton.disabled = true;
     this.syncReadiness = footer.createDiv({ cls: "epw-sync-readiness", attr: { role: "status", "aria-live": "polite" } });
     this.updateSyncState();
-    this.button(footer, "查询 / 恢复关联", () => this.run(() => this.recover()));
-    this.button(footer, "打开公众号后台", () => this.run(() => this.plugin.openWechatBackend()));
+    this.button(footerActions, "查询 / 恢复关联", () => this.run(() => this.recover()));
+    this.button(footerActions, "打开公众号后台", () => this.run(() => this.plugin.openWechatBackend()));
     this.registerEvent(this.app.vault.on("modify", file => {
       if (file === this.file) this.invalidate();
       else if (this.prepared?.images.some(image => image.localPath === file.path) || this.cover?.localPath === file.path) this.invalidate();

@@ -42,7 +42,7 @@ export class PublishingView extends ItemView {
       this.app.workspace.requestSaveLayout(); await this.renderArticle();
     });
     const shortcuts = root.createDiv({ cls: "ep-panel-shortcuts" });
-    this.button(shortcuts, "新建文章", () => this.plugin.newArticle()).addClass("mod-cta");
+    this.button(shortcuts, "新建文章", () => this.plugin.newArticle());
     this.button(shortcuts, "Hexo 管理后台", () => this.plugin.openHexoControlRoom());
     this.article = root.createDiv({ cls: "ep-panel-article" });
     const tools = root.createDiv({ cls: "ep-panel-tools" });
@@ -143,9 +143,10 @@ export class PublishingView extends ItemView {
       // Scan only on explicit action, rather than traversing external repositories on each keystroke.
       for (const target of PLATFORMS) {
         const row = related.createDiv({ cls: "ep-panel-platform" }); row.createEl("strong", { text: target.name });
+        const rowActions = row.createDiv({ cls: "ep-panel-platform-actions" });
         let state: "unknown" | "checking" | "exists" | "missing" = "unknown";
         const reset = () => { state = "unknown"; draft.textContent = "查找并打开"; };
-        const draft = this.button(row, "查找并打开", async () => {
+        const draft = this.button(rowActions, "查找并打开", async () => {
           try {
             if (state === "unknown") {
               state = "checking"; draft.textContent = "正在检查…";
@@ -166,8 +167,8 @@ export class PublishingView extends ItemView {
           }
         });
         if (target.id === "hexo") {
-          this.button(row, "预览", () => this.plugin.previewHexoArticle(source));
-          this.button(row, "一键排版", () => this.plugin.formatHexoArticle(source));
+          this.button(rowActions, "预览", () => this.plugin.previewHexoArticle(source));
+          this.button(rowActions, "一键排版", () => this.plugin.formatHexoArticle(source));
         }
       }
     } catch (error) {

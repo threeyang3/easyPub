@@ -382,6 +382,9 @@ export default class EasyPub extends Plugin {
     const leaf = existing ?? this.app.workspace.getLeaf("tab");
     if (!leaf) throw new Error("无法打开公众号工作台");
     if (!existing) await leaf.setViewState({ type: WECHAT_VIEW, active: true });
+    // Restored tabs can still hold the host's deferred placeholder view.
+    // Older supported hosts load views eagerly and do not expose this method.
+    await leaf.loadIfDeferred?.();
     await (leaf.view as WechatView).bind(file);
     await this.app.workspace.revealLeaf(leaf);
     for (const panel of this.app.workspace.getLeavesOfType(PUBLISHING_VIEW)) {

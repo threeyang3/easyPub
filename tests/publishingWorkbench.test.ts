@@ -139,6 +139,20 @@ export async function runPublishingWorkbenchTests() {
   sourceBody = '---\npub_id: draft-id\nsource_file: "[[another]]"\n---\nA platform draft';
   assert.equal(await pluginResolver.resolvePublishingSource(draft, {pub_id:'draft-id',source_file:'[[source]]'}), null);
 
+  // Restored workbench tabs must load their real view before binding a draft.
+  const deferredPlugin = Object.create(EasyPub.prototype) as EasyPub;
+  const deferredLeaf: any = {view: {}, loadIfDeferred: async () => {
+    deferredLeaf.view = {bind: async (file: TFile) => { assert.equal(file, draft); }};
+  }};
+  let revealed = false;
+  Object.assign(deferredPlugin, {app: {workspace: {
+    getLeavesOfType: (type: string) => type === WECHAT_VIEW ? [deferredLeaf] : [],
+    revealLeaf: async (leaf: unknown) => {assert.equal(leaf, deferredLeaf); revealed = true;},
+  }}});
+  await deferredPlugin.openWechatDraft(draft); assert.equal(revealed, true);
+  delete deferredLeaf.loadIfDeferred; // Older hosts expose an already-loaded view.
+  await deferredPlugin.openWechatDraft(draft);
+
   // Opening crop must reject a stale snapshot and release its lock after failed rendering.
   const cropView = Object.create(WechatView.prototype) as any;
   let readCrop = async () => 'changed body';

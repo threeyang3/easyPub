@@ -1,0 +1,69 @@
+{
+  "date": "2026-11-02",
+  "baseCommit": "12f14157786d789f5630eec587af7c6164f61af1",
+  "installedBuild": "12f1415 plus deferred workbench fix, captured before UI refinement",
+  "environment": {
+    "vault": "Sandbox",
+    "obsidian": "1.14.5",
+    "installer": "1.14.4",
+    "electron": "43.7.7",
+    "platform": "macOS"
+  },
+  "method": "Installed production bundle in real Obsidian; CLI-triggered native component handlers, DOM assertions, persisted file verification, native visual snapshot. Native input/screenshot capture lagged; no claim of complete mouse/keyboard walkthrough.",
+  "checks": [
+    "发布面板固定原稿",
+    "缺稿只提供创建入口",
+    "查找不自动创建",
+    "新版按钮加载",
+    "一次点击打开公众号稿",
+    "打开工作台后原稿固定不漂移",
+    "缺封面原因明确",
+    "缺封面禁用同步",
+    "原生属性窗口加载",
+    "标签逐行显示",
+    "分类层级保留",
+    "可读变更表",
+    "预览允许确认",
+    "再编辑使确认失效",
+    "属性保存保留正文和身份",
+    "封面选择不提前写盘",
+    "本地封面解码",
+    "保存封面恢复就绪",
+    "标题编辑显示组合阻塞原因",
+    "标题保存恢复按钮",
+    "公众号独立正文不变",
+    "已解决原因隐藏",
+    "候选搜索与数量限制",
+    "取消属性编辑不写原稿"
+  ],
+  "finding": {
+    "error": "view.bind is not a function",
+    "cause": "Restored workbench leaf is a deferred host placeholder",
+    "fix": "await leaf.loadIfDeferred?.() before view.bind",
+    "regression": "Deferred placeholder and older eager host mocks pass"
+  },
+  "tests": {
+    "core": "passed",
+    "productionBuild": "passed",
+    "nativeChecks": 24,
+    "capturedErrors": 0,
+    "ciForNewPatch": "not run at capture time; see CI for the committing revision"
+  },
+  "remoteWrites": 0,
+  "deployments": 0,
+  "releaseCreated": false,
+  "settingsUnchanged": true,
+  "installedHashes": {
+    "main.js": "ab5f91da9d7a2487777eb36ffe3354992693efbdd0ee016c93c155a327a68aff",
+    "manifest.json": "83f33d74caa50af9b4a5c0e1386a8f4e4310677b981cc54c10685feb9ba47a52",
+    "styles.css": "b7b071ad56505b040ed57f85ecccc09dfbab1c308b51c45546ea1e50110b7c7a"
+  },
+  "fixtures": {
+    "source": "EasyPub 验收 20261102-12f1415/验收原稿.md",
+    "draft": "发布/微信公众号/EasyPub 验收 12f1415.md",
+    "cover": "EasyPub 验收 20261102-12f1415/验收封面.png"
+  },
+  "screenshot": "properties-native.png",
+  "backup": "plugin-backup",
+  "artifactNote": "Screenshot, scripts and plugin backup are local acceptance artifacts, not repository files."
+}

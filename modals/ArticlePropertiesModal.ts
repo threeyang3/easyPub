@@ -32,14 +32,15 @@ export class ArticlePropertiesModal extends Modal {
   onOpen() {
     this.modalEl.addClass("easy-pub-properties-modal");
     const root = this.contentEl; root.empty(); root.addClass("easy-pub-properties");
+    const header = root.createDiv({ cls: "ep-property-header" });
+    header.createEl("h2", { text: this.context.title });
+    header.createEl("p", { text: this.context.description });
     const el = root.createDiv({ cls: "ep-property-form" });
-    el.createEl("h2", { text: this.context.title });
-    el.createEl("p", { text: this.context.description });
     let uploading = false;
     const importButtons: HTMLButtonElement[] = [];
     const controls: Array<{ field: PropertyField; input: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement; customInput?: HTMLInputElement; selected?: HTMLInputElement }> = [];
     for (const field of this.context.fields) {
-      const row = el.createEl("label");
+      const row = el.createEl("label", { cls: "ep-property-field" });
       let selected: HTMLInputElement | undefined;
       if (this.context.refresh) {
         selected = row.createEl("input", { type: "checkbox" });

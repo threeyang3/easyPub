@@ -1,70 +1,86 @@
 # EasyPub 文档中心
 
-[项目首页](../README.md) · [项目概览与架构图](overview.md) · [版本与验证状态](status.md)
+从第一篇本地稿开始，逐步了解各平台的编辑、预览和发布流程。
 
-文档描述当前代码分支；稳定 Release 与待发布改进请先看[状态说明](status.md)。历史审查记录提供过程证据，不作为当前操作步骤。目录保留原有指南地址，已有链接仍可使用。
+[项目首页](../README.md) · [下载稳定版](https://github.com/threeyang3/easyPub/releases/latest) · [1.9.4 更新说明](releases/1.9.4.md)
 
-## 按任务选择入口
+<a id="按任务选择入口"></a>
+<a id="一概览与用户指南"></a>
 
-| 你的目标 | 推荐阅读顺序 |
+## 第一次使用
+
+| 阅读顺序 | 读完可以做什么 |
 | --- | --- |
-| 理解项目、稿件存放位置和职责 | [项目概览](overview.md) → [数据模型](reference/data-model.md) |
-| 安装并生成第一篇稿件 | [快速开始](getting-started.md) → [发布机制](publishing.md) |
-| 使用公众号 | [公众号工作台](wechat.md) → [主题与 AI 排版](wechat-layout.md) |
-| 使用博客预览或后台 | [发布机制](publishing.md) → [Control Room 接入](control-room.md) |
-| 处理报错、迁移或恢复 | [排障](operations/troubleshooting.md) → [备份与恢复](operations/backup-and-recovery.md) |
-| 修改插件源码 | [开发环境](development/setup.md) → [架构设计](development/architecture.md) → [测试](development/testing.md) |
-| 发布插件新版本 | [贡献约定](development/contributing.md) → [发布流程](development/releasing.md) |
+| [安装与快速开始](getting-started.md) | 安装插件，确认平台属性，生成第一篇独立本地稿 |
+| [发布面板与基础排版](publishing-workbench.md) | 找到关联稿件、整理段落、选择性同步正文修改 |
+| [项目概览](overview.md) | 理解原稿、平台稿、微信草稿箱与博客仓库的关系 |
 
-## 一、概览与用户指南
+> **先分清保存在哪里。**
+> “生成稿件”准备本地文件，“同步草稿箱”写入微信后台，“部署”更新博客站点。它们各有独立的检查与确认流程。
 
-- [项目概览与总体架构图](overview.md)：定位、能力矩阵、数据边界、文件目录和典型工作流。
-- [安装、升级与快速开始](getting-started.md)：桌面环境、首次配置、生成稿件和升级注意事项。
-- [发布机制与平台行为](publishing.md)：身份、差异、字段合并、图片、Hexo 构建与预览。
-- [发布面板与跨稿同步](publishing-workbench.md)：发布稿之间选择正文改动或新增配图、冲突预览、Hexo 原生编辑。
-- [微信公众号工作台](wechat.md)：独立本地稿、账号、预览、图片、封面及远端同步。
-- [公众号主题与智能排版](wechat-layout.md)：十二套风格、AI 请求确认、区块调整和应用。
-- [PicGo 图片上传](picgo.md)：可选图床流程、缓存和凭据处理。
-- [Blog Control Room 接入](control-room.md)：兼容条件、会话、启动与部署保护。
-- [macOS 使用与迁移](macos.md)：Node/Git 环境、跨设备路径及宿主注意事项。
+## 按平台继续
 
-## 二、参考手册
+### 微信公众号
 
-- [命令与界面入口](reference/commands.md)：全部命令 ID、显示名称、作用对象和副作用。
-- [配置参考](reference/configuration.md)：默认值、作用域、凭据保存与设置恢复。
-- [数据模型与目录](reference/data-model.md)：Front Matter 所有权、稳定标识、排版方案和缓存。
-- [安全与隐私边界](security.md)：文件、网络、AI、凭据及已知限制。
+[工作台指南](wechat.md) 介绍正文预览、文章信息、配图、封面与同步恢复。先试本地功能，需要同步远端草稿时再连接账号。
 
-## 三、开发与维护
+[主题与智能排版](wechat-layout.md) 介绍十二套本地风格、逐块调整和可选 AI；[公众号与 Hexo 联动](wechat-association.md) 介绍两种正文导出方式、“阅读原文”和正式文章链接关联。
 
-- [开发环境和仓库结构](development/setup.md)
-- [模块架构与流程图](development/architecture.md)
-- [测试与验收指南](development/testing.md)
-- [贡献与文档维护约定](development/contributing.md)
-- [版本发布流程](development/releasing.md)
-- [AGENTS.md](../AGENTS.md)、[CLAUDE.md](../CLAUDE.md)：仓库开发约束与关键不变量。
+### Hexo 博客
 
-## 四、运维与当前状态
+[发布机制](publishing.md) 介绍图片处理、元数据、本地构建与预览；[Control Room 接入](control-room.md) 介绍兼容博客的管理后台和受保护部署流程。
 
-- [故障排查](operations/troubleshooting.md)
-- [备份、恢复与迁移](operations/backup-and-recovery.md)
-- [版本与验证状态](status.md)
-- [配套 hexo-blog 兼容性](hexo-blog-compatibility.md)
+[macOS 使用与迁移](macos.md) 补充本地 Node、Git、博客路径与跨设备配置。图片需要使用图床时，再阅读 [PicGo 指南](picgo.md)。
 
-## 五、历史记录与证据
+### 知乎与小红书
 
-以下文档按当时环境记录，不把一次通过推广为所有版本、系统或账号都通过：
+使用[快速开始](getting-started.md#第一次生成稿件)生成本地稿，在 Obsidian 中继续编辑，再自行发布到平台。[发布机制](publishing.md)说明目录、图片与更新规则。
 
-| 记录 | 内容 |
+## 日常操作
+
+| 任务 | 指南 |
 | --- | --- |
-| [性能与交互改进](performance-stabilization.md) | 1.9.0 基线热路径优化、调用次数回归与验证边界 |
-| [结构与交互审查](architecture-review.md) | 当前结构优化、排版异步取消与互斥修复 |
-| [稳定性审查](reliability-review.md) / [后续复核](review-followup.md) | 身份、备份、原子写入和恢复的演进 |
-| [公众号验收](wechat-acceptance.md) | 各轮自动化及真实账号测试 |
-| [排版验收](wechat-layout-acceptance.md) | AI、风格、冲突及后台/手机反馈 |
-| [macOS 验收](macos-acceptance.md) | Mac 环境和兼容后台专项证据 |
-| [1.6.3](releases/1.6.3.md)、[1.6.4](releases/1.6.4.md)、[1.7.0](releases/1.7.0.md)、[1.7.1](releases/1.7.1.md)、[1.7.2](releases/1.7.2.md)、[1.7.3](releases/1.7.3.md)、[1.8.0](releases/1.8.0.md)、[1.9.0](releases/1.9.0.md)、[1.9.1](releases/1.9.1.md)、[1.9.2](releases/1.9.2.md)、[1.9.3](releases/1.9.3.md) | 各稳定版本发布说明 |
+| 从原稿找到各平台稿件 | [发布面板](publishing-workbench.md) |
+| 首行空两格、段落之间加空行 | [基础排版](publishing-workbench.md#基础排版) |
+| 把本稿的改动带给其他稿件 | [选择性同步正文](publishing-workbench.md#在发布稿之间同步正文改动) |
+| 让公众号文章沿用一套视觉风格 | [主题与智能排版](wechat-layout.md) |
+| 从公众号成稿继续生成博客稿 | [两种 Hexo 输出](wechat-association.md#从公众号稿生成-hexo-稿) |
+| 更新账号、图片或遇到同步不确定状态 | [公众号工作台](wechat.md) |
+| 处理错误、升级与恢复原文 | [故障排查](operations/troubleshooting.md) · [备份与恢复](operations/backup-and-recovery.md) |
 
-结构化验收摘要保存在 [verification/](verification/)。不要向该目录提交真实账号密钥、访问令牌、未公开文章或完整插件配置。
+<a id="二参考手册"></a>
 
-- [公众号正式文章关联与 Hexo 交流入口](wechat-association.md)
+## 参考手册
+
+| 需要核对的内容 | 权威入口 |
+| --- | --- |
+| 命令 ID、显示名称和作用对象 | [命令与界面入口](reference/commands.md) |
+| 默认值、作用域、凭据保存方式 | [配置参考](reference/configuration.md) |
+| Front Matter、属性归属、缓存和目录 | [数据模型](reference/data-model.md) |
+| 文件、网络、AI 与账号边界 | [安全与隐私](security.md) |
+| 当前版本、已验证环境与限制 | [版本状态](status.md) |
+
+<a id="三开发与维护"></a>
+
+## 开发与维护
+
+[开发环境](development/setup.md) → [模块架构](development/architecture.md) → [测试与验收](development/testing.md) → [贡献约定](development/contributing.md) → [版本发布](development/releasing.md)
+
+配套博客要求见 [hexo-blog 兼容性](hexo-blog-compatibility.md)。Agent 开发约束见 [AGENTS.md](../AGENTS.md) 和 [CLAUDE.md](../CLAUDE.md)。
+
+<a id="四运维与当前状态"></a>
+<a id="五历史记录与证据"></a>
+
+<details>
+<summary>历史发布、审查与验收记录</summary>
+
+历史记录描述当时的版本和环境，不替代当前操作指南或本次提交的验证结果。
+
+- 发布说明：[1.9.4](releases/1.9.4.md)、[1.9.3](releases/1.9.3.md)、[1.9.2](releases/1.9.2.md)、[1.9.1](releases/1.9.1.md)、[1.9.0](releases/1.9.0.md)、[1.8.0](releases/1.8.0.md)；更早版本见 [releases/](releases/)。
+- 工程审查：[性能与交互](performance-stabilization.md)、[结构与交互](architecture-review.md)、[稳定性](reliability-review.md)、[后续复核](review-followup.md)。
+- 原生及服务验收：[公众号](wechat-acceptance.md)、[排版](wechat-layout-acceptance.md)、[macOS](macos-acceptance.md)及结构化摘要 [verification/](verification/)。
+- [截图来源与维护](assets/screenshots/README.md)记录本组配图的版本、演示状态和用途。
+
+验收目录不保存真实账号密钥、访问令牌、未公开文章或完整插件配置。
+
+</details>

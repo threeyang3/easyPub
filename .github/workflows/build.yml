@@ -6,10 +6,14 @@ on:
     paths-ignore:
       - "**/*.md"
       - "docs/**"
+      - "docs-site/**"
+      - ".github/workflows/pages.yml"
   pull_request:
     paths-ignore:
       - "**/*.md"
       - "docs/**"
+      - "docs-site/**"
+      - ".github/workflows/pages.yml"
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}

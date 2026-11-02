@@ -64,6 +64,7 @@ export class WechatView extends ItemView {
   private inspector!: HTMLElement;
   private status!: HTMLElement;
   private identity!: HTMLElement;
+  private syncReadiness?: HTMLElement;
   private syncButton!: HTMLButtonElement;
   private accountButton!: HTMLButtonElement;
   private pauseButton!: HTMLButtonElement;
@@ -128,6 +129,8 @@ export class WechatView extends ItemView {
     const footer = root.createDiv({ cls: "epw-footer" });
     this.syncButton = this.button(footer, "同步草稿箱", () => this.run(() => this.sync()));
     this.syncButton.addClass("mod-cta"); this.syncButton.disabled = true;
+    this.syncReadiness = footer.createDiv({ cls: "epw-sync-readiness", attr: { role: "status", "aria-live": "polite" } });
+    this.updateSyncState();
     this.button(footer, "查询 / 恢复关联", () => this.run(() => this.recover()));
     this.button(footer, "打开公众号后台", () => this.run(() => this.plugin.openWechatBackend()));
     this.registerEvent(this.app.vault.on("modify", file => {
@@ -182,7 +185,27 @@ export class WechatView extends ItemView {
     if (this.accountButton) this.accountButton.textContent = this.plugin.hasWechatCredentials() ? "账号设置" : "连接公众号";
   }
   private updateSyncState() {
-    if (this.syncButton) this.syncButton.disabled = this.busy || this.stale || this.dirty || !this.prepared || !this.cover || this.prepared.issues.length > 0;
+    const blockers: Array<{ message: string; label?: string; action?: () => void }> = [];
+    if (this.busy) blockers.push({ message: "任务进行中，请等待完成" });
+    if (this.dirty) blockers.push({ message: "文章信息尚未保存", label: "检查并保存信息", action: () => this.showPage("article") });
+    if (this.stale) blockers.push({ message: "预览待更新", label: "更新待同步预览", action: () => { void this.run(() => this.refresh(true)); } });
+    if (!this.prepared) blockers.push({ message: "正文尚未准备好" });
+    if (!this.cover) blockers.push({ message: "封面尚未准备好", label: "检查封面", action: () => this.showPage("images") });
+    for (const issue of this.prepared?.issues ?? []) blockers.push({ message: issue, label: "检查配图与正文", action: () => this.showPage("images") });
+    if (this.syncButton) {
+      this.syncButton.disabled = blockers.length > 0;
+      this.syncButton.title = blockers.map(item => item.message).join("；");
+    }
+    if (this.syncReadiness) {
+      this.syncReadiness.empty();
+      this.syncReadiness.hidden = !blockers.length;
+      if (blockers.length) this.syncReadiness.createEl("strong", { text: "暂不能同步" });
+      for (const blocker of blockers) {
+        const row = this.syncReadiness.createDiv();
+        row.createEl("span", { text: blocker.message });
+        if (blocker.action) this.button(row, blocker.label!, blocker.action).disabled = this.busy;
+      }
+    }
   }
   private invalidate() {
     this.version++; this.stale = true; this.cropSourceStale = true; this.updateSyncState(); this.message(this.paused ? "预览待更新 · 已暂停自动刷新，请手动刷新或恢复刷新" : "预览待更新 · 本地稿或附件已变化");

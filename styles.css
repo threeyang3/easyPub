@@ -356,3 +356,8 @@
 
 /* Current WeChat layout in the Hexo draft confirmation. */
 .ep-wechat-hexo-preview { max-width: 390px; max-height: 50vh; overflow: auto; margin: 16px auto; padding: 18px; background: #fff; color: #292d32; border: 1px solid var(--background-modifier-border); }
+
+.easy-pub-wechat .epw-sync-readiness { flex-basis: 100%; font-size: 12px; max-height: 140px; overflow: auto; }
+.easy-pub-wechat .epw-sync-readiness button { margin-left: 8px; }
+.easy-pub-properties .ep-property-preview { overflow-x: auto; }
+.easy-pub-properties .ep-property-preview td, .easy-pub-properties .ep-property-preview th { padding: 6px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }

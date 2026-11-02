@@ -144,14 +144,16 @@ export class PublishingView extends ItemView {
       for (const target of PLATFORMS) {
         const row = related.createDiv({ cls: "ep-panel-platform" }); row.createEl("strong", { text: target.name });
         let state: "unknown" | "checking" | "exists" | "missing" = "unknown";
-        const reset = () => { state = "unknown"; draft.textContent = "检查稿件"; };
-        const draft = this.button(row, "检查稿件", async () => {
+        const reset = () => { state = "unknown"; draft.textContent = "查找并打开"; };
+        const draft = this.button(row, "查找并打开", async () => {
           try {
             if (state === "unknown") {
               state = "checking"; draft.textContent = "正在检查…";
               const exists = await this.plugin.hasRelatedDraft(source, target);
+              if (this.closed || this.file !== file || !draft.isConnected) return;
               state = exists ? "exists" : "missing";
               draft.textContent = exists ? "打开稿件" : "创建稿件";
+              if (exists) await this.plugin.openRelatedDraft(source, target);
             } else if (state === "exists") await this.plugin.openRelatedDraft(source, target);
             else if (state === "missing") {
               await this.plugin.preparePublish(target, false, {configure: true, sourceFile: source});

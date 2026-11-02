@@ -80,16 +80,36 @@ export async function runAttachmentImportTests() {
       const modal = new ArticlePropertiesModal(app, { title: '博客属性', description: '',
         fields: platformPropertyFields('hexo'), current: {categories: ['随笔'], tags: ['旧标签']},
         suggested: {categories: ['随笔'], tags: ['旧标签']}, refresh: true,
-        categoryPaths: [['评论', '读书'], ['笔记', '读书']], suggestions: {tags: ['写作']} }, value => {result = value;});
+        categoryPaths: [['评论', '读书'], ['笔记', '读书']], suggestions: {tags: ['写作', ...Array.from({length: 30}, (_, i) => `候选${i}`)]} }, value => {result = value;});
       const el = dom.window.document.createElement('div');
       Object.assign(modal, {app, contentEl: el, modalEl: el, close: () => modal.onClose()}); modal.onOpen();
       const click = (text: string) => [...el.querySelectorAll('button')].find(b => b.textContent === text)!.click();
+      const search = el.querySelector<HTMLInputElement>('input[type="search"]')!;
+      assert.ok(search);
+      const tagSearch = el.querySelector('textarea[aria-label="标签"]')!.parentElement!.querySelector<HTMLInputElement>('input[type="search"]')!;
+      tagSearch.value = '候选29'; tagSearch.dispatchEvent(new dom.window.Event('input'));
+      assert.ok([...el.querySelectorAll('button')].some(b => b.textContent === '候选29'));
+      tagSearch.value = ''; tagSearch.dispatchEvent(new dom.window.Event('input'));
       click('评论 / 读书'); click('写作');
+      assert.equal(el.querySelector<HTMLTextAreaElement>('textarea[aria-label="标签"]')!.value, '旧标签\n写作');
       assert.equal(el.querySelector<HTMLInputElement>('input[aria-label="刷新分类"]')!.checked, true);
       assert.equal(el.querySelector<HTMLTextAreaElement>('textarea[aria-label="分类"]')!.disabled, false);
-      click('预览属性变更'); click('确认并继续');
+      click('预览属性变更');
+      assert.match(el.querySelector('table')!.textContent!, /评论 \/ 读书/);
+      assert.match(el.querySelector('table')!.textContent!, /保留不变/);
+      click('确认并继续');
       assert.deepEqual(result.values.categories, ['评论', '读书']);
       assert.deepEqual(result.values.tags, ['旧标签', '写作']);
+      const nested = [['评论', '读书'], ['笔记', '读书']];
+      const preserved = new ArticlePropertiesModal(app, {title: '多路径分类', description: '', fields: platformPropertyFields('hexo'),
+        current: {title: '保留', categories: nested, tags: ['[特殊标签]']}, suggested: {}}, value => {result = value;});
+      const preservedEl = dom.window.document.createElement('div');
+      Object.assign(preserved, {app, contentEl: preservedEl, modalEl: preservedEl, close: () => preserved.onClose()}); preserved.onOpen();
+      const clickPreserved = (text: string) => [...preservedEl.querySelectorAll('button')].find(b => b.textContent === text)!.click();
+      clickPreserved('预览属性变更'); clickPreserved('确认并继续');
+      assert.deepEqual(result.values.categories, nested, 'Multiple category paths must not flatten');
+      assert.deepEqual(result.values.tags, ['[特殊标签]'], 'Leading brackets must round-trip without being parsed as malformed JSON');
+
     } finally { globalThis.Event = previousEvent; }
     const form=setup(true);
     form.selectFile(image('fresh.png'));

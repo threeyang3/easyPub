@@ -59,26 +59,29 @@ export async function runPublishingWorkbenchTests() {
       assert.equal(options.sourceFile, files[1]); creations++;
     };
     assert.equal(queries, 0);
-    button('检查稿件').click(); await flush();
+    button('查找并打开').click(); await flush();
     assert.equal(queries, 1); assert.ok(button('创建稿件'));
     button('创建稿件').click(); await flush();
     assert.equal(creations, 1); assert.equal(queries, 1);
     // A move/delete after checking must recover on the same rendered row.
     plugin.hasRelatedDraft = async () => true;
+    let draftOpens = 0;
+    plugin.openRelatedDraft = async () => { draftOpens++; };
+    button('查找并打开').click(); await flush();
+    assert.equal(draftOpens, 1, 'One click locates and opens an existing draft');
     plugin.openRelatedDraft = async () => {throw new Error('发布稿已移动');};
-    button('检查稿件').click(); await flush();
     const staleDraftButton = button('打开稿件');
     staleDraftButton.click(); await flush();
-    assert.equal(staleDraftButton.textContent, '检查稿件');
+    assert.equal(staleDraftButton.textContent, '查找并打开');
     plugin.hasRelatedDraft = async () => false;
     staleDraftButton.click(); await flush();
     assert.equal(staleDraftButton.textContent, '创建稿件');
     plugin.preparePublish = async () => {throw new Error('创建失败');};
     staleDraftButton.click(); await flush();
-    assert.equal(staleDraftButton.textContent, '检查稿件');
+    assert.equal(staleDraftButton.textContent, '查找并打开');
     plugin.hasRelatedDraft = async () => {throw new Error('检查失败');};
     staleDraftButton.click(); await flush();
-    assert.equal(staleDraftButton.textContent, '检查稿件');
+    assert.equal(staleDraftButton.textContent, '查找并打开');
     const retainedButton = button('打开当前文章');
     retainedButton.focus();
     listeners.get('modify')!(files[1]); listeners.get('modify')!(files[1]); listeners.get('modify')!(files[1]);
@@ -109,6 +112,17 @@ export async function runPublishingWorkbenchTests() {
     assert.deepEqual(view.getState(), {path:'b.md',pinned:true});
     await view.onClose();
   } finally { dom.window.close(); }
+
+  const readinessView = Object.create(WechatView.prototype) as any;
+  Object.assign(readinessView, {syncButton: {}, busy: false, stale: false, dirty: false, prepared: {issues: []}, cover: {}});
+  readinessView.updateSyncState();
+  assert.equal(readinessView.syncButton.disabled, false);
+  readinessView.dirty = true; readinessView.stale = true; readinessView.cover = undefined;
+  readinessView.prepared.issues = ['图片过大']; readinessView.updateSyncState();
+  assert.equal(readinessView.syncButton.disabled, true);
+  for (const reason of ['尚未保存', '预览待更新', '封面尚未准备好', '图片过大']) assert.ok(readinessView.syncButton.title.includes(reason));
+  readinessView.dirty = false; readinessView.stale = false; readinessView.cover = {}; readinessView.prepared.issues = [];
+  readinessView.updateSyncState(); assert.equal(readinessView.syncButton.title, '');
 
   const source = Object.assign(new TFile(), {path:'source.md',extension:'md'});
   const draft = Object.assign(new TFile(), {path:'发布/draft.md',extension:'md'});

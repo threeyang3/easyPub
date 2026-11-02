@@ -69,46 +69,41 @@ export class ArticlePropertiesModal extends Modal {
       }
       const value = propertyValue(this.context.refresh ? this.context.suggested : this.context.current, field.key);
       if (!customInput) input.value = value === undefined ? "" : value instanceof Date ? value.toISOString() : typeof value === "string" ? value : JSON.stringify(value);
+      if (field.kind === "list" && Array.isArray(value) && canDisplayAsLines(value)) input.value = value.join("\n");
       if (field.kind === "list") {
-        input.setAttribute("placeholder", field.key === "tags" ? "每行一个标签，例如：\n写作\nAI\n\n也支持 JSON：[\"写作\", \"AI\"]" : '["随笔", "生活"]');
-        row.createEl("small", { text: field.key === "tags" ? "可点选已有标签，也可每行添加自定义标签；每项最多 60 字，不要用逗号分隔。" : "可点选已有分类，也可填写 JSON 文本列表。" });
+        input.setAttribute("placeholder", field.key === "tags" ? "每行一个标签，例如：\n写作\nAI\n\n也支持 JSON：[\"写作\", \"AI\"]" : "每行一级分类，例如：\n评论\n读书");
+        row.createEl("small", { text: field.key === "tags" ? "可点选已有标签，也可每行添加自定义标签；每项最多 60 字，不要用逗号分隔。" : "每行一级分类，构成一条完整路径；多条路径仍可使用嵌套 JSON 列表。" });
       }
       if (field.key === "categories" && this.context.categoryPaths?.length) {
         const picker = row.createDiv({ cls: "ep-property-suggestions" });
         picker.createEl("small", { text: "博客分类 · 点击填入完整层级，也可手动编辑" });
-        for (const categoryPath of this.context.categoryPaths) {
-          const button = picker.createEl("button", { text: categoryPath.join(" / "), attr: { type: "button" } });
-          button.onclick = () => {
-            input.value = JSON.stringify(categoryPath);
+        renderSuggestions(picker, this.context.categoryPaths, path => path.join(" / "), categoryPath => {
+            input.value = canDisplayAsLines(categoryPath) ? categoryPath.join("\n") : JSON.stringify(categoryPath);
             if (selected) { selected.checked = true; input.disabled = false; }
             input.dispatchEvent(new Event("input"));
-          };
-        }
+        });
       }
       const suggestions = field.suggestions ?? this.context.suggestions?.[field.key];
       if (suggestions?.length) {
         const picker = row.createDiv({ cls: "ep-property-suggestions" });
         picker.createEl("small", { text: field.kind === "list" ? "已有选项 · 点击切换" : "已有目录 · 点击填入" });
-        for (const suggestion of suggestions) {
-          const button = picker.createEl("button", { text: suggestion, attr: { type: "button" } });
-          button.onclick = () => {
+        renderSuggestions(picker, suggestions, value => value, suggestion => {
             if (field.kind === "list") {
               let values: unknown[];
               try { values = parsePropertyList(input.value, field.key); }
               catch (cause) { new Notice((cause as Error).message); return; }
               const index = values.findIndex(value => value === suggestion);
               if (index >= 0) values.splice(index, 1); else values.push(suggestion);
-              input.value = JSON.stringify(values);
+              input.value = canDisplayAsLines(values) ? values.join("\n") : JSON.stringify(values);
             } else input.value = suggestion;
             if (selected) { selected.checked = true; input.disabled = false; }
             input.dispatchEvent(new Event("input"));
-          };
-        }
+        });
       }
       if (this.context.refresh) {
         input.disabled = true;
         selected!.addEventListener("change", () => { input.disabled = !selected!.checked; invalidate(); });
-        row.createEl("small", { text: `当前：${JSON.stringify(propertyValue(this.context.current, field.key)) ?? "未设置"}` });
+        row.createEl("small", { text: `当前：${displayPropertyValue(propertyValue(this.context.current, field.key), field.key)}` });
       }
       input.addEventListener("input", () => invalidate());
       input.addEventListener("change", () => invalidate());
@@ -150,7 +145,7 @@ export class ArticlePropertiesModal extends Modal {
     const owner = this;
     const status = el.createEl("p", { attr: { role: "status", "aria-live": "polite" } });
     const error = el.createEl("p", { attr: { role: "alert" } });
-    const preview = el.createEl("pre"); preview.hidden = true;
+    const preview = el.createDiv({ cls: "ep-property-preview", attr: { tabindex: "-1", "aria-label": "属性变更预览" } }); preview.hidden = true;
     let proposed: PropertySelection | null = null;
     const actions = root.createDiv({ cls: "ep-property-actions" });
     const cancel = actions.createEl("button", { text: "取消" });
@@ -231,9 +226,31 @@ export class ArticlePropertiesModal extends Modal {
         }
         proposed = { values, remove: removals.filter(item => item.input.checked).map(item => item.key) };
         if (this.context.refresh && !Object.keys(values).length && !proposed.remove.length) throw new Error("请至少选择一个字段或待清理属性");
-        preview.textContent = JSON.stringify(this.context.previewSelection ? this.context.previewSelection(proposed)
-          : { 写入: proposed.values, 移除: proposed.remove }, null, 2);
-        preview.hidden = false; confirm.disabled = false;
+        const raw = this.context.previewSelection ? this.context.previewSelection(proposed)
+          : { 写入: proposed.values, 移除: proposed.remove };
+        preview.empty();
+        const table = preview.createEl("table");
+        const header = table.createEl("tr");
+        for (const text of ["字段", "当前值", "本次操作"]) header.createEl("th", { text });
+        for (const { field } of controls) {
+          const row = table.createEl("tr"), current = propertyValue(this.context.current, field.key);
+          row.createEl("td", { text: field.label });
+          row.createEl("td", { text: displayPropertyValue(current, field.key) });
+          const included = Object.prototype.hasOwnProperty.call(values, field.key);
+          const next = values[field.key];
+          row.createEl("td", { text: !included || JSON.stringify(current) === JSON.stringify(next) ? "保留不变"
+            : next === "" || Array.isArray(next) && !next.length ? "清空"
+            : `改为：${displayPropertyValue(next, field.key)}` });
+        }
+        for (const key of proposed.remove) {
+          const row = table.createEl("tr");
+          for (const text of [key, displayPropertyValue(this.context.current[key], key), "移除属性"]) row.createEl("td", { text });
+        }
+        const details = preview.createEl("details");
+        details.open = !!this.context.previewSelection;
+        details.createEl("summary", { text: "查看完整原始变更（含生成信息）" });
+        details.createEl("pre", { text: JSON.stringify(raw, null, 2) });
+        preview.hidden = false; confirm.disabled = false; preview.focus();
       } catch (cause) { invalidate(); error.textContent = (cause as Error).message; }
     };
     confirm.onclick = () => { if (!uploading && proposed) this.respond(proposed); };
@@ -275,4 +292,36 @@ export function chooseArticleProperties(app: App, context: ArticlePropertiesCont
     const modal = new ArticlePropertiesModal(app, context, value => { if (!failed) resolve(value); });
     try { modal.open(); } catch (error) { failed = true; modal.close(); reject(error); }
   });
+}
+
+function displayPropertyValue(value: unknown, key: string): string {
+  if (value === undefined) return "未设置";
+  if (value === "") return "空值";
+  if (Array.isArray(value)) {
+    if (!value.length) return "空列表";
+    return value.map(item => Array.isArray(item) ? item.join(" / ") : String(item)).join(key === "categories" && value.every(item => typeof item === "string") ? " / " : "、");
+  }
+  return value instanceof Date ? value.toISOString() : typeof value === "object" ? JSON.stringify(value) : String(value);
+}
+
+function renderSuggestions<T>(parent: HTMLElement, values: T[], label: (value: T) => string, choose: (value: T) => void) {
+  const search = parent.createEl("input", { type: "search", attr: { "aria-label": "搜索全部候选项", placeholder: "搜索全部候选项" } });
+  const items = parent.createDiv({ cls: "ep-property-suggestions" });
+  const count = parent.createEl("small");
+  const render = () => {
+    const query = search.value.trim().toLocaleLowerCase();
+    const matches = values.filter(value => label(value).toLocaleLowerCase().includes(query));
+    items.empty();
+    for (const value of matches.slice(0, 20)) {
+      const button = items.createEl("button", { text: label(value), attr: { type: "button" } });
+      button.onclick = () => choose(value);
+    }
+    count.textContent = matches.length > 20 ? `显示前 20 / ${matches.length} 项，请搜索缩小范围` : matches.length ? "" : "没有匹配项，可手动填写";
+  };
+  search.addEventListener("input", render); render();
+}
+
+function canDisplayAsLines(values: unknown[]): boolean {
+  return values.every(item => typeof item === "string" && item.length > 0 && item === item.trim() && !/[\r\n]/.test(item))
+    && !(typeof values[0] === "string" && values[0].startsWith("["));
 }

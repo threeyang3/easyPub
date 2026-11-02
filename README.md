@@ -1,55 +1,98 @@
+<div align="center">
+
 # EasyPub
 
-EasyPub 是桌面端 Obsidian 插件，将源笔记转换为各平台发布稿，并提供常驻发布面板、Hexo 博客预览与公众号草稿工作台。
+**在 Obsidian 写作，为不同平台准备成稿。**
 
-**[项目概览与架构图](docs/overview.md) · [完整文档](docs/README.md) · [快速开始](docs/getting-started.md)**
+[下载 1.9.4](https://github.com/threeyang3/easyPub/releases/tag/1.9.4) · [快速开始](docs/getting-started.md) · [文档中心](docs/README.md) · [更新记录](docs/releases/1.9.4.md)
 
-本次版本为 **1.9.4**，声明最低 Obsidian **1.5.7**。实际安装与验证范围见[版本状态](docs/status.md)。
+适用于桌面版 Obsidian 1.5.7 及以上版本。
 
-## 能力与边界
+</div>
 
-| 平台 | 发布稿位置 | EasyPub 提供的后续操作 |
+![公众号工作台中的正文预览、文章设置与发布操作](docs/assets/screenshots/wechat-workbench.png)
+
+<p align="center"><sub>先在本地完成成稿，再决定何时同步或发布。界面配图使用演示稿件；显示效果会随 Obsidian 主题变化。</sub></p>
+
+<a id="能力与边界"></a>
+
+## 一篇原稿，各自成稿
+
+EasyPub 把源笔记整理为 Hexo、微信公众号、知乎和小红书的独立发布稿。原稿继续用于写作，各平台稿可以分别调整标题、正文和配图；需要复用修改时，再选择要同步的内容并核对差异。
+
+| 平台 | 稿件保存在 | 可以继续做什么 |
 | --- | --- | --- |
-| Hexo | 外部博客仓库的 `source/_posts`；更新时保留已有草稿位置 | 图片处理、一键排版、本地构建、部署；兼容 Control Room 时进入受保护管理流程并支持文章预览 |
-| 微信公众号 | Vault 内，默认 `发布/微信公众号` | 独立成稿、十二套风格、可选 AI 排版、图片和双比例封面、草稿箱创建与更新 |
-| 知乎 | Vault 内，默认 `发布/知乎/文章` 或 `想法` | 生成和更新本地发布稿 |
-| 小红书 | Vault 内，默认 `发布/小红书` | 生成和更新本地发布稿 |
+| 微信公众号 | Vault 内，默认 `发布/微信公众号/` | 预览正文、选择风格、调整封面、同步微信草稿箱 |
+| Hexo | 博客仓库的 `source/_posts/` 或已有草稿位置 | 在 Obsidian 编辑，构建、预览或进入管理后台部署 |
+| 知乎 | Vault 内，默认 `发布/知乎/文章/` 或 `想法/` | 编辑独立稿件，再自行发布到平台 |
+| 小红书 | Vault 内，默认 `发布/小红书/` | 编辑独立稿件，再自行发布到平台 |
 
-源文章和发布稿是独立文件，通过 `pub_id` 关联。新平台稿只继承各自允许的基础属性；更新正文时保留平台稿自己的标题、标签、封面等设置。可通过“从原稿刷新平台属性（选择字段）”预览并更新指定属性。公众号已有本地稿默认只打开，正文替换需要显式操作。插件不自动将后台编辑同步回源文章，也不自动挂载外部博客文件夹。
+> **本地成稿、远端草稿、正式发布是三个阶段。**
+> 公众号同步保存到草稿箱，正式发布仍在微信后台完成；知乎、小红书由你自行发布。Hexo 自动部署默认关闭，兼容 Blog Control Room 的博客进入其受保护发布流程。
 
-AI 仅规划排版，不改写正文。公众号同步写入草稿箱，正式发布在微信后台完成。知乎和小红书没有自动发帖接口。详见[项目概览](docs/overview.md)。
+<a id="安装"></a>
+<a id="快速开始"></a>
 
-## 安装
+## 从第一篇稿件开始
 
-从 [GitHub Releases](https://github.com/threeyang3/easyPub/releases) 下载**同一版本**的 `main.js`、`manifest.json`、`styles.css`，放入 Vault 的 `.obsidian/plugins/easy-pub/`，重启 Obsidian 并启用插件。
+1. **安装插件。** 从 [Releases](https://github.com/threeyang3/easyPub/releases/latest) 下载同版 `main.js`、`manifest.json`、`styles.css`，放入 Vault 的 `.obsidian/plugins/easy-pub/` 并启用。
+2. **打开原稿。** 点击左侧工具栏“打开 EasyPub 发布面板”，再选择“创建 / 更新发布稿”和目标平台。
+3. **确认后编辑。** 核对属性预览，生成独立稿件；公众号进入工作台，其他平台打开对应 Markdown 文件。
 
-升级前备份配置，三个安装文件一起替换；不要用其他 Vault 的 `data.json` 覆盖现有账号与草稿关联。具体步骤见[安装与升级](docs/getting-started.md)。
+第一次只生成本地稿时，公众号不需要连接账号，知乎和小红书也无需额外服务。使用 Hexo 时先配置博客仓库路径。
 
-## 快速开始
+[跟着快速开始完成第一篇稿件](docs/getting-started.md)
 
-1. 可点击左侧工具栏的“新建文章”图标、EasyPub 发布面板的“新建文章”，或执行同名命令：填写保存目录、标题和基础属性，预览后创建独立原稿，自动生成新 `pub_id` 并标记为草稿；同名文件自动编号。作者、摘要、标签和封面可稍后补充，创作日期可调整或留空。
-2. 在“设置 → EasyPub”确认发布根目录；使用 Hexo 时填写博客仓库绝对路径。
-3. 打开一篇测试笔记，可先执行“初始化原稿属性”；点击云图标或执行 `Publish to platform`，选择平台并确认该平台属性。
-4. 生成稿件的属性窗口支持直接上传封面和批量添加图片附件，按 Obsidian 附件设置保存；也可选择已有附件。更新已有稿件时核对差异。生成后打开发布稿继续编辑；公众号按向导配置账号后进入预览工作台。
-4. Hexo 先检查和本地构建，再决定部署；公众号先检查预览，再同步草稿箱。自动部署默认关闭。
+## 公众号成稿，在一个工作台里检查
 
-点击工具栏“打开 EasyPub 发布面板”，或执行同名命令，随时访问 Hexo 管理后台和各平台稿件。面板跟随 Markdown 文章，也可固定当前稿件；首次启用新版自动展示一次，之后由工作区恢复开关状态。公众号工作台默认在中央标签页打开，使用“正文预览 / 文章信息 / 图片与封面”切换，封面裁剪使用独立大窗口。
+正文预览、文章信息、图片与封面各有自己的位置。十二套本地风格可以直接试用；需要 AI 建议重点与组件时，再配置服务并逐次确认发送内容。
 
-公众号工作台及原稿、各平台稿的发布面板提供「基础排版」：可分别选择段落首行写入两个全角空格、段落之间加空行，预览确认后保存当前稿并备份。Hexo 原有一键排版仍保留。详见[发布面板与排版](docs/publishing-workbench.md)。
+- 公众号本地稿独立保存，已有稿件默认直接打开。
+- 双比例封面分别调整横版 **2.35:1** 与方形 **1:1** 构图。
+- 同步前检查正文、图片、封面与账号状态；后台内容变化时先核对冲突。
 
-公众号工作台「生成 Hexo 稿」默认保存普通 Markdown，也可选择保留公众号排版，输出带样式 HTML；两种方式都使用当前公众号本地稿正文，不自动部署。详见[生成方式](docs/wechat-association.md#从公众号稿生成-hexo-稿)。
+[公众号工作台](docs/wechat.md) · [主题与智能排版](docs/wechat-layout.md)
 
-全部命令及界面入口见[命令参考](docs/reference/commands.md)。
+## 整理 Markdown，也能先看改动
 
-## 阅读路径
+“基础排版”适用于原稿和全部平台稿。首行写入两个全角空格、段落之间加空行可以分别选择；核对差异后保存，写入前保留原文备份。重复应用不叠加空格或空行，标题、代码、列表、引用和表格保留结构。
 
-- 理解文件关系：[概览](docs/overview.md) → [发布机制](docs/publishing.md) → [数据模型](docs/reference/data-model.md)。
-- 使用公众号：[工作台](docs/wechat.md) → [风格与 AI 排版](docs/wechat-layout.md)。
-- 使用博客：[Control Room](docs/control-room.md) → [macOS 配置](docs/macos.md)；图床可选用 [PicGo](docs/picgo.md)。
-- 处理问题：[排障](docs/operations/troubleshooting.md) → [备份与恢复](docs/operations/backup-and-recovery.md)。
-- 了解数据去向：[配置参考](docs/reference/configuration.md) → [安全与隐私](docs/security.md)。
+![基础排版窗口：选择首行缩进与段间空行，核对新增和删除的正文行](docs/assets/screenshots/basic-formatting.png)
 
-## 开发
+[了解基础排版与跨稿正文同步](docs/publishing-workbench.md)
+
+## 生成 Hexo 稿，选择合适的正文格式
+
+| 输出方式 | 适合的目标 |
+| --- | --- |
+| **普通 Markdown（默认）** | 保持源码易编辑，让字体、颜色和间距跟随博客主题 |
+| **保留公众号排版** | 将当前视觉效果保存为带样式的 HTML，并引用配套 CSS |
+
+两种方式都使用当前公众号本地稿，先预览再保存，不自动部署博客。普通 Markdown 模式复制本地原图，保留远程图片网址。
+
+![Hexo 生成窗口：选择普通 Markdown 或保留公众号排版，并核对输出预览](docs/assets/screenshots/hexo-export.png)
+
+[查看生成方式及后续编辑规则](docs/wechat-association.md#从公众号稿生成-hexo-稿)
+
+<a id="阅读路径"></a>
+
+## 按你的工作流继续
+
+| 现在想做什么 | 阅读入口 |
+| --- | --- |
+| 安装、升级，完成第一篇本地稿 | [快速开始](docs/getting-started.md) |
+| 管理原稿、平台稿和正文同步 | [发布面板与基础排版](docs/publishing-workbench.md) |
+| 准备公众号正文、配图和封面 | [公众号工作台](docs/wechat.md) |
+| 使用 Hexo 图片、构建和预览 | [发布机制](docs/publishing.md) · [Control Room](docs/control-room.md) |
+| 处理失败、恢复备份或迁移电脑 | [故障排查](docs/operations/troubleshooting.md) · [备份与恢复](docs/operations/backup-and-recovery.md) |
+| 查命令、配置与属性归属 | [参考手册](docs/README.md#参考手册) |
+
+升级时保留自己的 `data.json`，一起替换同版三个安装文件。版本、宿主与真实服务的验证范围见[版本状态](docs/status.md)。
+
+<a id="开发"></a>
+
+<details>
+<summary>开发与贡献</summary>
 
 ```bash
 git clone https://github.com/threeyang3/easyPub.git
@@ -59,10 +102,14 @@ npm test
 npm run build
 ```
 
-构建执行类型检查、生成插件并同步 `release/`，不会安装到 Vault。CI 基线为 Node 20。
+构建包含类型检查，并同步生产产物到 `release/`；不会自动安装到 Vault。
 
-从[开发环境](docs/development/setup.md)开始，再阅读[模块架构与流程图](docs/development/architecture.md)、[测试指南](docs/development/testing.md)、[贡献约定](docs/development/contributing.md)及[发布流程](docs/development/releasing.md)。仓库约束见 [AGENTS.md](AGENTS.md) 与 [CLAUDE.md](CLAUDE.md)。
+[开发环境](docs/development/setup.md) · [架构](docs/development/architecture.md) · [测试](docs/development/testing.md) · [贡献约定](docs/development/contributing.md) · [发布流程](docs/development/releasing.md)
 
-## 许可证
+仓库约束见 [AGENTS.md](AGENTS.md) 与 [CLAUDE.md](CLAUDE.md)。
 
-[MIT](LICENSE)
+</details>
+
+<a id="许可证"></a>
+
+[MIT License](LICENSE)

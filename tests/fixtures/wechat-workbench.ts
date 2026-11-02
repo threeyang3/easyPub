@@ -1,6 +1,6 @@
 import {invalidateHexoLocator} from "../../utils/hexoLocator";
 import { WechatHexoModal } from "../../modals/WechatHexoModal";
-import { exportWechatHexoContent } from "../../utils/wechatHexoContent";
+import { exportWechatHexoContent, exportWechatHexoMarkdown, WechatHexoMode } from "../../utils/wechatHexoContent";
 import { ArticlePropertiesModal } from "../../modals/ArticlePropertiesModal";
 import { platformPropertyFields } from "../../utils/articleProperties";
 import { PublishingView } from "../../views/PublishingView";
@@ -32,21 +32,26 @@ ctx.font = "40px serif"; ctx.fillText("WRITE · PREVIEW · PUBLISH", 80, 280);
 const blob = await new Promise<Blob>(resolve => canvas.toBlob(blob => resolve(blob!), "image/png"));
 const raw = await blob.arrayBuffer();
 let text = "---\npub_id: local-id\nsource_file: '[[source]]'\n---\n# 把表达，留给内容\n\n这是已经独立编辑的公众号本地稿。调整配图和封面，在这里检查最终排版。\n\n![封面配图](../../assets/cover.png)\n\n## 发布之前，从容检查\n\n- 正文与原稿保持独立\n- 图片适配交给工具\n- 最后在公众号后台发布\n\n> 好的工具，让写作更专注。\n\n```ts\n    const message = 'Hello';\n    console.log(message);\n```";
+let sourceText = "---\ntitle: 原稿测试\ncustom: 保留属性\n---\n原稿第一段\n原稿第二段\n";
 const listeners = new Map<string, Set<(...args: any[]) => void>>();
 const emit = (event: string, file: TFile) => listeners.get(event)?.forEach(listener => listener(file));
 let delay = 0, readDelay = 0, sourceReads = 0, connected = true, settingsWrites = 0;
 const imported = new Map<string,TFile>();
+const formattingBackups = new Map<string, string>();
 const app: any = {
   vault: {
+    configDir: ".obsidian",
+    adapter: {exists: async (name:string) => formattingBackups.has(name), mkdir: async (name:string) => {formattingBackups.set(name, "");},
+      write: async (name:string,value:string) => {formattingBackups.set(name,value);}, read: async (name:string) => formattingBackups.get(name)},
     read: async (target: TFile) => {
-      if (target === source) { sourceReads++; return "SOURCE MUST NOT BE READ"; }
+      if (target === source) { sourceReads++; return sourceText; }
       const snapshot = text;
       if (readDelay) { globals.fixtureDelayedReads = (globals.fixtureDelayedReads ?? 0) + 1; await new Promise(resolve => setTimeout(resolve, readDelay)); }
       return snapshot;
     },
-    process: async (_file: TFile, update: (raw: string) => string) => { text = update(text); emit("modify",file); },
+    process: async (target: TFile, update: (raw: string) => string) => { if(target===source)sourceText=update(sourceText);else text=update(text); emit("modify",target); },
     readBinary: async () => { if (delay) await new Promise(resolve => setTimeout(resolve, delay)); return raw; },
-    getAbstractFileByPath: (path: string) => path === file.path ? file : path === attachment.path ? attachment : path === alternate.path ? alternate : imported.get(path) ?? null,
+    getAbstractFileByPath: (path: string) => path === source.path ? source : path === file.path ? file : path === attachment.path ? attachment : path === alternate.path ? alternate : imported.get(path) ?? null,
     getFiles: () => [file, attachment, alternate, source, ...imported.values()],
     createBinary: async (path: string, _bytes: ArrayBuffer) => { const file = Object.assign(new TFile(), {path, extension:path.split(".").pop(),basename:path.split("/").pop()}); imported.set(path,file); return file; },
     on: (event: string, listener: (...args: any[]) => void) => {
@@ -70,17 +75,22 @@ const app: any = {
     text = header.slice(0, header.length - generatedBody.length) + parsed.content;
     emit("modify", file);
   } },
-  workspace: { on: (event: string, listener: (...args: any[]) => void) => { if (!listeners.has(event)) listeners.set(event, new Set()); listeners.get(event)!.add(listener); return () => listeners.get(event)?.delete(listener); }, getActiveFile: () => file, requestSaveLayout: () => {}, getLeaf: () => ({ openFile: async (file: TFile, options: unknown) => { globals.fixtureOpened = { path: file.path, options }; } }) },
+  workspace: { getLeavesOfType: () => [], on: (event: string, listener: (...args: any[]) => void) => { if (!listeners.has(event)) listeners.set(event, new Set()); listeners.get(event)!.add(listener); return () => listeners.get(event)?.delete(listener); }, getActiveFile: () => file, requestSaveLayout: () => {}, getLeaf: () => ({ openFile: async (file: TFile, options: unknown) => { globals.fixtureOpened = { path: file.path, options }; } }) },
 };
 let hexoGenerated = "", hexoCommitted = 0;
 let sourceUrlResult: {url?:string; reason?:string} = {};
-const plugin: any = { resolveWechatSourceUrl: async () => sourceUrlResult, app, settings: normalizeSettings(null), wechatSyncInProgress: false, wechatCredentialRevision: 0,
-  generateHexoFromWechat: async (_file: TFile, input: any) => {
-    await input.assertFresh();
-    const output = exportWechatHexoContent(input.document, image => `/picture/${image.hash}.png`);
-    const diff: any = {isNew:true,targetPath:"/blog/source/_drafts/current-wechat.md",sourceContent:output.body,targetContent:null,meta:{title:input.article.title}};
-    return new Promise<boolean>(resolve => new WechatHexoModal(app,diff,exportWechatHexoContent(input.document,image=>image.previewUrl).html,
-      async guard => {guard();await input.assertFresh();guard();hexoGenerated=output.body;hexoCommitted++;},resolve).open());
+const plugin: any = { manifest: {id:"easy-pub"}, assertSettingsWritable: () => {}, resolveWechatSourceUrl: async () => sourceUrlResult, app, settings: normalizeSettings(null), wechatSyncInProgress: false, wechatCredentialRevision: 0,
+  generateHexoFromWechat: async (_file: TFile, input: any, mode: WechatHexoMode = "markdown") => {
+    const prepare = async (mode: WechatHexoMode) => {
+      await input.assertFresh();
+      const output = mode === "layout" ? exportWechatHexoContent(input.document, image => `/picture/${image.hash}.png`)
+        : {body:await exportWechatHexoMarkdown(parseFrontMatter(input.snapshot).content, async () => `/picture/${input.document.images[0]?.hash ?? 'local'}.png`)};
+      const diff: any = {isNew:true,targetPath:"/blog/source/_drafts/current-wechat.md",sourceContent:output.body,targetContent:null,meta:{title:input.article.title}};
+      return {mode,diff,preview:mode === "layout" ? exportWechatHexoContent(input.document,image=>image.previewUrl).html : output.body};
+    };
+    const initial = await prepare(mode);
+    return new Promise<boolean>(resolve => new WechatHexoModal(app,initial,prepare,
+      async (plan,guard) => {guard();await input.assertFresh();guard();hexoGenerated=plan.diff.sourceContent;hexoCommitted++;},resolve).open());
   },
   getWechatAiConfiguration: () => ({settings: {endpoint: 'https://ai.example/v1/chat/completions', model: 'test-model', encryptedKey: '', jsonMode: true}, key: 'test-ai-key'}),
   openWechatAiSettings: () => {},
@@ -94,17 +104,19 @@ let pauseAssociation=false, releaseAssociation:(()=>void)|undefined;
 Object.assign(plugin, {
   publishDirectoryExists: async () => true,
   listPublishFiles: async (_platform: unknown, directory: string) => [...associationFiles.keys()].filter(file => file.startsWith(directory+"/")),
-  readPublishFile: async (_platform: unknown, file: string) => {associationReads++;const raw=associationFiles.get(file);if(pauseAssociation){pauseAssociation=false;await new Promise<void>(resolve=>{releaseAssociation=resolve;});}return raw;},
+  readPublishFile: async (_platform: unknown, target: string) => {if(target===source.path)return sourceText;if(target===file.path)return text;associationReads++;const raw=associationFiles.get(target);if(pauseAssociation){pauseAssociation=false;await new Promise<void>(resolve=>{releaseAssociation=resolve;});}return raw;},
   publishFileVersion: async (_platform:unknown,file:string) => associationFiles.get(file),
-  writePublishFile: async (_platform:unknown, file:string, next:string, expected:string, guard:()=>void, before:()=>Promise<void>) => {
+  writePublishFile: async (_platform:unknown, target:string, next:string, expected:string, guard:()=>void, before:()=>Promise<void>) => {
     await before();guard();if(associationFailure)throw new Error("fixture write failure");
-    if(associationFiles.get(file)!==expected)throw new Error("concurrent edit");associationFiles.set(file,next);
+    if(target===file.path||target===source.path) {await app.vault.process(target===source.path?source:file,(current:string)=>{guard();if(current!==expected)throw new Error("concurrent edit");return next;});return;}
+    if(associationFiles.get(target)!==expected)throw new Error("concurrent edit");associationFiles.set(target,next);
   },
 });
 plugin.settings.hexoRepoPath = "/blog";
 const view = new WechatView({ app, contentEl: document.querySelector("#workbench") } as any, plugin);
 await view.onOpen(); await view.bind(file);
 globals.fixture = { view,
+  formattingBackups: () => [...formattingBackups].filter(([name]) => name.endsWith(".md")),
   hexoGenerated: () => hexoGenerated, hexoCommitted: () => hexoCommitted,
   originalLink: (value: {url?:string; reason?:string}) => {sourceUrlResult=value;},
   associationFiles,
@@ -174,6 +186,7 @@ globals.fixture = { view,
   draftState: () => plugin.settings.wechat.drafts[":local-id"],
   markUncertain: () => { plugin.settings.wechat.drafts[":local-id"] = { mediaId: "old", uncertain: true }; },
   read: () => text,
+  readSource: () => sourceText,
   replace: (value: string) => { text = value; emit("modify", file); },
   modify: (suffix: string) => { text += `\n\n${suffix}`; emit("modify", file); },
   setDelay: (value: number) => { delay = value; },

@@ -53,6 +53,7 @@ export async function runPublishingWorkbenchTests() {
     active = files[1]; listeners.get('file-open')!(active); await flush();
     pending!('---\ntitle: stale A\n---\nold'); await flush();
     assert.match(root.textContent, /b.md/); assert.doesNotMatch(root.textContent, /stale A/);
+    assert.ok(button('基础排版'), 'Original notes expose the same basic formatting entry');
     let queries = 0, creations = 0;
     plugin.hasRelatedDraft = async () => {queries++; return false;};
     plugin.preparePublish = async (_platform: unknown, _refresh: boolean, options: any) => {
@@ -114,9 +115,17 @@ export async function runPublishingWorkbenchTests() {
   } finally { dom.window.close(); }
 
   const readinessView = Object.create(WechatView.prototype) as any;
-  Object.assign(readinessView, {syncButton: {}, busy: false, stale: false, dirty: false, prepared: {issues: []}, cover: {}});
+  Object.assign(readinessView, {syncButton: {}, hexoButton: {}, formatButton: {}, busy: false, stale: false, dirty: false, prepared: {issues: []}, cover: {}});
   readinessView.updateSyncState();
   assert.equal(readinessView.syncButton.disabled, false);
+  assert.equal(readinessView.hexoButton.disabled, false);
+  assert.equal(readinessView.formatButton.disabled, false);
+  readinessView.busy = true; readinessView.updateSyncState();
+  assert.equal(readinessView.hexoButton.disabled, true);
+  assert.equal(readinessView.formatButton.disabled, true);
+  readinessView.busy = false; readinessView.updateSyncState();
+  assert.equal(readinessView.hexoButton.disabled, false);
+  assert.equal(readinessView.formatButton.disabled, false);
   readinessView.dirty = true; readinessView.stale = true; readinessView.cover = undefined;
   readinessView.prepared.issues = ['图片过大']; readinessView.updateSyncState();
   assert.equal(readinessView.syncButton.disabled, true);

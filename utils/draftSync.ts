@@ -2,14 +2,14 @@ import { App, MarkdownView, TFile, normalizePath } from "obsidian";
 import fs from "fs/promises";
 import path from "path";
 import type EasyPub from "../main";
-import { Platform, PLATFORMS, WechatLayoutDocument } from "../types";
+import { Platform, PLATFORMS } from "../types";
 import { parseFrontMatter, getFrontMatterString, stringifyFrontMatter } from "./frontMatter";
 import { getPublishPath, hexoEditorPath, isWithinPath } from "./platforms";
 import { DraftSyncImages, CanonicalBody, SyncLocation, SyncAsset, syncHash, readAttachmentConfiguration } from "./draftSyncImages";
 import { reconcileChanges, applySyncChanges, SyncChange } from "./draftSyncDiff";
 import { writeImmutableAsset } from "./publishFiles";
-import { extractWechatBlocks } from "./wechatLayoutAst";
-import { rebaseWechatLayout } from "./wechatLayoutEngine";
+import { preserveSyncedWechatLayout } from "./draftSyncLayout";
+export { preserveSyncedWechatLayout } from "./draftSyncLayout";
 
 export interface SyncTarget {
   location: SyncLocation & {platform:Platform}; snapshot: string; canonical: CanonicalBody;
@@ -18,17 +18,6 @@ export interface SyncTarget {
 export interface SyncPreview {
   target: SyncTarget; content: string; body: string; canonical: string; assets: SyncAsset[]; selected: SyncChange[]; layoutNotice?: string;
 }
-const layoutDoc = (body: string):WechatLayoutDocument => {
-  const doc=extractWechatBlocks(body);return {hash:doc.hash,blocks:doc.blocks.map(block=>({...block,text:block.markdown,planningText:""}))};
-};
-export function preserveSyncedWechatLayout(before: string, after: string, data: Record<string,any>): {data:Record<string,any>;notice?:string} {
-  if(!data.wechat?.layout||before===after)return {data};
-  try {
-    const result=rebaseWechatLayout(data.wechat.layout,layoutDoc(after),layoutDoc(before));
-    return {data:{...data,wechat:{...data.wechat,layout:result.plan,layoutHistory:[...(Array.isArray(data.wechat.layoutHistory)?data.wechat.layoutHistory:[]),data.wechat.layout].slice(-5)}},notice:result.notice};
-  } catch { return {data,notice:"原排版方案无效，已保留原设置；请在公众号工作台重新确认排版。"}; }
-}
-
 async function adapterWrite(app:App,target:string,content:string) {
   const adapter=app.vault.adapter;
   const parts=target.split("/");parts.pop();let directory="";

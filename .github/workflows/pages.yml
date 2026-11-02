@@ -5,6 +5,7 @@ on:
     branches: ["main"]
     paths:
       - "docs-site/index.html"
+      - "docs-site/guides/**"
       - "docs-site/assets/**"
       - "docs/assets/screenshots/**"
       - ".github/workflows/pages.yml"

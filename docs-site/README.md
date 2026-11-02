@@ -14,7 +14,7 @@ python3 -m http.server 8000
 
 ## 文件结构
 
-- `index.html`：产品介绍、快速开始、功能专题、FAQ 和详细文档入口。
+- `index.html`：产品首页，介绍核心能力并引导进入使用文档。\n- `guides/`：分层使用文档，包含安装、原稿工作流、公众号工作台与账号配置、智能排版、Hexo、正文同步和参考指南。
 - `assets/styles.css`：响应式布局与视觉样式。
 - `assets/app.js`：移动导航、页面内搜索和当前章节定位。
 - 截图直接引用 `../docs/assets/screenshots/`，避免重复存储产品图片。

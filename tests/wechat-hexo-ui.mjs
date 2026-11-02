@@ -6,7 +6,8 @@ export async function runWechatHexoUi(page) {
     window.fixture.replace('---\npub_id: local-id\nsource_file: "[[source]]"\n---\n## 公众号独立标题\n\n　　保留这一段 **Markdown 正文**。\n\n> 引用排版\n\n```ts\n  const a = 1;\n  next(a);\n```\n\n![Cover](../../assets/cover.png)');
     await window.fixture.view.refresh();
   });
-  const create = () => page.getByRole('button',{name:'生成 Hexo 稿',exact:true}).click();
+  const createButton = () => page.getByRole('button',{name:'生成 Hexo 稿',exact:true});
+  const create = () => createButton().click();
   const dialog = page.getByRole('dialog');
   const mode = (value='markdown') => dialog.getByRole('radio',{name:value==='layout'?'保留公众号排版':'普通 Markdown',exact:true});
   const save = () => dialog.getByRole('button',{name:'确认生成 Hexo 草稿',exact:true});
@@ -30,6 +31,8 @@ export async function runWechatHexoUi(page) {
   await dialog.locator('.ep-wechat-hexo-preview h2').waitFor();
   assert.equal(await dialog.locator('.ep-wechat-hexo-preview h2').innerText(),'公众号独立标题');
   assert.match(await dialog.locator('.ep-wechat-hexo-preview pre').innerText(),/const a = 1/);
+  await page.evaluate(()=>window.fixture.setReadDelay(200));
+  assert.equal(await createButton().isDisabled(),true,'Generating again is unavailable until the current workbench operation completes');
   await save().click();
   await dialog.waitFor({state:'hidden'});
   const html = await page.evaluate(()=>window.fixture.hexoGenerated());

@@ -68,6 +68,8 @@ export class WechatView extends ItemView {
   private identity!: HTMLElement;
   private syncReadiness?: HTMLElement;
   private syncButton!: HTMLButtonElement;
+  private hexoButton?: HTMLButtonElement;
+  private formatButton?: HTMLButtonElement;
   private accountButton!: HTMLButtonElement;
   private pauseButton!: HTMLButtonElement;
   private previewTab!: HTMLButtonElement;
@@ -112,10 +114,10 @@ export class WechatView extends ItemView {
       else void this.run(() => this.refresh(true));
     });
     this.button(tools, "打开本地稿", () => this.run(async () => { if (this.file) await this.app.workspace.getLeaf(false).openFile(this.file); }));
-    this.button(tools, "生成 Hexo 稿", () => this.run(() => this.generateHexo()));
+    this.hexoButton = this.button(tools, "生成 Hexo 稿", () => this.run(() => this.generateHexo()));
     this.button(tools,"同步正文到其他稿",()=>{if(this.file)void this.plugin.syncDraftBody(this.file).catch(error=>this.message((error as Error).message,true));});
     this.button(tools, "智能排版", () => { void this.openLayout().catch(error => this.message((error as Error).message, true)); });
-    this.button(tools, "基础排版", () => this.run(() => this.formatBody()));
+    this.formatButton = this.button(tools, "基础排版", () => this.run(() => this.formatBody()));
     this.status = root.createDiv({ cls: "epw-status", text: "等待选择公众号本地稿", attr: { role: "status", "aria-live": "polite" } });
     const tabs = root.createDiv({ cls: "epw-tabs", attr: { "aria-label": "预览布局" } });
     this.previewTab = this.button(tabs, "正文预览", () => this.showSettings(false));
@@ -189,6 +191,9 @@ export class WechatView extends ItemView {
     if (this.accountButton) this.accountButton.textContent = this.plugin.hasWechatCredentials() ? "账号设置" : "连接公众号";
   }
   private updateSyncState() {
+    // A saved dialog closes before the post-save preview finishes refreshing.
+    // Keep repeat actions visibly unavailable until the workbench is ready.
+    for (const button of [this.hexoButton, this.formatButton]) if (button) button.disabled = this.busy;
     const blockers: Array<{ message: string; label?: string; action?: () => void }> = [];
     if (this.busy) blockers.push({ message: "任务进行中，请等待完成" });
     if (this.dirty) blockers.push({ message: "文章信息尚未保存", label: "检查并保存信息", action: () => this.showPage("article") });

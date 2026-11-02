@@ -115,9 +115,17 @@ export async function runPublishingWorkbenchTests() {
   } finally { dom.window.close(); }
 
   const readinessView = Object.create(WechatView.prototype) as any;
-  Object.assign(readinessView, {syncButton: {}, busy: false, stale: false, dirty: false, prepared: {issues: []}, cover: {}});
+  Object.assign(readinessView, {syncButton: {}, hexoButton: {}, formatButton: {}, busy: false, stale: false, dirty: false, prepared: {issues: []}, cover: {}});
   readinessView.updateSyncState();
   assert.equal(readinessView.syncButton.disabled, false);
+  assert.equal(readinessView.hexoButton.disabled, false);
+  assert.equal(readinessView.formatButton.disabled, false);
+  readinessView.busy = true; readinessView.updateSyncState();
+  assert.equal(readinessView.hexoButton.disabled, true);
+  assert.equal(readinessView.formatButton.disabled, true);
+  readinessView.busy = false; readinessView.updateSyncState();
+  assert.equal(readinessView.hexoButton.disabled, false);
+  assert.equal(readinessView.formatButton.disabled, false);
   readinessView.dirty = true; readinessView.stale = true; readinessView.cover = undefined;
   readinessView.prepared.issues = ['图片过大']; readinessView.updateSyncState();
   assert.equal(readinessView.syncButton.disabled, true);

@@ -4,7 +4,7 @@
 
 **在 Obsidian 写作，为不同平台准备成稿。**
 
-[下载 1.9.4](https://github.com/threeyang3/easyPub/releases/tag/1.9.4) · [快速开始](docs/getting-started.md) · [文档中心](docs/README.md) · [更新记录](docs/releases/1.9.4.md)
+[产品说明网站](https://threeyang3.github.io/easyPub/) · [下载 1.9.4](https://github.com/threeyang3/easyPub/releases/tag/1.9.4) · [快速开始](docs/getting-started.md) · [文档中心](docs/README.md) · [更新记录](docs/releases/1.9.4.md)
 
 适用于桌面版 Obsidian 1.5.7 及以上版本。
 

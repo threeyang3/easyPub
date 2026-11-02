@@ -1,4 +1,23 @@
-const menu=document.querySelector("#menu");const sidebar=document.querySelector("#sidebar");menu?.addEventListener("click",()=>{const open=sidebar.classList.toggle("open");menu.setAttribute("aria-expanded",String(open));});document.querySelectorAll("#sidebar nav a").forEach(a=>a.addEventListener("click",()=>sidebar.classList.remove("open")));const search=document.querySelector("#search");search?.addEventListener("input",()=>{const q=search.value.trim().toLocaleLowerCase();document.querySelectorAll("main section").forEach(section=>{const text=(section.innerText+" "+(section.dataset.search||"")).toLocaleLowerCase();section.hidden=!!q&&!text.includes(q);});});const links=[...document.querySelectorAll("#sidebar nav a")];const sections=links.map(a=>document.querySelector(a.getAttribute("href"))).filter(Boolean);if("IntersectionObserver"in window){const observer=new IntersectionObserver(entries=>entries.forEach(entry=>{if(entry.isIntersecting){links.forEach(a=>a.classList.toggle("active",a.hash==="#"+entry.target.id));}}),{rootMargin:"-15% 0px -70% 0px"});sections.forEach(section=>observer.observe(section));}document.addEventListener("keydown",e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="k"){e.preventDefault();search?.focus();}});document.querySelectorAll('a[href^="../docs/"]').forEach(a=>{a.href="https://github.com/threeyang3/easyPub/blob/main/docs/"+a.getAttribute("href").slice(8);a.target="_blank";a.rel="noreferrer";});
-document.querySelectorAll(".docs-sidebar nav a").forEach(a=>{if(new URL(a.href,location.href).pathname===location.pathname)a.classList.add("active");});
-const dm=document.querySelector("#menu"),ds=document.querySelector(".docs-sidebar");dm?.addEventListener("click",()=>{const o=ds?.classList.toggle("open");dm.setAttribute("aria-expanded",String(!!o));});
-const s=document.querySelector("#search");s?.addEventListener("input",()=>{const q=s.value.trim().toLocaleLowerCase();document.querySelectorAll(".docs-main h2,.docs-main h3,.docs-main p,.docs-main li,.docs-main .guide-card").forEach(e=>e.hidden=!!q&&!e.innerText.toLocaleLowerCase().includes(q));});
+const menu=document.querySelector("#menu");
+const sidebar=document.querySelector("#sidebar");
+menu?.addEventListener("click",()=>{const open=sidebar?.classList.toggle("open");menu.setAttribute("aria-expanded",String(!!open));});
+document.querySelectorAll("#sidebar nav a").forEach(a=>a.addEventListener("click",()=>sidebar?.classList.remove("open")));
+const search=document.querySelector("#search");
+search?.addEventListener("input",()=>{
+  const q=search.value.trim().toLocaleLowerCase();
+  const candidates=document.querySelectorAll("main section, .docs-main h2, .docs-main h3, .docs-main p, .docs-main li, .docs-main .guide-card");
+  candidates.forEach(el=>{const hay=(el.innerText||"").toLocaleLowerCase()+" "+(el.dataset.search||"").toLocaleLowerCase();el.hidden=!!q&&!hay.includes(q);});
+});
+const navLinks=[...document.querySelectorAll("#sidebar nav a")];
+const hashLinks=navLinks.filter(a=>a.getAttribute("href")?.startsWith("#"));
+const sections=hashLinks.map(a=>document.getElementById(a.getAttribute("href").slice(1))).filter(Boolean);
+if("IntersectionObserver"in window&&sections.length){
+  const observer=new IntersectionObserver(entries=>entries.forEach(entry=>{
+    if(entry.isIntersecting)hashLinks.forEach(a=>a.classList.toggle("active",a.hash==="#"+entry.target.id));
+  }),{rootMargin:"-15% 0px -70% 0px"});
+  sections.forEach(section=>observer.observe(section));
+}
+navLinks.forEach(a=>{
+  try{if(new URL(a.href,location.href).pathname===location.pathname)a.classList.add("active");}catch{}
+});
+document.addEventListener("keydown",e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="k"){e.preventDefault();search?.focus();}});
